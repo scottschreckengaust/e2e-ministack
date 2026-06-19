@@ -1,14 +1,13 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { MiniStackStack } from '../../lib/ministack-stack';
+import { MINISTACK_ENV } from '../../lib/env';
 
 // Pure-synth CDK tests — no AWS, no MiniStack, no Docker. Synthesize the stack
 // to a CloudFormation template and assert against it.
 function synth(): Template {
   const app = new cdk.App();
-  const stack = new MiniStackStack(app, 'TestStack', {
-    env: { account: '000000000000', region: 'us-east-1' },
-  });
+  const stack = new MiniStackStack(app, 'TestStack', { env: MINISTACK_ENV });
   return Template.fromStack(stack);
 }
 

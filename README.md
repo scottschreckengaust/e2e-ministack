@@ -70,6 +70,9 @@ npm run deploy
 npm run test:integration
 ```
 
+> [!NOTE]
+> The `CDK_DEFAULT_ACCOUNT`/`CDK_DEFAULT_REGION` exports above are belt-and-suspenders only — the app pins the MiniStack account/region unconditionally in [`lib/env.ts`](lib/env.ts), so it never deploys to a real account even if your shell has live AWS credentials.
+
 ```console
 PASS test/integration/integration.test.ts
   ✓ invokes the deployed Lambda and gets the doubled value
