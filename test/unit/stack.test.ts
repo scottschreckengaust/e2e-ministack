@@ -97,6 +97,37 @@ describe('MiniStackStack — fine-grained assertions', () => {
     });
   });
 
+  it('encrypts the DLQ with a customer-managed CMK (unified KMS strategy)', () => {
+    // issue #34: the DLQ previously used the AWS-managed aws/sqs key
+    // (KMS_MANAGED). It now uses a customer-managed CMK with rotation, matching
+    // the log group's strategy. KmsMasterKeyId references the CMK's key ARN
+    // (not the literal 'alias/aws/sqs' string that KMS_MANAGED emits).
+    template.hasResourceProperties('AWS::SQS::Queue', {
+      KmsMasterKeyId: Match.objectLike({ 'Fn::GetAtt': Match.anyValue() }),
+    });
+    // A dedicated rotation-enabled CMK exists for the DLQ (in addition to the
+    // log-group key): assert at least two rotated CMKs are present.
+    const keys = template.findResources('AWS::KMS::Key');
+    const rotated = Object.values(keys).filter(
+      (k) => k.Properties.EnableKeyRotation === true,
+    );
+    expect(rotated.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('alarms on DLQ depth so failed invocations are observable', () => {
+    // issue #34: without an alarm, failed async invocations accumulate in the
+    // DLQ silently. Assert a CloudWatch alarm watches the queue's
+    // ApproximateNumberOfMessagesVisible metric and breaches above 0.
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      Namespace: 'AWS/SQS',
+      MetricName: 'ApproximateNumberOfMessagesVisible',
+      ComparisonOperator: 'GreaterThanThreshold',
+      Threshold: 0,
+      EvaluationPeriods: 1,
+      TreatMissingData: 'notBreaching',
+    });
+  });
+
   it('KMS-encrypts the Lambda log group', () => {
     template.hasResourceProperties('AWS::Logs::LogGroup', {
       KmsKeyId: Match.anyValue(),
