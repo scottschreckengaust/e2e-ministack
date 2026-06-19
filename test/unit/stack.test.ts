@@ -65,6 +65,29 @@ describe('MiniStackStack — fine-grained assertions', () => {
     });
   });
 
+  it('scopes the CloudWatch Logs KMS grant with a confused-deputy condition', () => {
+    // The grant to logs.<region>.amazonaws.com must be constrained by an
+    // ArnLike condition on kms:EncryptionContext:aws:logs:arn = the specific
+    // Lambda log-group ARN (AWS's documented CMK-for-single-log-group pattern),
+    // not left as an unconditional Resource:'*' grant.
+    template.hasResourceProperties('AWS::KMS::Key', {
+      KeyPolicy: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Principal: { Service: 'logs.us-east-1.amazonaws.com' },
+            Condition: {
+              ArnLike: {
+                'kms:EncryptionContext:aws:logs:arn': {
+                  'Fn::Join': Match.anyValue(),
+                },
+              },
+            },
+          }),
+        ]),
+      }),
+    });
+  });
+
   it('does not attach the AWS-managed AWSLambdaBasicExecutionRole', () => {
     const roles = template.findResources('AWS::IAM::Role');
     const json = JSON.stringify(roles);
