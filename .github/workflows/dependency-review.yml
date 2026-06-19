@@ -1,0 +1,33 @@
+name: Dependency Review
+
+# PR-time supply-chain gate: scans the dependency manifest/lockfile diff for
+# newly-introduced known-vulnerable packages and disallowed licenses, so a PR
+# that pulls in a bad dependency is caught before merge (complements the
+# always-on scanners in security.yml, which run on the whole tree, not the diff).
+on:
+  pull_request:
+
+# Least privilege by default (zizmor posture).
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # read the base/head refs being compared
+      pull-requests: write # post the review summary comment on the PR
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Dependency Review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # Fail the PR on high-or-worse vulnerabilities in newly-added deps.
+          fail-on-severity: high
+          # Block copyleft / unknown licenses incompatible with this project.
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0
+          # Surface the findings inline on the PR for reviewers.
+          comment-summary-in-pr: on-failure
