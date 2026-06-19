@@ -1,0 +1,99 @@
+name: Bug report
+description: Report something that does not work when running the stack/tests against MiniStack.
+title: 'bug: <short summary>'
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! This project runs an AWS CDK app against [MiniStack](https://github.com/ministackorg/ministack)
+        with many environment-specific moving parts (Docker socket, `--network host`, Node 24, GLIBC for fuzzing,
+        a pinned MiniStack image digest). The fields below let us triage "it doesn't work" reports quickly — please fill them in.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem and which command/step triggered it (e.g. `npm run deploy`, `npm run test:integration`).
+      placeholder: Running `npm run deploy` against MiniStack hangs at ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands in order. Include whether MiniStack was freshly started or reset (`curl -X POST http://localhost:4566/_ministack/reset`).
+      placeholder: |
+        1. docker run -d --name ministack --network host ...
+        2. export AWS_ENDPOINT_URL=... AWS_ENDPOINT_URL_S3=...
+        3. npm ci && npm run build && npm run bootstrap && npm run deploy
+        4. npm run test:integration
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: os-arch
+    attributes:
+      label: OS and architecture
+      description: e.g. `Ubuntu 24.04 x86_64`, `macOS 15 arm64`. Note that `--network host` is Linux-only.
+      placeholder: Ubuntu 24.04 x86_64
+    validations:
+      required: true
+  - type: dropdown
+    id: linux-host-network
+    attributes:
+      label: Running on Linux with `--network host`?
+      description: MiniStack spawns sibling Lambda/RDS/ECS containers; `--network host` (Linux-only) is required for them to be reachable.
+      options:
+        - 'Yes — Linux with --network host'
+        - 'No — macOS/Windows (or without --network host)'
+        - 'Not sure'
+    validations:
+      required: true
+  - type: input
+    id: docker-version
+    attributes:
+      label: Docker version
+      description: Output of `docker --version`. The Docker socket is mounted so MiniStack can spawn sibling containers.
+      placeholder: Docker version 27.x.x
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      description: Output of `node --version`. This project pins Node 24 (24.17.0) via mise.
+      placeholder: v24.17.0
+    validations:
+      required: true
+  - type: input
+    id: ministack-digest
+    attributes:
+      label: MiniStack image digest
+      description: The `ministackorg/ministack` image digest you ran (`docker inspect --format '{{index .RepoDigests 0}}' ministack`). The repo pins a specific digest.
+      placeholder: 'ministackorg/ministack:full@sha256:...'
+    validations:
+      required: true
+  - type: input
+    id: glibc-version
+    attributes:
+      label: GLIBC version (only if the bug involves fuzzing)
+      description: Output of `ldd --version`. `npm run fuzz` (jazzer.js) needs GLIBC >= 2.38. Leave blank if not fuzzing.
+      placeholder: 'ldd (GNU libc) 2.39'
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: Paste error output, `docker logs ministack`, or CI run links. Do not include real AWS credentials.
+      render: shell
+    validations:
+      required: false

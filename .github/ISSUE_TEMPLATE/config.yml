@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: MiniStack project
+    url: https://github.com/ministackorg/ministack
+    about: Questions about the MiniStack emulator itself (not this stack) are best raised upstream.
+  - name: Repository documentation
+    url: https://github.com/scottschreckengaust/e2e-ministack#readme
+    about: Read the README and CLAUDE.md for setup, required flags, and known environment constraints before filing.
