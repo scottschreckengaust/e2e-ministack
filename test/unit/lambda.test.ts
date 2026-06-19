@@ -109,6 +109,11 @@ describe('cdk-doubler handler — properties', () => {
     'any finite number either doubles to a finite number (200) or is rejected (400)',
     async (n) => {
       const res = await handler({ n });
+      // nodeVersion is an always-present invariant on EVERY branch (index.d.ts
+      // declares `nodeVersion: string`; index.js returns it on the 200 and both
+      // 400 paths). Assert it in the property too, so a mutant dropping it on
+      // any branch is caught by exploration — not just the example tests.
+      expect(res.nodeVersion).toBe(process.version);
       if (res.statusCode === 200) {
         // success invariant: doubled is finite and exactly 2n
         expect(Number.isFinite(res.doubled)).toBe(true);
@@ -129,6 +134,8 @@ describe('cdk-doubler handler — properties', () => {
       // inside the property turns any throw into a clean test failure here.
       const res = await handler({ n: anyValue as unknown as number });
       expect([200, 400]).toContain(res.statusCode);
+      // nodeVersion is present on every branch for ANY input (see index.d.ts).
+      expect(res.nodeVersion).toBe(process.version);
       if (res.statusCode === 200) {
         expect(Number.isFinite(res.doubled)).toBe(true);
       } else {
@@ -143,6 +150,8 @@ describe('cdk-doubler handler — properties', () => {
       const res = await handler({ n });
       expect(res.statusCode).toBe(200);
       expect(res.doubled).toBe(n * 2);
+      // nodeVersion is present on the success branch too (see index.d.ts).
+      expect(res.nodeVersion).toBe(process.version);
     },
   );
 });
