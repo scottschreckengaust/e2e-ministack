@@ -53,6 +53,9 @@ jobs:
           docker logs ministack || true
           exit 1
 
+      - name: Lint
+        run: npm run lint
+
       - name: Build
         run: npm run build
 

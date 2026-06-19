@@ -13,17 +13,21 @@
     "bootstrap": "cdk bootstrap aws://000000000000/us-east-1",
     "deploy": "cdk deploy --require-approval never",
     "destroy": "cdk destroy --force",
+    "lint": "eslint .",
     "test": "jest"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.13.2",
     "aws-cdk": "2.1128.0",
     "cdk-nag": "^3.0.1",
+    "eslint": "^10.5.0",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.61.1"
   },
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.1072.0",
