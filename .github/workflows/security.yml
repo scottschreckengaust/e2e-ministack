@@ -227,6 +227,57 @@ jobs:
           path: ${{ steps.grype.outputs.sarif }}
           if-no-files-found: warn
 
+  # ── Third-party container image (MiniStack emulator) ───────────────────
+  # The MiniStack image runs with the host Docker socket mounted and
+  # --network host (see ci.yml), which the threat model flags as untrusted
+  # input. The Grype "FS scan" job above only scans the repo source (path '.'),
+  # so nothing inspects the contents of the image itself. This job scans the
+  # image BY ITS PINNED DIGEST so a newly-disclosed CVE in the emulator is
+  # surfaced even though we can't patch a third-party image.
+  #
+  # Failure policy: REPORT-ONLY (fail-build: false). The image is third-party
+  # and pinned by digest; we cannot remediate CVEs inside it by editing this
+  # repo, so hard-failing CI on its findings would only block work on issues
+  # we can't fix. Instead we always emit + upload SARIF (artifact + Security
+  # tab) so findings stay visible and actionable (e.g. bumping the pinned
+  # digest once MiniStack ships a fix). The weekly schedule above keeps this
+  # current as new CVEs are disclosed.
+  ministack-image:
+    name: Grype MiniStack image scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      # NOTE: this digest MUST match the image pinned in ci.yml
+      # (ministackorg/ministack:full@sha256:c5ce466...). Keep them in sync;
+      # if ci.yml bumps the digest, bump it here too.
+      - id: grype
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: 'ministackorg/ministack:full@sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3'
+          # Report-only: third-party image we can't patch (see comment above).
+          fail-build: false
+          severity-cutoff: high
+          output-format: sarif
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: grype-ministack-image
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: grype-ministack-image-sarif
+          path: ${{ steps.grype.outputs.sarif }}
+          if-no-files-found: warn
+
   # ── Secrets ─────────────────────────────────────────────────────────────
   gitleaks:
     name: Gitleaks
