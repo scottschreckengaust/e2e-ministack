@@ -1,0 +1,33 @@
+{
+  "name": "e2e-ministack",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "e2e-ministack": "bin/app.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "synth": "cdk synth",
+    "bootstrap": "cdk bootstrap aws://000000000000/us-east-1",
+    "deploy": "cdk deploy --require-approval never",
+    "destroy": "cdk destroy --force",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.7.4",
+    "aws-cdk": "2.1034.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.5.4"
+  },
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.658.0",
+    "@aws-sdk/client-s3": "^3.658.0",
+    "aws-cdk-lib": "2.230.0",
+    "constructs": "^10.3.0"
+  }
+}

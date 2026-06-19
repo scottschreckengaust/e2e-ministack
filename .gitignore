@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# CDK
+cdk.out/
+*.d.ts
+# Compiled TS output (sources are .ts; emit is transient)
+bin/*.js
+lib/*.js
+test/*.js
+
+# Logs / OS
+*.log
+.DS_Store

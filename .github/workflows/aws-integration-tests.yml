@@ -1,0 +1,104 @@
+name: AWS Integration Tests
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # NOTE: MiniStack is NOT run as a `services:` container here.
+    # Lambda / ECS / RDS / ElastiCache / EKS work by having MiniStack spawn
+    # *sibling* containers on the host Docker daemon. That requires:
+    #   1. mounting /var/run/docker.sock, and
+    #   2. MiniStack's own loopback being the host (so its readiness probes
+    #      can reach the host-published ports of those sibling containers).
+    # The `services:` syntax can mount the socket but cannot put the service
+    # container on the host network, so RDS/etc. get stuck in "creating".
+    # Running MiniStack as an explicit `docker run` step with --network host
+    # is the configuration that actually works (verified end-to-end).
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start MiniStack
+        run: |
+          docker run -d --name ministack \
+            --network host \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -e LAMBDA_EXECUTOR=docker \
+            -e MINISTACK_RDS_PUBLIC_ENDPOINT=1 \
+            -e MINISTACK_HOST=localhost \
+            ministackorg/ministack:full
+
+      - name: Wait for MiniStack to be healthy
+        run: |
+          # The image ships its own python-based HEALTHCHECK; poll Docker's
+          # reported health status rather than reimplementing the probe.
+          for i in $(seq 1 30); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' ministack 2>/dev/null || echo missing)"
+            echo "attempt $i: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "MiniStack did not become healthy in time" >&2
+          docker logs ministack || true
+          exit 1
+
+      - name: Build
+        run: npm run build
+
+      # Bare `cdk` (no cdklocal wrapper) works with CLI >= 2.1000: it honors
+      # AWS_ENDPOINT_URL for credential resolution and CloudFormation calls.
+      # AWS_ENDPOINT_URL_S3 must ALSO be set — S3's virtual-host addressing
+      # can't be inferred from the generic endpoint, so CDK requires it
+      # explicitly for asset publishing to the bootstrap bucket.
+      - name: CDK bootstrap
+        env:
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          CDK_DEFAULT_ACCOUNT: "000000000000"
+          CDK_DEFAULT_REGION: us-east-1
+        run: npm run bootstrap
+
+      - name: CDK deploy
+        env:
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          CDK_DEFAULT_ACCOUNT: "000000000000"
+          CDK_DEFAULT_REGION: us-east-1
+        run: npm run deploy
+
+      - name: Run integration tests
+        env:
+          # With --network host the container listens on the runner's own
+          # localhost:4566; the SDK clients in the tests read AWS_ENDPOINT_URL.
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+        run: npm test
+
+      - name: MiniStack logs on failure
+        if: failure()
+        run: docker logs ministack || true
+
+      - name: Stop MiniStack
+        if: always()
+        run: docker rm -f ministack || true
