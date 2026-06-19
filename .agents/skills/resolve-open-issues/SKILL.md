@@ -1,6 +1,6 @@
 ---
 name: resolve-open-issues
-description: Use when asked to resolve many GitHub issues end-to-end as one focused PR each (e.g. "fix all open issues", "work the backlog"), especially when issues cluster on shared files and the run spans hours/CI. Provides a throttled draft→ready PR pipeline, a concurrency dial, wall-clock metrics, conflict-cluster serialization, a stuck/escalation+resume protocol, and crash-recoverable state.
+description: Use whenever asked to batch-resolve, triage, burn down, or "work through" many GitHub issues end-to-end as one focused PR each (e.g. "fix all open issues", "work the backlog", "clear out the issue tracker", "open PRs for these issues") — even if the word "skill" or "pipeline" is never said. Especially when issues cluster on shared files or the run spans hours/CI. Provides a merge-train draft→ready→merged PR pipeline, an adaptive concurrency cap, wall-clock metrics, conflict-cluster serialization, a stuck/escalation+resume protocol, and crash-recoverable state. Reach for this over ad-hoc fixing any time the request is plural ("issues", "the backlog") rather than a single named bug.
 ---
 
 # Resolve Open Issues — batch PR pipeline
@@ -122,40 +122,30 @@ do not count.
 ## 4a. CI monitoring & the green-gate (baked-in)
 
 A PR is **never** promoted on elapsed time — only on **all-green CI** while a ready slot is
-free. The monitor is a re-check loop owned by the orchestrator; the subagent owns fixes.
+free. Background subagents **cannot self-schedule** a wakeup, so `ScheduleWakeup` is the
+orchestrator's job: **orchestrator schedules the re-check; subagent performs any fix.**
 
-**Mechanism (who does what):**
+Each loop, for every DRAFT/READY PR, read `gh pr checks <url>` (or `statusCheckRollup`) and
+classify:
 
-- Background subagents **cannot self-schedule** a wakeup — a worker runs, comes to rest, and
-  notifies the orchestrator. `ScheduleWakeup` is an orchestrator (main-loop) capability.
-  Therefore: **orchestrator schedules the re-check; subagent performs any fix.**
-- Each loop, for every DRAFT/READY PR, read `gh pr checks <url>` (or the
-  `statusCheckRollup`). Classify:
-  - **all-green** (0 failed, 0 pending; `skipping` is fine — e.g. fuzz is skipped on PRs) →
-    stamp `ci_green_at`; promote if slot-free (§4 step 4).
-  - **pending** (any check not COMPLETED) → do nothing yet; ensure a CI_POLL wakeup is set
-    (`270s`, cache-warm) and re-check next loop.
-  - **red** (any `FAILURE`/`CANCELLED`/`TIMED_OUT`) → **classify before acting** (§4b). A
-    _transient_ failure (rate-limit / network) is re-run, NOT fixed; a _real_ failure wakes the
-    subagent. Do NOT promote either way.
-- **Waking the subagent on red:**
-  - _Warm resume_ — if the worker's `agentId` is still live & recent (persisted in the
-    ledger), `SendMessage` to it with the failing check name + its log tail and "fix on your
-    existing branch/worktree, push, then report." Cheapest; keeps its context.
-  - _Cold resume_ — after a crash/long gap (agentId lost), dispatch a **fresh** worker with
-    the per-issue prompt + "branch/worktree/PR `fix/issue-N-*` already exist — resume there,
-    do not recreate," plus the failing-check detail. The public PR thread + ledger are the
-    source of truth that makes this possible.
-  - After the fix pushes, CI re-runs; the token stays DRAFT and re-enters this loop until
-    green. Bound retries (e.g. 3) — past that, escalate (§7) rather than loop forever.
-- **Why not let the worker poll its own CI before stopping?** It would hold a subagent alive
-  ~15–30 min busy-waiting, burning its context window for no work. The worker stops at
-  draft; the orchestrator's single timer covers _all_ open PRs at once. (Optional: a worker
-  MAY do **one** quick post-push check to catch instant lint/unit breaks, then stop — but it
-  must not loop.)
+- **all-green** (0 failed, 0 pending; `skipping` is fine — e.g. fuzz is skipped on PRs) → stamp
+  `ci_green_at`; promote if slot-free (§4 step 4).
+- **pending** → do nothing yet; ensure a CI_POLL wakeup is set (`270s`) and re-check next loop.
+- **red** (`FAILURE`/`CANCELLED`/`TIMED_OUT`) → **classify before acting** (§4b): a _transient_
+  failure (rate-limit / network) is re-run, NOT fixed; a _real_ failure wakes the subagent.
+  Don't promote either way.
 
-This is the loop your run depends on: _monitor for all-green; if not green, schedule a later
-wakeup and re-check; if red, classify (§4b) then re-run-or-fix._
+**Waking the subagent on red** — _warm resume_ if its `agentId` is still live & recent (ledger):
+`SendMessage` the failing check + log tail and "fix on your existing branch/worktree, push, then
+report" (keeps its context). _Cold resume_ after a crash (agentId lost): dispatch a **fresh**
+worker with the per-issue prompt + "branch/worktree/PR `fix/issue-N-*` already exist — resume
+there, do not recreate" + the failing-check detail; the public PR thread + ledger are what make
+this possible. After the fix pushes, the token stays DRAFT and re-enters this loop until green.
+Bound retries (~3) — past that, escalate (§7) rather than loop forever.
+
+A worker **does not poll its own CI** (it would busy-wait ~15–30 min, burning its context for no
+work) — the orchestrator's single timer covers _all_ open PRs at once. (Optional: a worker MAY do
+**one** quick post-push check to catch an instant lint/unit break, then stop — never loop.)
 
 ---
 
@@ -166,51 +156,33 @@ wastes quota and masks real bugs.
 
 ### (1) The orchestrator's own GitHub API limit (`gh` / REST / GraphQL)
 
-- Authenticated limit is 5000 req/hr (core) + a separate GraphQL pool. Caused by **you**
-  polling too hard, not by any PR.
-- **Check headroom proactively** before/while polling:
-  `gh api rate_limit --jq '{core: .resources.core.remaining, reset_in_s: (.resources.core.reset - now | floor)}'`
-- **Remedy = slow down:** widen the CI-poll interval (270s → 600s+), batch `gh` calls (one
-  `gh pr view --json statusCheckRollup` per PR per loop, not per-check), prefer one combined
-  query over many small ones, and don't re-list everything each loop — trust the ledger.
-- If `core_remaining` is near 0, **stop polling until `reset_in_s` elapses** (ScheduleWakeup
-  for `reset_in_s + 30`). Never spin on a 403/429.
+Authenticated limit is 5000 req/hr (core) + a separate GraphQL pool — caused by **you** polling
+too hard, not by any PR. Check headroom proactively:
+`gh api rate_limit --jq '{core: .resources.core.remaining, reset_in_s: (.resources.core.reset - now | floor)}'`.
+**Remedy = slow down:** widen the CI-poll interval (270s → 600s+), batch `gh` calls (one
+`gh pr view --json statusCheckRollup` per PR per loop), and trust the ledger instead of
+re-listing each loop. If `core_remaining` is near 0, **stop polling until `reset_in_s` elapses**
+(ScheduleWakeup for `reset_in_s + 30`). Never spin on a 403/429.
 
 ### (2) Actions-side limits inside the runner (surface as JOB FAILURES, not API errors to you)
 
-Symptoms in a failed job's log: image-registry pull throttling (Docker Hub / GHCR pulling the
-MiniStack digest), `429 Too Many Requests` / `API rate limit exceeded` from a step that calls
-the GitHub API (e.g. a SARIF upload, `gh` inside a step), or concurrent-job/runner-minute
-caps queueing or cancelling jobs.
+Symptoms in a failed job's log: image-registry pull throttling (Docker Hub / GHCR), `429` /
+`API rate limit exceeded` from a step that calls the GitHub API (SARIF upload, `gh` in a step),
+or concurrent-job/runner-minute caps queueing or cancelling jobs.
 
 **Protocol — ALWAYS inspect before re-running:**
 
-1. **Inspect the log** of the failed check. Get the run + failed job, then read the failing
-   step:
-
-   ```bash
-   gh pr checks <PR> | grep -i fail
-   gh run view <run-id> --log-failed        # or: gh run view --job <job-id> --log
-   ```
-
-2. **Classify the root cause:**
-   - **Transient (rate-limit / network / registry throttle / runner flake)** → re-run. Tells:
-     `rate limit`, `429`, `toomanyrequests`, `TLS handshake timeout`, `i/o timeout`,
-     `connection reset`, `pull access ... denied` after a throttle, a job `cancelled` by a
-     concurrency cap.
-   - **Real (test/lint/build/scan finding)** → NOT a rate limit. Wake the subagent (§4a) to fix
-     the actual failure. Re-running will just fail again and burn quota.
-3. **Act on transient — re-run only the failed jobs, after the window resets:**
-   - First confirm you're **not currently being limited** (re-running into an active limit just
-     re-fails): re-check `gh api rate_limit`; for Actions/registry throttles, wait out the
-     window (minutes) before retrying.
-   - `gh run rerun <run-id> --failed` (re-runs only failed jobs, not the whole workflow —
-     cheaper, faster, less load). Bound retries (e.g. ≤2 transient re-runs per PR); if it keeps
-     failing the same way, escalate (§7) — it may not actually be transient.
-   - Log the re-run in the ledger (`rerun_count`) so silent infinite-retry can't hide.
-4. **Reduce recurrence:** stagger work to ease Actions load — ratchet `max_in_flight` down
-   (§5a) during a throttle, keep fewer PRs triggering CI at once, and let the merge-paced
-   pipeline (one merge → one promote → one dispatch) naturally rate-limit new workflow runs.
+1. **Inspect** the failed check's log:
+   `gh pr checks <PR> | grep -i fail`, then `gh run view <run-id> --log-failed`.
+2. **Classify.** _Transient_ (re-run, don't fix): `rate limit`, `429`, `toomanyrequests`, `TLS
+handshake timeout`, `i/o timeout`, `connection reset`, `pull access ... denied` after a
+   throttle, a job `cancelled` by a concurrency cap. _Real_ (test/lint/build/scan finding): wake
+   the subagent (§4a) — re-running just re-fails and burns quota.
+3. **Act on transient** — first confirm you're not _currently_ limited (`gh api rate_limit`;
+   wait out Actions/registry windows), then `gh run rerun <run-id> --failed` (failed jobs only).
+   Bound to ≤2 re-runs/PR (log `rerun_count`); if it keeps failing the same way, escalate (§7).
+4. **Reduce recurrence:** ratchet `max_in_flight` down (§5a) during a throttle; the merge-paced
+   pipeline (one merge → one promote → one dispatch) naturally rate-limits new workflow runs.
 
 **Golden rule:** a re-run is only valid for a _confirmed-transient_ failure. Inspect first;
 never blind-retry a red check.
