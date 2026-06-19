@@ -21,6 +21,17 @@ import * as path from 'path';
  * tests can address them without reading CloudFormation outputs. In a real
  * stack you would prefer CfnOutputs + describe-stacks; fixed names keep the
  * example self-contained.
+ *
+ * WARNING — do NOT deploy this stack unchanged to a real AWS account. S3 bucket
+ * names are GLOBALLY unique across every AWS account and region, so the
+ * hard-coded 'cdk-demo-bucket' / 'cdk-demo-log-bucket' names below will almost
+ * certainly collide with a bucket someone else already owns and fail the deploy
+ * with "BucketAlreadyExists" (issue #35). The fixed names are deliberate here
+ * only because everything runs against the local MiniStack emulator, which
+ * isolates the global namespace. For a real-account deploy, either drop the
+ * explicit `bucketName` (let CDK auto-generate a unique, account/region-scoped
+ * name) or parameterize it with a deployer-supplied prefix — and switch the
+ * tests to read CfnOutputs instead of the hard-coded names.
  */
 export class MiniStackStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
