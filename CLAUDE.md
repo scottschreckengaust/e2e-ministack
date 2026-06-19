@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`e2e-ministack` — a minimal **AWS CDK (TypeScript) app exercised by end-to-end integration tests against [MiniStack](https://github.com/ministackorg/ministack)**, a free local AWS emulator (LocalStack alternative, port 4566). A trivial stack (an S3 bucket + a Node.js Lambda) is deployed into MiniStack with `cdk deploy`, then Jest tests invoke the deployed resources through the AWS SDK. The whole loop runs locally and in CI with no real AWS account.
+`e2e-ministack` — a minimal **AWS CDK (TypeScript) app exercised by end-to-end integration tests against [MiniStack](https://github.com/ministackorg/ministack)**, a free local AWS emulator (LocalStack alternative, port 4566). A trivial stack (two S3 buckets + a Node.js Lambda) is deployed into MiniStack with `cdk deploy`, then Jest tests invoke the deployed resources through the AWS SDK. The whole loop runs locally and in CI with no real AWS account.
 
 ## Commands
 
@@ -51,7 +51,7 @@ CI runs this same sequence — see `.github/workflows/ci.yml`.
 ## Architecture / layout
 
 - `bin/app.ts` — CDK entrypoint; instantiates the stack with the fixed account/region from `lib/env.ts` (`MINISTACK_ENV` = `000000000000`/`us-east-1`) so the bootstrap environment matches locally and in CI. The env is pinned **unconditionally** — it does _not_ read `CDK_DEFAULT_ACCOUNT`/`CDK_DEFAULT_REGION`, because the CDK CLI populates those from the ambient credential chain and a contributor with live AWS creds would otherwise synth/deploy against their real account (issue #2). `lib/env.ts` is the single source of truth, imported by both `bin/app.ts` and the unit tests so the literal can't drift.
-- `lib/ministack-stack.ts` — the stack: S3 bucket `cdk-demo-bucket` + Lambda `cdk-doubler`. **Resource names are hard-coded** so tests address them directly without reading CloudFormation outputs.
+- `lib/ministack-stack.ts` — the stack: two S3 buckets (data bucket `cdk-demo-bucket` + access-log bucket `cdk-demo-log-bucket`) + Lambda `cdk-doubler`. The **log bucket** exists solely to receive the data bucket's S3 server access logs — it satisfies the access-logging security rules (cdk-nag `AwsSolutions-S1` / checkov `CKV_AWS_18`) and logs to itself to avoid an infinite chain of log buckets; only the data bucket is exercised by tests. **Resource names are hard-coded** so tests address them directly without reading CloudFormation outputs (`test/unit/stack.test.ts` asserts exactly two buckets).
 - `lambda/index.js` — the function under test (doubles `event.n`, returns `process.version`). `lambda/index.d.ts` is a hand-written type contract (committed) so the unit test can import it with types without `allowJs`.
 - **Test pyramid** (`jest.config.js` picks the tier dir via `JEST_TIER`):
   - `test/unit/` — `lambda.test.ts` (pure handler logic) + `stack.test.ts` (CDK `Template` fine-grained assertions **and** a full-template snapshot). Synth-only; no emulator/Docker. The snapshot baseline lives in `test/unit/__snapshots__/` and must be updated (`-u`) after any intended template change.
