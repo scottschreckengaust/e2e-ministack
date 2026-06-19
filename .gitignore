@@ -44,3 +44,4 @@ ministack.log
 # Logs / OS
 *.log
 .DS_Store
+.agents/skills/*-workspace/

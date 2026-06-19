@@ -1,6 +1,6 @@
 ---
 name: resolve-open-issues
-description: Use whenever asked to batch-resolve, triage, burn down, or "work through" many GitHub issues end-to-end as one focused PR each (e.g. "fix all open issues", "work the backlog", "clear out the issue tracker", "open PRs for these issues") — even if the word "skill" or "pipeline" is never said. Especially when issues cluster on shared files or the run spans hours/CI. Provides a merge-train draft→ready→merged PR pipeline, an adaptive concurrency cap, wall-clock metrics, conflict-cluster serialization, a stuck/escalation+resume protocol, and crash-recoverable state. Reach for this over ad-hoc fixing any time the request is plural ("issues", "the backlog") rather than a single named bug.
+description: Use to autonomously resolve, fix, or close MULTIPLE open GitHub issues in one run — driving each from issue to merged PR without per-issue hand-holding. Trigger whenever the user points at issues in the plural or a whole tracker rather than one named bug: "fix all the open issues," "knock out / burn down / clear / work the backlog," "go through every issue and open a PR each," "resolve #3 #4 #9, one PR per issue," "spin up agents to work my issues overnight," "draft → green → merge → next until empty," "keep the PRs moving through CI as they go green," "work the issues on owner/repo." The defining signal is many issues plus an end-to-end loop (fix → open PR → pass CI → merge → take the next), often long-running, unattended, or spanning many PRs at once. Do NOT use for a single bug fix, reviewing or merging one already-open PR, rebasing one branch, or debugging why CI is red.
 ---
 
 # Resolve Open Issues — batch PR pipeline
@@ -19,6 +19,10 @@ repeatable, parameterized prompts — edit those, not ad-hoc copies.
 > merge it, advance, promote the next. The open-PR width is an **injected launch parameter**
 > with an adaptive ratchet (§5a). The config below is authoritative; the dial (§5) is how you
 > deviate per loop.
+>
+> **Before your first dispatch, skim §10 (Gotchas)** — the mise-PATH and semgrep-hook quirks
+> there will otherwise read as real failures and cost you a debugging detour. The two
+> paste-ready prompts live in §11.
 
 ---
 
@@ -274,6 +278,12 @@ For a first run on a fresh repo/session, run **PILOT MODE**: seed `max_in_flight
 injected `N` (default **3**, `max_ready = 1`), take that many issues through end-to-end
 (BACKLOG→…→MERGED), then proceed with the steady-state loop. Set `N=1` to force a single-issue
 dry run. Hold the adaptive ratchet flat for the pilot — prove the pipeline before widening it.
+
+**Thin backlog is fine, not a failure.** If fewer issues exist than `max_in_flight`, the train
+just runs narrower — dispatch what's there, and the loop ends cleanly via the normal §9 STOP
+condition ("backlog empty AND nothing in flight"). You never need to pad the cap to the issue
+count; `max_in_flight` is a ceiling, not a quota. A 2-issue backlog with `N=3` simply means two
+workers and an early, tidy finish.
 
 ### 5c. The merge-closer loop (the always-on "merger / reviewer / approver")
 
