@@ -76,6 +76,19 @@ describe('MiniStackStack — snapshot', () => {
   it('matches the synthesized CloudFormation snapshot', () => {
     // Regression tripwire: any change to the synthesized template must be
     // reviewed and the snapshot updated with `npm run test:unit -- -u`.
-    expect(synth().toJSON()).toMatchSnapshot();
+    //
+    // Mask the Lambda asset's content hash (Code.S3Key) — it's the SHA-256 of
+    // the zipped `lambda/` dir, so it flips on any lambda/index.js edit even
+    // when the template is otherwise unchanged. Pinning it would make this
+    // infra snapshot fail for code-only changes and train reviewers to
+    // rubber-stamp `-u`. The S3Bucket alongside it is the stable CDK bootstrap
+    // bucket, so it stays asserted.
+    expect(synth().toJSON()).toMatchSnapshot({
+      Resources: {
+        Doubler90AA16BC: {
+          Properties: { Code: { S3Key: expect.any(String) } },
+        },
+      },
+    });
   });
 });
