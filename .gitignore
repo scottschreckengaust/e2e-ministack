@@ -9,6 +9,10 @@ bin/*.js
 lib/*.js
 test/*.js
 
+# threat-composer-ai generated workflow output (the curated model lives in
+# threat-model.tc.json at the repo root, not here)
+.threat-composer/
+
 # Logs / OS
 *.log
 .DS_Store
