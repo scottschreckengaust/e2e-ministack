@@ -1,0 +1,109 @@
+name: Supply chain
+
+# Output-integrity controls (issue #16). The rest of the security posture is
+# detective / ingestion-side (npm audit, OSV, Grype) — it answers "does any
+# dependency carry a known CVE?". This workflow adds OUTPUT integrity: a signed
+# bill-of-materials (SBOM) describing exactly what went into the build, plus a
+# cryptographic build-provenance attestation binding the produced artifact to
+# this workflow run. Together they mitigate threat-model threats #7/#8/#10
+# (compromised dependency, malicious commit, poisoned bootstrap asset), which
+# previously had only process mitigations.
+#
+# Kept as a DEDICATED workflow (not folded into security.yml) so the elevated
+# attestation permissions (id-token / attestations: write) are isolated from
+# the scanner jobs, and to avoid churn against in-flight edits to ci.yml /
+# security.yml.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, matching security.yml — re-attest/re-inventory on a cadence even
+    # without a push.
+    - cron: '0 6 * * 1'
+
+# Least privilege by default; the attestation job opts into more (see below).
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── SBOM + build provenance attestation ─────────────────────────────────
+  # The build artifact attested here is the synthesized CloudFormation template
+  # tree (cdk.out) — the actual deployable output of this repo — together with
+  # its SBOM. We follow the repo's produce → always-upload observability
+  # convention for the SBOM artifact; the attestation itself is stored by GitHub
+  # (queryable via `gh attestation verify`) and so needs no manual upload.
+  sbom-provenance:
+    name: SBOM + provenance attestation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # NON-DEFAULT permissions, scoped to ONLY this job (the rest of the workflow
+    # stays at the top-level `contents: read`). This is the standard, accepted
+    # exception to least-privilege for Sigstore-backed build provenance:
+    #   - id-token: write     — mint the OIDC token Sigstore uses to sign.
+    #   - attestations: write — record the attestation in the repo's
+    #                           attestation store.
+    #   - contents: read      — checkout + build.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24.17.0'
+          cache: 'npm'
+      - run: npm ci
+      # Produce the deployable build artifact (the synthesized template tree).
+      - name: Synthesize CloudFormation (build artifact)
+        run: npm run synth
+      # Archive cdk.out as a single, stable file so there is one concrete
+      # artifact to attest by digest.
+      - name: Package build artifact
+        run: tar -czf cdk-out.tar.gz cdk.out
+      # SBOM of the whole repo dependency tree (CycloneDX JSON). syft/anchore
+      # pin via SHA per repo convention.
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: '.'
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          # Don't let the action push its own GH release-asset/attestation; this
+          # workflow controls upload + attestation explicitly below.
+          upload-artifact: false
+          upload-release-assets: false
+      # produce → always-upload: the SBOM is downloadable from the run even if a
+      # later step fails.
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: warn
+      - name: Upload build artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cdk-out
+          path: cdk-out.tar.gz
+          if-no-files-found: warn
+      # Build-provenance attestation over BOTH the packaged build artifact and
+      # the SBOM, binding them to this workflow run (Sigstore-signed, stored by
+      # GitHub). Verify later with:
+      #   gh attestation verify cdk-out.tar.gz --repo <owner>/<repo>
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            cdk-out.tar.gz
+            sbom.cdx.json
