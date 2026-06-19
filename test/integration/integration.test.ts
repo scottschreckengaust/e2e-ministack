@@ -1,12 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 
 /**
- * Integration tests against resources deployed by `cdklocal deploy` into
+ * Integration tests against resources deployed by `cdk deploy` into
  * MiniStack. The workflow runs `cdk deploy` BEFORE `jest`, so these tests
  * assume `cdk-doubler` and `cdk-demo-bucket` already exist.
  *
@@ -60,9 +62,26 @@ describe('MiniStack CDK integration', () => {
     expect(payload.statusCode).toBe(400);
   });
 
+  // Track every object we write so the afterEach hook can delete it, keeping
+  // each run idempotent against a long-lived/reused emulator (issue #10):
+  // no test depends on (or is polluted by) an object left over from a prior
+  // run, and the bucket isn't required to start empty.
+  const Bucket = 'cdk-demo-bucket';
+  const writtenKeys: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      writtenKeys
+        .splice(0)
+        .map((Key) => s3.send(new DeleteObjectCommand({ Bucket, Key }))),
+    );
+  });
+
   it('round-trips an object through the deployed S3 bucket', async () => {
-    const Bucket = 'cdk-demo-bucket';
-    const Key = 'hello.txt';
+    // Unique per test run so concurrent/repeated runs against the same emulator
+    // never collide on a shared, hard-coded key (was 'hello.txt').
+    const Key = `integration-test/${randomUUID()}.txt`;
+    writtenKeys.push(Key);
     await s3.send(new PutObjectCommand({ Bucket, Key, Body: 'hi from test' }));
     const got = await s3.send(new GetObjectCommand({ Bucket, Key }));
     const body = await got.Body!.transformToString();
