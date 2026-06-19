@@ -60,8 +60,8 @@ These were established by running the stack, not from docs alone — don't "simp
 
 ## Version coupling
 
-- `aws-cdk-lib` is pinned to **2.230.0** — `lambda.Runtime.NODEJS_24_X` was introduced there (2.220.0 and earlier lack it).
-- `aws-cdk` (CLI) is **2.1034.0**. Post-2.179 the CLI versions diverged from the library (CLI is numbered `2.10xx.x`), so they are pinned independently and are not expected to match.
+- `aws-cdk-lib` is pinned to **2.260.0**. Note `lambda.Runtime.NODEJS_24_X` requires >= 2.230.0 (2.220.0 and earlier lack it), so don't downgrade below that.
+- `aws-cdk` (CLI) is **2.1128.0**. Post-2.179 the CLI versions diverged from the library (CLI is numbered `2.10xx.x`/`2.11xx.x`), so they are pinned independently and are not expected to match.
 
 ## Repository conventions
 
