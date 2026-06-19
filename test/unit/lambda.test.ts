@@ -5,7 +5,11 @@ import { handler } from '../../lambda/index';
 describe('cdk-doubler handler', () => {
   it('doubles a positive number', async () => {
     const res = await handler({ n: 21 });
-    expect(res).toEqual({ statusCode: 200, doubled: 42, nodeVersion: process.version });
+    expect(res).toEqual({
+      statusCode: 200,
+      doubled: 42,
+      nodeVersion: process.version,
+    });
   });
 
   it('doubles zero', async () => {

@@ -1,0 +1,18 @@
+// markdownlint-cli2 config. Run: npx markdownlint-cli2 "**/*.md"
+{
+  "config": {
+    "default": true,
+    // Line length is owned by Prettier (proseWrap), not markdownlint — enabling
+    // MD013 here would fight the formatter. markdownlint enforces the non-
+    // formatting rules (structure, consistency, the table rules MD055/056/058).
+    "MD013": false,
+    // The README uses a centered HTML header/badges block on purpose.
+    "MD033": {
+      "allowed_elements": ["div", "p", "a", "img", "picture", "br", "h1"],
+    },
+    // README's first line is the centered <div>, not an H1 (the H1 is inside it).
+    "MD041": false,
+  },
+  "globs": ["**/*.md"],
+  "ignores": ["node_modules", ".remember", ".threat-composer"],
+}

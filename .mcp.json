@@ -4,7 +4,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai",
+        "git+https://github.com/awslabs/threat-composer.git@0d58a0d85e5413f6c4169245c667ac083f4efb39#subdirectory=packages/threat-composer-ai",
         "threat-composer-ai-mcp"
       ],
       "env": {

@@ -1,0 +1,11 @@
+# Generated / vendored
+node_modules/
+cdk.out/
+.threat-composer/
+package-lock.json
+# Local tooling
+.remember/
+# Jest snapshots (generated; exact bytes matter)
+test/**/__snapshots__/
+# Hand-authored threat model (large generated-style JSON; not Prettier's job)
+threat-model.tc.json

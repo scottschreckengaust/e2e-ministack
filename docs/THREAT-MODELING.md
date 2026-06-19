@@ -69,10 +69,10 @@ Browser/local edits are **not** in the repo until you export:
 
 ## AI-assisted generation (optional, requires Bedrock)
 
-threat-composer's only model *generator* is the experimental
+threat-composer's only model _generator_ is the experimental
 `threat-composer-ai` CLI/MCP server. It requires a real **Amazon Bedrock**
 account (LLM inference, billed per run; not emulated by MiniStack) and produces
-a *draft for human review* — it does not replace the human authoring loop.
+a _draft for human review_ — it does not replace the human authoring loop.
 
 This repo ships an MCP server config in [`.mcp.json`](../.mcp.json) so an MCP
 client (Claude Code, Claude Desktop, Cline, Kiro, …) can call it:
@@ -82,8 +82,15 @@ client (Claude Code, Claude Desktop, Cline, Kiro, …) can call it:
   "mcpServers": {
     "threat-composer-ai": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai", "threat-composer-ai-mcp"],
-      "env": { "AWS_REGION": "${AWS_REGION:-us-east-1}", "AWS_PROFILE": "${AWS_PROFILE}" }
+      "args": [
+        "--from",
+        "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai",
+        "threat-composer-ai-mcp"
+      ],
+      "env": {
+        "AWS_REGION": "${AWS_REGION:-us-east-1}",
+        "AWS_PROFILE": "${AWS_PROFILE}"
+      }
     }
   }
 }

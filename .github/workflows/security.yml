@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # allow manual runs
   schedule:
     # Weekly run so newly-disclosed CVEs are caught even without a push.
-    - cron: "0 6 * * 1"
+    - cron: '0 6 * * 1'
 
 # Least privilege by default; jobs opt into more where needed.
 permissions:
@@ -27,6 +27,9 @@ jobs:
       - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
           languages: javascript-typescript
+          # Pin the analyzer bundle so the CodeQL engine/queries are reproducible
+          # (otherwise the action auto-updates to the latest bundle).
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.25.6/codeql-bundle.tar.gz
       - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
 
   semgrep:
@@ -37,9 +40,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Run Semgrep
-        # --error makes findings fail the job.
+        # --error makes findings fail the job. Version pinned for reproducibility.
         run: |
-          pipx install semgrep || pip install semgrep
+          pipx install semgrep==1.167.0 || pip install semgrep==1.167.0
           semgrep scan --config=auto --error --exclude=node_modules --exclude=cdk.out
 
   # ── Dependency / supply-chain vulnerabilities ───────────────────────────
@@ -52,7 +55,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "24"
+          node-version: '24.17.0'
       - run: npm ci
       - run: npm audit --audit-level=high
 
@@ -66,9 +69,12 @@ jobs:
       # Install the official binary and run the same command verified locally,
       # rather than depend on the action's interface.
       - name: Install OSV-Scanner
+        # Pinned to v2.4.0 AND verified by SHA-256 so a re-tagged/tampered
+        # release is rejected (content pin, not just a tag pin).
         run: |
           curl -sSfL -o osv-scanner \
             https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
+          echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
       - name: Scan lockfile
         run: ./osv-scanner scan --lockfile=package-lock.json
@@ -82,7 +88,7 @@ jobs:
           persist-credentials: false
       - uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          path: "."
+          path: '.'
           fail-build: true
           severity-cutoff: high
 
@@ -109,12 +115,15 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "24"
+          node-version: '24.17.0'
       - run: npm ci
       - name: Synthesize CloudFormation
         run: npm run synth
       - name: Install scanners
-        run: pipx install cfn-lint checkov || pip install cfn-lint checkov
+        # Versions pinned for reproducibility.
+        run: |
+          pipx install cfn-lint==1.51.5 || pip install cfn-lint==1.51.5
+          pipx install checkov==3.3.0 || pip install checkov==3.3.0
       - name: cfn-lint
         # Fail on errors only — the two W warnings (legacy AccessControl prop,
         # used by CDK's own access logging; and a redundant dependency hint)
@@ -134,7 +143,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "24"
+          node-version: '24.17.0'
       # threat-composer is a design-time authoring tool (no CI generator that
       # works without a real Bedrock account), so the gate is simply: the
       # committed model parses and carries the expected sections. Edit it in

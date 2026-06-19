@@ -38,9 +38,7 @@ describe('MiniStack CDK integration', () => {
   it('round-trips an object through the deployed S3 bucket', async () => {
     const Bucket = 'cdk-demo-bucket';
     const Key = 'hello.txt';
-    await s3.send(
-      new PutObjectCommand({ Bucket, Key, Body: 'hi from test' }),
-    );
+    await s3.send(new PutObjectCommand({ Bucket, Key, Body: 'hi from test' }));
     const got = await s3.send(new GetObjectCommand({ Bucket, Key }));
     const body = await got.Body!.transformToString();
     expect(body).toBe('hi from test');

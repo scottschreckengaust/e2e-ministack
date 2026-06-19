@@ -7,7 +7,7 @@
 # (bypassable with `git commit --no-verify`, absent until `pre-commit install`).
 # CI remains the source of truth.
 
-minimum_pre_commit_version: "3.5.0"
+minimum_pre_commit_version: '3.5.0'
 fail_fast: false
 
 repos:
@@ -16,7 +16,7 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-added-large-files # block accidentally committed big blobs
-        args: ["--maxkb=1024"]
+        args: ['--maxkb=1024']
       - id: check-merge-conflict # leftover <<<<<<< markers
       - id: check-case-conflict # names that collide on case-insensitive FS
       - id: check-symlinks # broken symlinks
@@ -27,13 +27,13 @@ repos:
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: mixed-line-ending
-        args: ["--fix=lf"]
+        args: ['--fix=lf']
       - id: check-json # validates threat-model.tc.json, cdk.json, package.json
         exclude: ^tsconfig\.json$ # JSONC (has comments) — not strict JSON
       - id: check-yaml # validates the workflow files
       - id: detect-private-key # committed PEM/SSH keys
       - id: detect-aws-credentials
-        args: ["--allow-missing-credentials"]
+        args: ['--allow-missing-credentials']
       - id: forbid-submodules
 
   # ── Secrets ────────────────────────────────────────────────────────────
@@ -66,4 +66,17 @@ repos:
         entry: npm run build
         language: system
         files: \.ts$
+        pass_filenames: false
+      - id: markdownlint
+        name: markdownlint-cli2
+        entry: npm run lint:md
+        language: system
+        files: \.md$
+        pass_filenames: false
+      - id: prettier
+        name: prettier (format check)
+        entry: npm run format:check
+        language: system
+        # Prettier governs formatting for all its supported types here.
+        files: \.(ts|js|mjs|json|jsonc|md|ya?ml)$
         pass_filenames: false
