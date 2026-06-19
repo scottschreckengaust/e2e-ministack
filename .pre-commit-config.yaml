@@ -43,9 +43,9 @@ repos:
       - id: gitleaks
 
   # ── GitHub Actions workflow lint (fast) ────────────────────────────────
-  # gitleaks and actionlint build from Go source on install. If your network
-  # blocks proxy.golang.org (corporate TLS interception), set GOPROXY=direct
-  # before `pre-commit install` / `pre-commit run`.
+  # gitleaks and actionlint build from Go source on install (works as-is for
+  # most). Workaround ONLY if your network can't reach proxy.golang.org (e.g.
+  # corporate TLS interception): set GOPROXY=direct before pre-commit install.
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12
     hooks:

@@ -92,7 +92,7 @@ pre-commit install
 - Hooks: standard hygiene (large files, merge conflicts, shebang/executable consistency, EOF/whitespace, `check-json`/`check-yaml`, private-key + AWS-credential detection), **gitleaks** (secrets), **actionlint** (workflows), and `local` **eslint** + **tsc** that reuse the repo's pinned `node_modules` (so the hook and CI run identical tooling).
 - `tsconfig.json` is excluded from `check-json` (it's JSONC — has comments).
 - **`bin/app.ts` is mode `100755`** (executable) on purpose — it has a `#!/usr/bin/env node` shebang, so the shebang/executable hooks require it. Don't `chmod -x` it.
-- gitleaks/actionlint build from Go source on first install. Behind a TLS-intercepting proxy (e.g. corporate networks blocking `proxy.golang.org`), run with **`GOPROXY=direct`**.
+- gitleaks/actionlint build from Go source on first install. This works out of the box for most. **Only** if your network can't reach `proxy.golang.org` (e.g. a TLS-intercepting corporate proxy) is a workaround needed: set `GOPROXY=direct` before installing.
 - This is a convenience tier, not an enforcing control (`--no-verify` bypasses it; absent until `pre-commit install`). CI remains the source of truth; the slow gates (cdk-nag synth, checkov, CodeQL, grype, MiniStack E2E) stay in CI only.
 
 ## Dependency notes
