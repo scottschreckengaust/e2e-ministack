@@ -67,13 +67,40 @@ Browser/local edits are **not** in the repo until you export:
 2. Save the file **over** `threat-model.tc.json` in the repo root.
 3. Commit. CI re-validates it on push.
 
-## What's intentionally NOT automated
+## AI-assisted generation (optional, requires Bedrock)
 
 threat-composer's only model *generator* is the experimental
-`threat-composer-ai` CLI/MCP server, which requires a real **Amazon Bedrock**
-account (LLM inference, billed per run; not emulated by MiniStack) and still
-produces a *draft for human review*. So the loop here is deliberately
-human-authored: **edit → export → commit → CI validates**.
+`threat-composer-ai` CLI/MCP server. It requires a real **Amazon Bedrock**
+account (LLM inference, billed per run; not emulated by MiniStack) and produces
+a *draft for human review* — it does not replace the human authoring loop.
+
+This repo ships an MCP server config in [`.mcp.json`](../.mcp.json) so an MCP
+client (Claude Code, Claude Desktop, Cline, Kiro, …) can call it:
+
+```json
+{
+  "mcpServers": {
+    "threat-composer-ai": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai", "threat-composer-ai-mcp"],
+      "env": { "AWS_REGION": "${AWS_REGION:-us-east-1}", "AWS_PROFILE": "${AWS_PROFILE}" }
+    }
+  }
+}
+```
+
+Requirements: [`uv`](https://docs.astral.sh/uv/) on PATH (provides `uvx`), and
+AWS credentials with Bedrock access in the environment (`AWS_PROFILE` /
+`AWS_REGION` are passed through). In Claude Code, run `/mcp` to connect and
+approve the project server. Prefer the CLI for a one-shot run:
+
+```bash
+uv tool install --from "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai" threat-composer-ai
+threat-composer-ai-cli /path/to/code   # drafts a .tc.json from source
+```
+
+Whatever the generator produces is still a **draft**: review it, then follow
+the edit → export → commit loop above so CI validates the result.
 
 For runtime posture checks that a template-time model can't provide (live IAM
 trust, actual public buckets, account settings), see the

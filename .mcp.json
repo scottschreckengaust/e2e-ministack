@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "threat-composer-ai": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai",
+        "threat-composer-ai-mcp"
+      ],
+      "env": {
+        "AWS_REGION": "${AWS_REGION:-us-east-1}",
+        "AWS_PROFILE": "${AWS_PROFILE}"
+      }
+    }
+  }
+}
