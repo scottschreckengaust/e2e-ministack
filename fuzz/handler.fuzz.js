@@ -5,28 +5,32 @@
 // coverage feedback to reach states the structured generators may not. The
 // invariant is the same — the handler must never throw and must always return
 // a finite `doubled` (200) or a clean 400.
+const { FuzzedDataProvider } = require('@jazzer.js/core');
 const { handler } = require('../lambda/index.js');
 
 /**
- * @param {import('@jazzer.js/core').FuzzedDataProvider} data
+ * jazzer.js passes the fuzz target a raw Buffer; wrap it in a
+ * FuzzedDataProvider to derive structured inputs.
+ * @param {Buffer} data
  */
 module.exports.fuzz = async (data) => {
+  const fdp = new FuzzedDataProvider(data);
   // Derive a variety of `event.n` shapes from the fuzzer's bytes so it can
   // explore numeric, string, and structural inputs.
-  const choice = data.consumeIntegralInRange(0, 4);
+  const choice = fdp.consumeIntegralInRange(0, 4);
   let n;
   switch (choice) {
     case 0:
-      n = data.consumeNumber();
+      n = fdp.consumeNumber();
       break;
     case 1:
-      n = data.consumeString(32);
+      n = fdp.consumeString(32);
       break;
     case 2:
-      n = data.consumeIntegral(8);
+      n = fdp.consumeIntegral(6); // jazzer.js caps maxNumBytes at 6
       break;
     case 3:
-      n = { nested: data.consumeString(8) };
+      n = { nested: fdp.consumeString(8) };
       break;
     default:
       n = undefined;
