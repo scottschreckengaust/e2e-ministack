@@ -56,6 +56,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      # cdk-nag (AwsSolutions) runs during synth and fails on any unsuppressed
+      # finding. This gate needs no AWS endpoint, so it runs before bootstrap
+      # to fail fast on security regressions.
+      - name: CDK synth (cdk-nag security gate)
+        run: npm run synth
+
       # Bare `cdk` (no cdklocal wrapper) works with CLI >= 2.1000: it honors
       # AWS_ENDPOINT_URL for credential resolution and CloudFormation calls.
       # AWS_ENDPOINT_URL_S3 must ALSO be set — S3's virtual-host addressing

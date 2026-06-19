@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
+import { Validations } from 'aws-cdk-lib';
+import { AwsSolutionsChecks } from 'cdk-nag';
 import { MiniStackStack } from '../lib/ministack-stack';
 
 const app = new cdk.App();
@@ -12,3 +14,8 @@ new MiniStackStack(app, 'MiniStackTestStack', {
     region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
   },
 });
+
+// cdk-nag v3 registers rule packs via CDK's policy-validation framework
+// (NOT the v2 `Aspects.of(app).add(...)` API). Checks run at synth time and
+// any unsuppressed finding fails synth. verbose surfaces rule explanations.
+Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));
