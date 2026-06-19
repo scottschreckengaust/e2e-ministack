@@ -24,8 +24,12 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+      # Only run path detection on push/PR — on dispatch/schedule the event has
+      # no `before` SHA, so paths-filter prints a noisy fallback message, and
+      # the unit/mutation jobs already force-run on those events anyway.
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         with:
           filters: |
             code:
