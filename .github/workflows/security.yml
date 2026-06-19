@@ -57,14 +57,20 @@ jobs:
 
   osv-scanner:
     name: OSV Scanner
-    # Reusable workflow published by the OSV project (handles its own checkout).
-    permissions:
-      contents: read
-      security-events: write
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
-    with:
-      scan-args: |-
-        --lockfile=./package-lock.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      # Install the official binary and run the same command verified locally,
+      # rather than depend on the action's interface.
+      - name: Install OSV-Scanner
+        run: |
+          curl -sSfL -o osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
+          chmod +x osv-scanner
+      - name: Scan lockfile
+        run: ./osv-scanner scan --lockfile=package-lock.json
 
   grype:
     name: Grype FS scan
