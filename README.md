@@ -146,6 +146,14 @@ A defense-in-depth set of gates runs in CI (see [`security.yml`](.github/workflo
 
 The stack is hardened to pass cdk-nag and checkov cleanly (TLS, encryption, least-privilege IAM, DLQ, KMS-encrypted logs). All GitHub Actions are pinned to commit SHAs with least-privilege `permissions`.
 
+## 🚧 Limitations / what this is NOT
+
+This is a **demonstration and CI harness**, not a production blueprint. Be deliberate about what you copy:
+
+- **Emulator-only — not real AWS.** Everything runs against [MiniStack](https://github.com/ministackorg/ministack), a local emulator. Its behaviour _approximates_ AWS but doesn't match it perfectly: IAM enforcement, service quotas, eventual-consistency timing, and error shapes can all differ. A green run here is **not** proof that the stack behaves identically on a real account. The `test/e2e/` tier (a real-account stage) is a deliberate placeholder, currently skipped.
+- **Security gates are shift-left only.** cdk-nag and checkov analyze the _synthesized template_ before deploy. They cannot see runtime posture — real IAM trust relationships, actually-public buckets, account-level settings. Runtime CSPM tools (**ScoutSuite**, **Prowler**) are **intentionally omitted** because they need a real account and don't work meaningfully against the emulator. Don't read "all security checks pass" as a runtime security assurance; add a CSPM gate if you introduce a real-account stage.
+- **Hard-coded resource names are a test convenience, not a pattern to copy.** The bucket and Lambda names are fixed literals so tests can address them directly without reading CloudFormation outputs. In production, fixed physical names cause deploy collisions and block multiple environments — let CDK auto-name resources (or use outputs/SSM) instead.
+
 ## 📚 References
 
 - [MiniStack](https://github.com/ministackorg/ministack) — the local AWS emulator (MIT)
