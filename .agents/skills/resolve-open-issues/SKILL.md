@@ -244,6 +244,38 @@ The dial is a per-loop decision: read the metrics (§8), pick the profile, proce
 merge-train's `max_ready=1` is what makes "one is kept Ready if all-green, merges, then the
 next is rebased and promoted" the steady-state behavior.
 
+### 5a. `max_in_flight` is an injected launch parameter + adaptive ratchet
+
+The open-PR ceiling is **passed in at launch**, not discovered. The repo's
+`settings/interaction_limits` "max open PRs per user" value is a GitHub **UI-only** control
+with **no public REST/GraphQL endpoint** — `gh api repos/{o}/{r}/interaction-limits` returns
+`{}` and `.../rulesets` returns `[]` even when the UI shows a number (verified). So the
+orchestrator MUST NOT try to read it (and MUST NOT scrape the settings HTML — that needs a
+browser session cookie, not the `gh` token). Instead:
+
+- **`--max-in-flight N` is an injected launch parameter.** If the launch prompt provides it,
+  use it as the **hard ceiling**. If it is **absent, the orchestrator ASKS the human** for it
+  before dispatching, offering **default `3`** (the starting point).
+- **Hard ceiling = 1000** (mirrors the GitHub UI's own max). There is no smaller built-in
+  limit; `N` may be anything in `1..1000`.
+- **Adaptive ratchet (start at the injected `N`, default 3):** while CI passes first-try AND
+  `gh api rate_limit` core-remaining stays healthy (>1000), **ratchet `max_in_flight` UP by 1
+  each clean loop**, never past the ceiling. On ANY rate-limit signal — own-API limit (§4b‑1)
+  or an Actions-side 429/throttle in a job log (§4b‑2) — **ratchet DOWN by 1** (floor 1) and
+  widen the CI-poll interval. **Log every change** in the ledger (`old→new` + trigger), so a
+  silent runaway can't hide.
+- `max_ready` stays **1** (merge-train front) independent of `max_in_flight`; the parameter
+  governs only the *draft funnel* width (`max_draft = max_in_flight − max_ready`).
+
+### 5b. Pilot mode
+
+For a first run on a fresh repo/session, run **PILOT MODE**: start the adaptive cap at the
+injected `N` (**default 3**), take that many issues through end-to-end (BACKLOG→…→MERGED),
+then proceed with the steady-state loop. (Earlier guidance said "one issue first"; the
+default pilot scope is now **3** — there are plenty of open issues and the worker contract was
+already validated by the original manual pilot.) The human may still set `N=1` to force a
+single-issue dry run.
+
 ---
 
 ## 6. Sequencing, rebase & refill cascade
@@ -408,6 +440,12 @@ Don't pick 300s (worst of both — pays the cache miss without amortizing it).
   the base HEAD when a worker reports a surprising base.
 - **`needs:` doesn't imply a fork guard** — a downstream job inherits dependency ordering,
   not the upstream job's `if:`. Guard the socket-mounting job directly.
+- **The repo "max open PRs per user" setting has NO API.** `settings/interaction_limits` in
+  the GitHub UI can show a number, but `gh api repos/{o}/{r}/interaction-limits` returns `{}`
+  and `.../rulesets` returns `[]` (verified on this repo) — native interaction-limits are only
+  the `existing_users`/`contributors_only`/`collaborators_only` access gate, carrying no
+  count, and admins/writers bypass them anyway. So the open-PR cap is **not machine-readable**:
+  pass it in as `--max-in-flight` (§5a), never try to fetch or HTML-scrape it.
 
 ---
 

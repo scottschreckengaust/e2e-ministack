@@ -20,8 +20,29 @@ sets the goal + config; the SKILL says how to run the loop.
 - Confirm identity: `gh api user --jq .login`. Issue claims + PRs authored under it. Each
   worker's public traceable identity is `claude-agent:issue-N`.
 
+## Launch parameter: `--max-in-flight N` (injected; the open-PR ceiling)
+- **`N` is the hard ceiling on open PRs.** It is **injected at launch**, NOT discovered: the
+  repo's `settings/interaction_limits` "max open PRs per user" is a GitHub UI-only control with
+  **no API** (`gh api repos/{o}/{r}/interaction-limits` → `{}`, `.../rulesets` → `[]`). Do NOT
+  fetch or HTML-scrape it. (SKILL §5a / §10.)
+- **If the launch prompt did NOT pass `--max-in-flight`, ASK me before dispatching**, offering
+  the default **`3`** as the starting point.
+- **Range `1..1000`** (1000 = the UI's own max; there is no smaller built-in limit).
+- **Adaptive ratchet:** start `max_in_flight` at `N` (default 3). Each clean loop (CI green
+  first-try AND `gh api rate_limit` core-remaining >1000) ratchet **up by 1** toward the
+  ceiling; on any rate-limit signal (§4b) ratchet **down by 1** (floor 1) + widen CI-poll. Log
+  every change (`old→new` + trigger) in the ledger. `max_ready` stays **1** (train front);
+  `max_in_flight` governs only the draft-funnel width.
+
+## Pilot mode (default for a fresh session)
+Run PILOT MODE: take the first `N` issues (default **3**) fully end-to-end
+(BACKLOG→…→MERGED) under the merge-train, then continue the steady-state loop. Set `N=1` for a
+single-issue dry run. (SKILL §5b.)
+
 ## Authoritative config (captured clarifications — the `balanced` default)
-- **Pipeline caps:** ≤ **3** ready-for-review + ≤ **2** draft = ≤ **5** in flight. (Dial: SKILL §5.)
+- **Pipeline caps:** `max_ready = 1` (merge-train front) + draft funnel up to
+  `max_in_flight − 1`; total open PRs ≤ the injected `--max-in-flight` (default 3, ceiling
+  1000). (Dial + adaptive ratchet: SKILL §5 / §5a.)
 - **Worker contract:** each issue gets ONE background worker (`prompts/subagent-issue.md`) that
   goes root-cause → worktree → TDD → local gates → **draft PR** → report, then **STOPS**.
   Workers never mark ready, never poll CI in a loop, never close issues, never touch
@@ -75,8 +96,9 @@ to ≤2 retries, log `rerun_count`); **real** (test/lint/scan finding) → wake 
 Never blind-retry. During a throttle, ratchet the dial toward `serial`.
 
 ## Resource sizing
-If vCPU/RAM unknown, start at the `balanced` cap and watch the first wave's local-gate timings;
-ratchet the dial (SKILL §5) up only if the box stays comfortable, down if rebases/CI-failures pile up.
+Start `max_in_flight` at the injected `N` (default 3) and watch the first wave's local-gate
+timings + `gh api rate_limit`; apply the adaptive ratchet (SKILL §5a) — up while the box stays
+comfortable and CI is clean, down on rate-limits or piling rebases/CI-failures.
 
 ## Closure & sign-out (SKILL §7b — avoid stranding / double-dispatch)
 - **Don't hand-close when auto-close is wired.** Verify each ready/merged PR actually links its
