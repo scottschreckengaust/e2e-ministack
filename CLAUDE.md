@@ -82,7 +82,7 @@ Two workflows. `ci.yml` (jobs: changes → unit → integration) lints, runs uni
 - **Dependency/supply-chain** — `npm audit --audit-level=high`, OSV-Scanner (lockfile), Grype (filesystem).
 - **SAST/secrets** — Semgrep (`--config=auto --error`), Gitleaks (full history), CodeQL (JS/TS).
 - **zizmor** — audits the workflow files themselves. To keep it clean: pin every action to a **commit SHA** (not a tag), set top-level `permissions: contents: read`, and `persist-credentials: false` on every checkout.
-- **actionlint** — separate workflow (`actionlint.yml`), path-triggered on `.github/workflows/**`. Validates workflow *correctness* (schema, shellcheck on `run:` blocks) — complements zizmor's *security* audit.
+- **actionlint** — runs in `security.yml` alongside zizmor. Validates workflow *correctness* (schema, shellcheck on `run:` blocks) — complements zizmor's *security* audit. Both workflow-file linters live together there.
 - **Threat model** — `threat-model.tc.json` is an [AWS threat-composer](https://github.com/awslabs/threat-composer) artifact (design-time, hand-authored). Edit it in the threat-composer web app or the AWS Toolkit VS Code extension (see [docs/THREAT-MODELING.md](docs/THREAT-MODELING.md)). CI only checks it parses and has the expected sections — threat-composer has no credential-free CI generator (its AI generator needs a real Bedrock account), so this is a human-maintained artifact, not an automated finding source.
 
 ### Not used here (would need a real AWS account)

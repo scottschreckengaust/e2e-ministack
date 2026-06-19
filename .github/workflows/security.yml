@@ -3,6 +3,7 @@ name: Security
 on:
   push:
   pull_request:
+  workflow_dispatch: # allow manual runs
   schedule:
     # Weekly run so newly-disclosed CVEs are caught even without a push.
     - cron: "0 6 * * 1"
@@ -150,6 +151,22 @@ jobs:
           '
 
   # ── GitHub Actions workflow hardening ───────────────────────────────────
+  # actionlint (correctness: schema, shellcheck) and zizmor (security:
+  # injection, unpinned actions, permissions) together lint the workflow files.
+  actionlint:
+    name: Actionlint (workflow correctness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Run actionlint
+        # Official install script pins the version; actionlint also runs
+        # shellcheck on `run:` blocks.
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
   zizmor:
     name: Zizmor (Actions audit)
     runs-on: ubuntu-latest
