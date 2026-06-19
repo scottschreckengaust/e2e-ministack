@@ -63,6 +63,11 @@ These were established by running the stack, not from docs alone — don't "simp
 - `aws-cdk-lib` is pinned to **2.260.0**. Note `lambda.Runtime.NODEJS_24_X` requires >= 2.230.0 (2.220.0 and earlier lack it), so don't downgrade below that.
 - `aws-cdk` (CLI) is **2.1128.0**. Post-2.179 the CLI versions diverged from the library (CLI is numbered `2.10xx.x`/`2.11xx.x`), so they are pinned independently and are not expected to match.
 
+## Dependency notes
+
+- `package.json` has an `overrides` forcing **`js-yaml ^4.2.0`**. The Jest/Istanbul coverage toolchain pulls `js-yaml@^3` transitively, which carries a moderate DoS (GHSA-h67p-54hq-rp68). v4 is safe here because the only consumer (`@istanbuljs/load-nyc-config`) calls `js-yaml.load()`, which still exists in v4 (only `safeLoad` was removed). `npm audit` should report 0 vulnerabilities — don't accept `npm audit fix`'s suggestion to downgrade `ts-jest`.
+- The GitHub-side Dependabot "npm_and_yarn … js-yaml" updates fail because the fix lives in this override, not a direct-dep bump; that's expected, not a CI regression.
+
 ## Repository conventions
 
 - `.remember/` is local session/memory tooling, not project code — ignore it when reasoning about the application.
