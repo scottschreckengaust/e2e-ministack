@@ -31,6 +31,45 @@ describe('MiniStackStack — fine-grained assertions', () => {
     }
   });
 
+  it('both buckets bound version/upload growth with lifecycle rules', () => {
+    // issue #6: versioned + DESTROY buckets must not accumulate noncurrent
+    // versions or aborted multipart uploads unboundedly. Both buckets share
+    // the expire-noncurrent-versions rule.
+    const buckets = template.findResources('AWS::S3::Bucket');
+    for (const id of Object.keys(buckets)) {
+      const rules = buckets[id].Properties.LifecycleConfiguration.Rules;
+      expect(rules).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            Id: 'expire-noncurrent-versions',
+            Status: 'Enabled',
+            NoncurrentVersionExpiration: {
+              NoncurrentDays: 30,
+              NewerNoncurrentVersions: 1,
+            },
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('the log bucket expires its self-ingested access logs', () => {
+    template.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: 'cdk-demo-log-bucket',
+      LifecycleConfiguration: {
+        Rules: Match.arrayWith([
+          Match.objectLike({
+            Id: 'expire-access-logs',
+            Status: 'Enabled',
+            Prefix: 'self/',
+            ExpirationInDays: 90,
+          }),
+        ]),
+      },
+    });
+  });
+
   it('buckets enforce TLS via a deny-insecure-transport policy', () => {
     template.hasResourceProperties('AWS::S3::BucketPolicy', {
       PolicyDocument: Match.objectLike({

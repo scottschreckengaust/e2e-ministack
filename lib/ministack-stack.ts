@@ -35,6 +35,27 @@ export class MiniStackStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       versioned: true, // CKV_AWS_21
       serverAccessLogsPrefix: 'self/', // CKV_AWS_18 (logs to itself)
+      // Versioned + DESTROY without lifecycle rules lets noncurrent versions,
+      // aborted multipart uploads, and the self-ingested access logs grow
+      // unboundedly (issue #6). Bound all three (CKV_AWS_300):
+      //  - drop noncurrent versions after 30d (superseded log data has no
+      //    audit value), keeping 1 prior version as a short safety net;
+      //  - abort incomplete multipart uploads after 7d;
+      //  - expire the self/ access logs after 90d (typical short retention
+      //    window for operational access logs).
+      lifecycleRules: [
+        {
+          id: 'expire-noncurrent-versions',
+          noncurrentVersionExpiration: cdk.Duration.days(30),
+          noncurrentVersionsToRetain: 1,
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+        },
+        {
+          id: 'expire-access-logs',
+          prefix: 'self/',
+          expiration: cdk.Duration.days(90),
+        },
+      ],
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
@@ -49,6 +70,17 @@ export class MiniStackStack extends cdk.Stack {
       versioned: true, // CKV_AWS_21
       serverAccessLogsBucket: logBucket, // AwsSolutions-S1 / CKV_AWS_18
       serverAccessLogsPrefix: 'data-bucket/',
+      // Bound noncurrent-version and multipart-upload accumulation (issue #6 /
+      // CKV_AWS_300). Same rationale as the log bucket; no object-expiration
+      // rule since live data has no fixed retention here.
+      lifecycleRules: [
+        {
+          id: 'expire-noncurrent-versions',
+          noncurrentVersionExpiration: cdk.Duration.days(30),
+          noncurrentVersionsToRetain: 1,
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+        },
+      ],
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
