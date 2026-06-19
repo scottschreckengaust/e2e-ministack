@@ -6,6 +6,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as path from 'path';
 
 /**
@@ -142,12 +143,44 @@ export class MiniStackStack extends cdk.Stack {
     // no broad wildcard resource — clears AwsSolutions-IAM4/IAM5).
     logGroup.grantWrite(role);
 
+    // Unified KMS strategy: this stack uses customer-managed CMKs (with key
+    // rotation) everywhere it encrypts, rather than mixing customer-managed and
+    // AWS-managed keys. The log group above uses a CMK; the DLQ previously used
+    // sqs.QueueEncryption.KMS_MANAGED (the aws/sqs AWS-managed alias), so two
+    // encryption philosophies sat side by side (issue #34). We give the DLQ its
+    // own dedicated CMK so both data stores share one consistent, rotated,
+    // policy-controllable key strategy. A separate key (rather than reusing the
+    // log key) keeps each key's resource policy scoped to a single purpose.
+    const dlqKey = new kms.Key(this, 'DoublerDlqKey', {
+      enableKeyRotation: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     // Dead-letter queue for failed async invocations (CKV_AWS_116),
-    // KMS-encrypted and TLS-enforced.
+    // encrypted with the customer-managed CMK above and TLS-enforced.
     const dlq = new sqs.Queue(this, 'DoublerDlq', {
-      encryption: sqs.QueueEncryption.KMS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dlqKey,
       enforceSSL: true,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Observability: failed async invocations land in the DLQ silently
+    // (issue #34). Alarm on any visible message so a failure surfaces instead of
+    // accumulating unnoticed. Threshold > 0 over a single 1-minute period;
+    // missing data (an idle, empty queue) is treated as not-breaching.
+    new cloudwatch.Alarm(this, 'DoublerDlqDepthAlarm', {
+      alarmName: `${functionName}-dlq-depth`,
+      alarmDescription:
+        'Dead-letter queue for cdk-doubler has visible messages: a failed async invocation needs investigation.',
+      metric: dlq.metricApproximateNumberOfMessagesVisible({
+        period: cdk.Duration.minutes(1),
+        statistic: cloudwatch.Stats.MAXIMUM,
+      }),
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
     // NODEJS_24_X was added in aws-cdk-lib 2.230.0 (pinned in package.json).

@@ -153,9 +153,72 @@ exports[`MiniStackStack — snapshot matches the synthesized CloudFormation snap
     "DoublerDlq3080075A": {
       "DeletionPolicy": "Delete",
       "Properties": {
-        "KmsMasterKeyId": "alias/aws/sqs",
+        "KmsMasterKeyId": {
+          "Fn::GetAtt": [
+            "DoublerDlqKeyEA61CA01",
+            "Arn",
+          ],
+        },
       },
       "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "DoublerDlqDepthAlarm0EAB09A2": {
+      "Properties": {
+        "AlarmDescription": "Dead-letter queue for cdk-doubler has visible messages: a failed async invocation needs investigation.",
+        "AlarmName": "cdk-doubler-dlq-depth",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "QueueName",
+            "Value": {
+              "Fn::GetAtt": [
+                "DoublerDlq3080075A",
+                "QueueName",
+              ],
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ApproximateNumberOfMessagesVisible",
+        "Namespace": "AWS/SQS",
+        "Period": 60,
+        "Statistic": "Maximum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "DoublerDlqKeyEA61CA01": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "EnableKeyRotation": true,
+        "KeyPolicy": {
+          "Statement": [
+            {
+              "Action": "kms:*",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":iam::000000000000:root",
+                    ],
+                  ],
+                },
+              },
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::KMS::Key",
       "UpdateReplacePolicy": "Delete",
     },
     "DoublerDlqPolicy9F72791F": {
