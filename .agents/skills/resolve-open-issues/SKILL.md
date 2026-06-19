@@ -140,9 +140,10 @@ where folding and cluster assignment are decided, before any dispatch:
    `ready_count < max_ready` AND no other PR from its hot cluster is already READY:
    `gh pr ready <url>`, stamp `ready_at`, and post the sequencing annotation (§6). Increment
    ready_count.
-5. **Merge watch** — for READY PRs that got approved/merged (human or policy): stamp
-   `merged_at`, **close the issue** with an acceptance-point summary, free the ready slot,
-   then run the **rebase+refill cascade** (§6).
+5. **Merge watch** — drive the always-on merge-closer (§5c): for READY PRs, get them merged
+   (native auto-merge or direct merge per §5c), stamp `merged_at`, **close/reconcile the
+   issue(s)** with an acceptance-point summary, free the ready slot, then run the
+   **rebase+refill cascade** (§6).
 6. **Escalations** — for BLOCKED tokens, scan the issue/PR thread for a human reply
    addressing `agent:wK` (§7). If found, resume.
 7. **Refill** — while `building+draft < max_draft` and backlog non-empty: pick the next
