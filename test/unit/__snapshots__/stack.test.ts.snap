@@ -23,6 +23,21 @@ exports[`MiniStackStack — snapshot matches the synthesized CloudFormation snap
           ],
         },
         "BucketName": "cdk-demo-bucket",
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 7,
+              },
+              "Id": "expire-noncurrent-versions",
+              "NoncurrentVersionExpiration": {
+                "NewerNoncurrentVersions": 1,
+                "NoncurrentDays": 30,
+              },
+              "Status": "Enabled",
+            },
+          ],
+        },
         "LoggingConfiguration": {
           "DestinationBucketName": {
             "Ref": "LogBucketCC3B17E8",
@@ -323,6 +338,27 @@ exports[`MiniStackStack — snapshot matches the synthesized CloudFormation snap
           ],
         },
         "BucketName": "cdk-demo-log-bucket",
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 7,
+              },
+              "Id": "expire-noncurrent-versions",
+              "NoncurrentVersionExpiration": {
+                "NewerNoncurrentVersions": 1,
+                "NoncurrentDays": 30,
+              },
+              "Status": "Enabled",
+            },
+            {
+              "ExpirationInDays": 90,
+              "Id": "expire-access-logs",
+              "Prefix": "self/",
+              "Status": "Enabled",
+            },
+          ],
+        },
         "LoggingConfiguration": {
           "LogFilePrefix": "self/",
         },
