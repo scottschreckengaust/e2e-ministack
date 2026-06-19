@@ -24,10 +24,20 @@ supply-chain safety. This file is the authoritative inventory.
 | Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                 |
 | fast-check, jazzer.js (fuzz)  | `package.json` + lockfile            | exact, lockfile-resolved                 |
 
+> **Scope of "exact" above.** Only `aws-cdk` and `aws-cdk-lib` are pinned to a
+> bare exact version _string_ in `package.json`. The other direct runtime deps
+> — `@aws-sdk/client-lambda` and `@aws-sdk/client-s3` (`^3.x`) and `constructs`
+> (`^10.x`) — and all direct devDependencies use **caret ranges**. Their
+> _installed_ versions are still pinned, but by the lockfile, not the manifest
+> (see "npm `^`/`~` ranges" below). So the install is reproducible; the
+> `package.json` declaration is a compatibility floor, not the source of truth.
+
 ## Intentionally NOT pinned (with reasons)
 
 - **npm `^`/`~` ranges in `package.json`** — these are resolution _floors_
-  only. `npm ci` installs exactly what `package-lock.json` says, so the actual
+  only (this covers the caret-ranged direct deps noted above —
+  `@aws-sdk/client-*`, `constructs` — as well as all transitive deps). `npm ci`
+  installs exactly what `package-lock.json` says, so the actual
   install is pinned. The ranges document intended compatibility; the lockfile
   is the source of truth. (Run `npm ci`, never `npm install`, in CI.) Note this
   is about the dependency _ranges_, not npm itself — the npm **tool** is now
@@ -43,6 +53,22 @@ supply-chain safety. This file is the authoritative inventory.
 - **Homebrew tool versions (local dev only)** — `pre-commit`, scanners
   installed via brew on a developer machine are not repo-pinned; CI is the
   reproducible source of truth.
+
+## Known-deprecated transitive packages
+
+`npm ci` prints a few `npm warn deprecated` lines for packages pulled in deep
+in the dev toolchain. They are **transitive** (no direct dependency on them),
+buried under tools we _do_ pin, and carry no open advisory that `npm audit
+--audit-level=high` flags — so they're tolerated, not bumped:
+
+- **`glob@7.x` / `glob@10.x`** and **`inflight@1.0.6`** — deprecated as
+  unmaintained (and `inflight` leaks memory). They arrive via the Jest /
+  test-tooling chain. We can't bump them without forking upstream; an `override`
+  would risk breaking those tools for no security gain.
+
+These warnings are expected and not a CI regression. Revisit if any of them
+graduates to a real advisory (then add a scoped `override`, as we do for
+`js-yaml` / `markdown-it` / `qs` — see CLAUDE.md "Dependency notes").
 
 ## Updating a pin
 
