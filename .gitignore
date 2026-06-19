@@ -17,6 +17,11 @@ test/**/*.d.ts
 # threat-model.tc.json at the repo root, not here)
 .threat-composer/
 
+# Stryker mutation testing (reports + incremental cache are generated; the
+# cache is restored/saved via actions/cache in CI, never committed)
+.stryker-tmp/
+reports/
+
 # Logs / OS
 *.log
 .DS_Store

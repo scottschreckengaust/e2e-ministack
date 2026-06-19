@@ -32,6 +32,7 @@ npm run test:unit      # fast: Lambda logic + CDK assertions/snapshot (no emulat
 npm test               # alias for test:unit
 npm run test:integration  # jest AWS-SDK tests against deployed MiniStack resources
 npm run test:e2e       # placeholder for a real-account stage (currently skipped)
+npm run test:mutation  # Stryker mutation testing of the Lambda logic (gate: >=80%)
 npm run destroy        # cdk destroy --force
 
 # Reset MiniStack state between runs (faster than restarting the container):
@@ -55,6 +56,7 @@ CI runs this same sequence — see `.github/workflows/ci.yml`.
   - `test/unit/` — `lambda.test.ts` (pure handler logic) + `stack.test.ts` (CDK `Template` fine-grained assertions **and** a full-template snapshot). Synth-only; no emulator/Docker. The snapshot baseline lives in `test/unit/__snapshots__/` and must be updated (`-u`) after any intended template change.
   - `test/integration/` — Jest + AWS SDK v3 clients pointed at `AWS_ENDPOINT_URL`, against deployed MiniStack resources. Assumes `cdk deploy` already ran.
   - `test/e2e/` — placeholder (`describe.skip`) for a future real-account deployment stage.
+- **Mutation testing** — `npm run test:mutation` (Stryker) mutates `lambda/index.js` against the unit tier; CI gate breaks under 80% (currently 100%). Scoped to the Lambda logic only — the CDK stack is declarative config Stryker can't tie to synth output (mutants show as "no coverage"), so it's covered by cdk-nag/checkov/assertions/snapshot instead. `incremental: true` caches per-mutant verdicts; CI restores/saves that cache via `actions/cache`.
 
 ## Why these flags / non-obvious constraints
 

@@ -73,6 +73,37 @@ jobs:
       - name: CDK synth (cdk-nag security gate)
         run: npm run synth
 
+  # Mutation testing of the Lambda logic. Fails under the break threshold (80%).
+  mutation:
+    name: Mutation testing (Stryker)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24.17.0'
+      - run: npm ci
+      # Restore Stryker's incremental result cache so only mutants in changed
+      # files are re-tested. The key uses github.run_id (unique every run) so
+      # the cache ALWAYS saves in the post-job step — actions/cache skips the
+      # save when the exact key already hit, so a per-commit/SHA key can fail
+      # to persist. restore-keys prefix-matches the most recent prior cache.
+      # The stryker config hash is in the key so a scope change (the `mutate`
+      # glob) busts the cache.
+      - name: Restore mutation cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: reports/mutation/incremental.json
+          key: stryker-${{ hashFiles('stryker.config.mjs') }}-${{ github.run_id }}
+          restore-keys: |
+            stryker-${{ hashFiles('stryker.config.mjs') }}-
+      - name: Mutation tests
+        run: npm run test:mutation
+
   # MiniStack deploy + integration tests. Runs only if unit passed.
   integration:
     name: Integration (MiniStack)

@@ -20,6 +20,7 @@ supply-chain safety. This file is the authoritative inventory.
 | gitleaks, pre-commit-hooks    | `.pre-commit-config.yaml`            | `rev:` tags                              |
 | threat-composer-ai (uvx)      | `.mcp.json`                          | git commit SHA                           |
 | Prettier, markdownlint-cli2   | `package.json` + lockfile            | exact, lockfile-resolved                 |
+| Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                 |
 
 ## Intentionally NOT pinned (with reasons)
 
