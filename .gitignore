@@ -3,11 +3,15 @@ node_modules/
 
 # CDK
 cdk.out/
-*.d.ts
-# Compiled TS output (sources are .ts; emit is transient)
+# Compiled TS output (sources are .ts; emit is transient). Scoped to the
+# compiled locations so hand-written declarations like lambda/index.d.ts stay
+# tracked.
 bin/*.js
+bin/*.d.ts
 lib/*.js
-test/*.js
+lib/*.d.ts
+test/**/*.js
+test/**/*.d.ts
 
 # threat-composer-ai generated workflow output (the curated model lives in
 # threat-model.tc.json at the repo root, not here)

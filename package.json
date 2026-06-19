@@ -14,7 +14,10 @@
     "deploy": "cdk deploy --require-approval never",
     "destroy": "cdk destroy --force",
     "lint": "eslint .",
-    "test": "jest"
+    "test": "npm run test:unit",
+    "test:unit": "JEST_TIER=unit jest",
+    "test:integration": "JEST_TIER=integration jest",
+    "test:e2e": "JEST_TIER=e2e jest"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

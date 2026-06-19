@@ -19,6 +19,7 @@
     "experimentalDecorators": true,
     "strictPropertyInitialization": false,
     "esModuleInterop": true,
+    "isolatedModules": true,
     "skipLibCheck": true,
     "typeRoots": ["./node_modules/@types"],
     // TypeScript 6 no longer auto-includes every @types/* package, so the

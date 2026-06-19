@@ -1,0 +1,11 @@
+# Extend gitleaks' default ruleset, then allowlist known false positives.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "CDK synth artifacts contain high-entropy asset hashes that are not secrets"
+# CloudFormation snapshot: S3Key/asset digests are deterministic content
+# hashes, not credentials. Scope the allowlist to the snapshot file only.
+paths = [
+  '''test/unit/__snapshots__/.*\.snap''',
+]
