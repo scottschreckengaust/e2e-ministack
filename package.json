@@ -27,7 +27,7 @@
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.658.0",
     "@aws-sdk/client-s3": "^3.658.0",
-    "aws-cdk-lib": "2.230.0",
+    "aws-cdk-lib": "2.246.0",
     "constructs": "^10.3.0"
   }
 }
