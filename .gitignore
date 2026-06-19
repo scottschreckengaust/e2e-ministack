@@ -32,6 +32,11 @@ crash-*
 *.outcome
 cfn-lint.txt
 npm-audit.json
+# CI-downloaded scanner binaries
+/gitleaks
+/osv-scanner
+gitleaks.tar.gz
+ministack.log
 
 # Logs / OS
 *.log

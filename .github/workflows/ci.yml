@@ -112,7 +112,7 @@ jobs:
       # The stryker config hash is in the key so a scope change (the `mutate`
       # glob) busts the cache.
       - name: Restore mutation cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: reports/mutation/incremental.json
           key: stryker-${{ hashFiles('stryker.config.mjs') }}-${{ github.run_id }}
@@ -147,7 +147,7 @@ jobs:
       # Persist the fuzzing corpus across runs so discovered inputs accumulate
       # and later runs start from prior coverage (rolling key, like mutation).
       - name: Restore fuzz corpus
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: .fuzz-corpus
           key: fuzz-corpus-${{ github.run_id }}
