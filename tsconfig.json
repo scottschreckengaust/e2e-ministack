@@ -20,7 +20,10 @@
     "strictPropertyInitialization": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "typeRoots": ["./node_modules/@types"]
+    "typeRoots": ["./node_modules/@types"],
+    // TypeScript 6 no longer auto-includes every @types/* package, so the
+    // ones we rely on must be listed explicitly (node globals + jest).
+    "types": ["node", "jest"]
   },
   "exclude": ["node_modules", "cdk.out"]
 }
