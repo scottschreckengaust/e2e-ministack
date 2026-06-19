@@ -2,7 +2,7 @@
   "schema": 1,
   "applicationInfo": {
     "name": "e2e-ministack",
-    "description": "### Overview\n\nA minimal AWS CDK (TypeScript) stack — an S3 data bucket (with a server-access-log bucket) and a Node.js Lambda (`cdk-doubler`) with a customer-managed least-privilege role, KMS-encrypted log group, and an SQS dead-letter queue. The stack is exercised end-to-end against MiniStack (a local AWS emulator) in CI.\n\n### Threat-modeling scope\n\nThreats 1–4 are hand-authored and track the runtime resources in `lib/ministack-stack.ts`. Threats 5–11 (tagged `ai-generated`) were surfaced by the threat-composer-ai generator and cover the build/supply-chain and CI/CD surface (Docker socket, image/dependency/repo/workflow compromise, bootstrap bucket, DLQ disclosure), then curated by hand. Open in the [Threat Composer](https://github.com/awslabs/threat-composer) web app or the AWS Toolkit VS Code extension to expand further. See [docs/THREAT-MODELING.md](docs/THREAT-MODELING.md)."
+    "description": "### Overview\n\nA minimal AWS CDK (TypeScript) stack — an S3 data bucket (with a server-access-log bucket) and a Node.js Lambda (`cdk-doubler`) with a customer-managed least-privilege role, KMS-encrypted log group, and an SQS dead-letter queue. The stack is exercised end-to-end against MiniStack (a local AWS emulator) in CI.\n\n### Threat-modeling scope\n\nThreats 1–4 are hand-authored and track the runtime resources in `lib/ministack-stack.ts`. Threats 5–12 (tagged `ai-generated`) cover the build/supply-chain and CI/CD surface (Docker socket, image/dependency/repo/workflow compromise, bootstrap bucket, DLQ disclosure, and the optional developer-invoked threat-composer-ai MCP server), then curated by hand. Each carries STRIDE + Priority metadata and assumption links so high-severity host-compromise threats are distinguishable from low-severity disclosure ones. Open in the [Threat Composer](https://github.com/awslabs/threat-composer) web app or the AWS Toolkit VS Code extension to expand further. See [docs/THREAT-MODELING.md](docs/THREAT-MODELING.md)."
   },
   "architecture": {
     "description": "### Components\n\n- **DataBucket** (`cdk-demo-bucket`) — S3, SSE (S3-managed), TLS enforced, public access blocked, versioned, access logging to LogBucket.\n- **LogBucket** (`cdk-demo-log-bucket`) — S3, receives server access logs.\n- **Doubler** (`cdk-doubler`) — Node.js 24 Lambda; doubles `event.n`.\n- **DoublerRole** — customer-managed IAM role, scoped write to the function's log group only.\n- **DoublerLogGroup** — CloudWatch Logs, KMS-encrypted (`DoublerLogKey`), 1-week retention.\n- **DoublerDlq** — SQS dead-letter queue (KMS-managed encryption, TLS enforced)."
@@ -19,6 +19,18 @@
       "numericId": 2,
       "content": "AWS account-level guardrails (SCPs, GuardDuty, CloudTrail) exist outside this stack and are out of scope for this model.",
       "tags": ["scope"]
+    },
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "numericId": 3,
+      "content": "CI runs on ephemeral GitHub-hosted runners (ubuntu-latest), so host compromise is bounded to a single short-lived runner; workflow tokens are least-privilege (contents: read) and not persisted across jobs.",
+      "tags": ["scope", "ci-cd"]
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "numericId": 4,
+      "content": "The threat-composer-ai MCP server (.mcp.json) is optional, developer-invoked, and never runs in CI; it executes on a developer workstation with that developer's AWS_PROFILE/Bedrock credentials and fetches third-party code via uvx pinned to a commit SHA.",
+      "tags": ["scope", "supply-chain", "mcp"]
     }
   ],
   "mitigations": [
@@ -87,6 +99,12 @@
       "numericId": 11,
       "content": "The DLQ uses KMS encryption and enforced TLS; restrict consume permissions and avoid logging sensitive payloads. Monitor DLQ depth with a CloudWatch alarm.",
       "tags": ["lambda", "sqs", "ai-generated"]
+    },
+    {
+      "id": "e0000000-0000-4000-8000-000000000012",
+      "numericId": 12,
+      "content": "The threat-composer-ai MCP server is optional and pinned to a commit SHA in .mcp.json (not a floating ref); run it only on a trusted developer workstation, scope AWS_PROFILE to a least-privilege Bedrock-only profile, review the third-party code before invoking, and require explicit MCP-server approval in the client (/mcp in Claude Code). It is never wired into CI.",
+      "tags": ["supply-chain", "mcp", "ai-generated"]
     }
   ],
   "threats": [
@@ -148,6 +166,10 @@
       "impactedGoal": ["confidentiality", "integrity", "availability"],
       "impactedAssets": ["docker socket", "host system", "ci environment"],
       "statement": "A malicious actor with access to the mounted Docker socket can escape the MiniStack container and run arbitrary commands on the host, which leads to full host compromise including other containers, files, and credentials, resulting in reduced confidentiality, integrity, and availability of the docker socket, host system, and ci environment",
+      "metadata": [
+        { "key": "STRIDE", "value": ["E", "T"] },
+        { "key": "Priority", "value": "High" }
+      ],
       "tags": ["supply-chain", "docker", "ai-generated"]
     },
     {
@@ -160,6 +182,10 @@
       "impactedGoal": ["confidentiality", "integrity"],
       "impactedAssets": ["ministack container", "ci environment", "source code"],
       "statement": "A malicious actor who compromises the ministackorg/ministack image on Docker Hub can inject code that executes at container startup in CI and dev, which leads to execution of arbitrary code with access to AWS credentials, source, and the Docker socket, resulting in reduced confidentiality and integrity of the ministack container, ci environment, and source code",
+      "metadata": [
+        { "key": "STRIDE", "value": ["T", "E"] },
+        { "key": "Priority", "value": "High" }
+      ],
       "tags": ["supply-chain", "docker", "ai-generated"]
     },
     {
@@ -172,6 +198,10 @@
       "impactedGoal": ["confidentiality", "integrity"],
       "impactedAssets": ["npm dependencies", "cdk infrastructure", "ci environment"],
       "statement": "A malicious actor who compromises an npm package in the dependency tree can execute code during npm install or at runtime, which leads to theft of source, backdoors in CDK infrastructure, or credential exfiltration, resulting in reduced confidentiality and integrity of npm dependencies, cdk infrastructure, and ci environment",
+      "metadata": [
+        { "key": "STRIDE", "value": ["T", "E"] },
+        { "key": "Priority", "value": "High" }
+      ],
       "tags": ["supply-chain", "dependencies", "ai-generated"]
     },
     {
@@ -184,6 +214,10 @@
       "impactedGoal": ["integrity", "confidentiality"],
       "impactedAssets": ["source code", "cdk infrastructure", "iam policies"],
       "statement": "A malicious actor with commit access to the GitHub repository can inject malicious code into CDK stack definitions, which leads to deployment of compromised infrastructure with persistent backdoors, resulting in reduced integrity and confidentiality of source code, cdk infrastructure, and iam policies",
+      "metadata": [
+        { "key": "STRIDE", "value": ["T", "E"] },
+        { "key": "Priority", "value": "High" }
+      ],
       "tags": ["supply-chain", "ci-cd", "ai-generated"]
     },
     {
@@ -196,6 +230,10 @@
       "impactedGoal": ["confidentiality", "integrity"],
       "impactedAssets": ["github actions workflows", "ci environment", "github secrets"],
       "statement": "A malicious actor who compromises a GitHub Actions workflow or action dependency can modify the CI pipeline to exfiltrate secrets or bypass security checks, which leads to compromise of the CI environment and ability to modify deployed infrastructure, resulting in reduced confidentiality and integrity of github actions workflows, ci environment, and github secrets",
+      "metadata": [
+        { "key": "STRIDE", "value": ["T", "I", "E"] },
+        { "key": "Priority", "value": "High" }
+      ],
       "tags": ["supply-chain", "ci-cd", "ai-generated"]
     },
     {
@@ -208,6 +246,10 @@
       "impactedGoal": ["integrity"],
       "impactedAssets": ["cdktoolkit bootstrap bucket", "lambda functions", "cdk assets"],
       "statement": "A malicious actor who compromises the CDKToolkit bootstrap bucket can replace CDK assets with malicious versions, which leads to deployment of compromised Lambda code or other resources, resulting in reduced integrity of the cdktoolkit bootstrap bucket, lambda functions, and cdk assets",
+      "metadata": [
+        { "key": "STRIDE", "value": ["T"] },
+        { "key": "Priority", "value": "Medium" }
+      ],
       "tags": ["ci-cd", "ai-generated"]
     },
     {
@@ -220,7 +262,27 @@
       "impactedGoal": ["confidentiality"],
       "impactedAssets": ["sqs dead letter queue", "lambda invocation payloads"],
       "statement": "A malicious actor who gains access to the SQS dead-letter queue can extract failed Lambda invocation payloads, which leads to disclosure of application data, error messages, or debugging information, resulting in reduced confidentiality of the sqs dead letter queue and lambda invocation payloads",
+      "metadata": [
+        { "key": "STRIDE", "value": ["I"] },
+        { "key": "Priority", "value": "Low" }
+      ],
       "tags": ["lambda", "sqs", "ai-generated"]
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000012",
+      "numericId": 12,
+      "threatSource": "A malicious actor",
+      "prerequisites": "who tampers with the third-party threat-composer-ai code fetched by the developer-invoked MCP server (.mcp.json)",
+      "threatAction": "execute arbitrary code on the developer's workstation when the optional MCP server is run",
+      "threatImpact": "abuse of the developer's AWS_PROFILE/Bedrock credentials, exfiltration of local source or secrets, and tampering with the generated threat model",
+      "impactedGoal": ["confidentiality", "integrity"],
+      "impactedAssets": ["developer workstation", "developer aws credentials", "threat model artifact"],
+      "statement": "A malicious actor who tampers with the third-party threat-composer-ai code fetched by the developer-invoked MCP server (.mcp.json) can execute arbitrary code on the developer's workstation when the optional MCP server is run, which leads to abuse of the developer's AWS_PROFILE/Bedrock credentials, exfiltration of local source or secrets, and tampering with the generated threat model, resulting in reduced confidentiality and integrity of the developer workstation, developer aws credentials, and threat model artifact",
+      "metadata": [
+        { "key": "STRIDE", "value": ["T", "I", "E"] },
+        { "key": "Priority", "value": "Medium" }
+      ],
+      "tags": ["supply-chain", "mcp", "ai-generated"]
     }
   ],
   "mitigationLinks": [
@@ -235,9 +297,20 @@
     { "mitigationId": "e0000000-0000-4000-8000-000000000008", "linkedId": "f0000000-0000-4000-8000-000000000008" },
     { "mitigationId": "e0000000-0000-4000-8000-000000000009", "linkedId": "f0000000-0000-4000-8000-000000000009" },
     { "mitigationId": "e0000000-0000-4000-8000-000000000010", "linkedId": "f0000000-0000-4000-8000-000000000010" },
-    { "mitigationId": "e0000000-0000-4000-8000-000000000011", "linkedId": "f0000000-0000-4000-8000-000000000011" }
+    { "mitigationId": "e0000000-0000-4000-8000-000000000011", "linkedId": "f0000000-0000-4000-8000-000000000011" },
+    { "mitigationId": "e0000000-0000-4000-8000-000000000012", "linkedId": "f0000000-0000-4000-8000-000000000012" }
   ],
   "assumptionLinks": [
-    { "type": "Threat", "assumptionId": "11111111-1111-4111-8111-111111111111", "linkedId": "f0000000-0000-4000-8000-000000000001" }
+    { "type": "Threat", "assumptionId": "11111111-1111-4111-8111-111111111111", "linkedId": "f0000000-0000-4000-8000-000000000001" },
+    { "type": "Threat", "assumptionId": "11111111-1111-4111-8111-111111111111", "linkedId": "f0000000-0000-4000-8000-000000000005" },
+    { "type": "Threat", "assumptionId": "33333333-3333-4333-8333-333333333333", "linkedId": "f0000000-0000-4000-8000-000000000005" },
+    { "type": "Threat", "assumptionId": "33333333-3333-4333-8333-333333333333", "linkedId": "f0000000-0000-4000-8000-000000000006" },
+    { "type": "Threat", "assumptionId": "33333333-3333-4333-8333-333333333333", "linkedId": "f0000000-0000-4000-8000-000000000007" },
+    { "type": "Threat", "assumptionId": "33333333-3333-4333-8333-333333333333", "linkedId": "f0000000-0000-4000-8000-000000000008" },
+    { "type": "Threat", "assumptionId": "33333333-3333-4333-8333-333333333333", "linkedId": "f0000000-0000-4000-8000-000000000009" },
+    { "type": "Threat", "assumptionId": "11111111-1111-4111-8111-111111111111", "linkedId": "f0000000-0000-4000-8000-000000000010" },
+    { "type": "Threat", "assumptionId": "22222222-2222-4222-8222-222222222222", "linkedId": "f0000000-0000-4000-8000-000000000010" },
+    { "type": "Threat", "assumptionId": "11111111-1111-4111-8111-111111111111", "linkedId": "f0000000-0000-4000-8000-000000000011" },
+    { "type": "Threat", "assumptionId": "44444444-4444-4444-8444-444444444444", "linkedId": "f0000000-0000-4000-8000-000000000012" }
   ]
 }
