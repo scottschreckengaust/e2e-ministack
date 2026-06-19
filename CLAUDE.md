@@ -50,7 +50,7 @@ CI runs this same sequence — see `.github/workflows/ci.yml`.
 
 ## Architecture / layout
 
-- `bin/app.ts` — CDK entrypoint; instantiates the stack with a fixed account/region (`000000000000`/`us-east-1`) so the bootstrap environment matches locally and in CI.
+- `bin/app.ts` — CDK entrypoint; instantiates the stack with the fixed account/region from `lib/env.ts` (`MINISTACK_ENV` = `000000000000`/`us-east-1`) so the bootstrap environment matches locally and in CI. The env is pinned **unconditionally** — it does _not_ read `CDK_DEFAULT_ACCOUNT`/`CDK_DEFAULT_REGION`, because the CDK CLI populates those from the ambient credential chain and a contributor with live AWS creds would otherwise synth/deploy against their real account (issue #2). `lib/env.ts` is the single source of truth, imported by both `bin/app.ts` and the unit tests so the literal can't drift.
 - `lib/ministack-stack.ts` — the stack: S3 bucket `cdk-demo-bucket` + Lambda `cdk-doubler`. **Resource names are hard-coded** so tests address them directly without reading CloudFormation outputs.
 - `lambda/index.js` — the function under test (doubles `event.n`, returns `process.version`). `lambda/index.d.ts` is a hand-written type contract (committed) so the unit test can import it with types without `allowJs`.
 - **Test pyramid** (`jest.config.js` picks the tier dir via `JEST_TIER`):

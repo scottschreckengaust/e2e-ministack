@@ -3,19 +3,28 @@ import * as cdk from 'aws-cdk-lib';
 import { Validations } from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { MiniStackStack } from '../lib/ministack-stack';
+import { MINISTACK_ENV } from '../lib/env';
 
-const app = new cdk.App();
+export function buildApp(): cdk.App {
+  const app = new cdk.App();
 
-new MiniStackStack(app, 'MiniStackTestStack', {
-  // Pin a deterministic account/region so the same bootstrap environment
-  // (aws://000000000000/us-east-1) is used locally and in CI against MiniStack.
-  env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT ?? '000000000000',
-    region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
-  },
-});
+  // Pin the deploy target to MiniStack's fixed account/region unconditionally.
+  // Do NOT read CDK_DEFAULT_ACCOUNT/REGION here: the CDK CLI sets those from
+  // the ambient credential chain (AWS_PROFILE / SSO / IMDS), so a contributor
+  // with live AWS creds would otherwise synth/deploy against their real
+  // account. See lib/env.ts and issue #2.
+  new MiniStackStack(app, 'MiniStackTestStack', {
+    env: MINISTACK_ENV,
+  });
 
-// cdk-nag v3 registers rule packs via CDK's policy-validation framework
-// (NOT the v2 `Aspects.of(app).add(...)` API). Checks run at synth time and
-// any unsuppressed finding fails synth. verbose surfaces rule explanations.
-Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));
+  // cdk-nag v3 registers rule packs via CDK's policy-validation framework
+  // (NOT the v2 `Aspects.of(app).add(...)` API). Checks run at synth time and
+  // any unsuppressed finding fails synth. verbose surfaces rule explanations.
+  Validations.of(app).addPlugins(
+    new AwsSolutionsChecks(app, { verbose: true }),
+  );
+
+  return app;
+}
+
+buildApp();
