@@ -85,10 +85,11 @@ mode on a repo you've run before; set `N=1` for a strict single-issue dry run. (
    issues; fold or annotate shared-file/shared-cause dependencies.
 2. **Isolate** — `git worktree add -b fix/issue-N-<slug> .claude/worktrees/fix-issue-N-<slug> origin/main`; `npm ci`; push the branch to signal state.
 3. **TDD** — failing test that reproduces (fails for the RIGHT reason) → minimal fix → green.
-4. **Local gates (all green before PR):** pre-commit · `tsc` · `eslint .` · `prettier --check .`
-   · `markdownlint-cli2` · `JEST_TIER=unit jest` · `cdk synth`. If `lambda/index.js` changed:
-   `JEST_TIER=unit stryker run` (mutation gate 100%). If the synthesized template changed: update
-   the snapshot (`-u`) **deliberately** and inspect the diff.
+4. **Local gates (all green before PR):** run the repo's **own** declared gates — `pre-commit
+run` plus the relevant `package.json`/CI scripts — don't hard-code a list (it goes stale).
+   **Never regress a gate below its current high-water mark** (e.g. the mutation tier is at
+   **100%** today — keep it there, even though CI's floor is lower). If the synthesized template
+   changed: update the snapshot (`-u`) **deliberately** and inspect the diff. (Details: worker prompt.)
 5. **Commit** (`Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`) + push `-u`.
 6. **Draft PR** (`gh pr create --draft`) with: Summary (`closes #N`), reproduced root cause +
    evidence, the fix + why it's best-practice, Testing (commands + results), Dependencies/related

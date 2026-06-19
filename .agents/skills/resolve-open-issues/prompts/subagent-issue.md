@@ -72,13 +72,29 @@ Then signal state IMMEDIATELY (comment on **every** issue in {{ISSUES}}):
 
 ## Local gates (ALL green before the PR, from the worktree)
 
-Run only those relevant to the files you touched (the orchestrator lists them in the fix):
-`npx tsc --noEmit -p tsconfig.json` · `npx eslint {{FILES}}` · `npx prettier --check {{FILES}}`
-· `npx markdownlint-cli2 {{MD_FILES}}` · `JEST_TIER=unit npx jest` · `cdk synth` (if stack
-touched) · `JEST_TIER=unit npx stryker run` (ONLY if `lambda/index.js` changed; gate 100%) ·
-`pre-commit run --files {{FILES}}` (if installed; else say so in the report).
-If you changed the synthesized template, run `JEST_TIER=unit npx jest -u` DELIBERATELY and
-inspect the snapshot diff — confirm only the intended lines moved.
+**The repo's own config is the source of truth for which gates exist and their thresholds — do
+not hard-code a gate list here, it goes stale as the repo evolves.** Run, in order:
+
+1. **`pre-commit run --files {{FILES}}`** (if `.pre-commit-config.yaml` is present) — this is the
+   repo's declared fast-gate set; whatever it runs is authoritative. If pre-commit isn't
+   installed, say so in the report and fall back to the package's own scripts.
+2. **The repo's defined test/build scripts** for what you touched — read `package.json`
+   `scripts` and the CI workflow (`.github/workflows/`) rather than assuming names. Typically a
+   fast unit tier (e.g. `npm test` / `JEST_TIER=unit`), a build/synth, and — only when the
+   relevant source changed — heavier gates the repo defines (e.g. a mutation tier). Honor
+   whatever threshold the repo's config sets; don't invent one.
+3. If you changed a snapshot-backed artifact, update it **deliberately** (e.g. `jest -u`) and
+   inspect the diff — confirm only intended lines moved.
+
+**Never regress a gate below its current level.** A gate's _enforced floor_ may sit below where
+the repo actually scores today (e.g. the mutation gate's CI floor is 80% but the repo is at
+**100%**); treat the **current high-water mark as the bar** — a change that drops mutation from
+100% to 95% must be fixed even though CI's floor would technically pass it. Hold the line; don't
+let enhancements erode quality.
+
+Report which gates you ran and their results (§ Report back). The goal: match exactly what the
+repo's pre-commit + CI would enforce, plus hold every gate at its current high-water mark, so a
+draft that's green locally is green in CI and never lowers the bar.
 
 ## Commit (PATH-in-same-invocation — see quirk b) + push
 
@@ -89,7 +105,8 @@ Stage only your scoped files. Commit (conventional + trailer EXACTLY):
 
 {{COMMIT_BODY}}
 
-Closes #{{N}}
+Closes #{{N}}   ← one line PER fully-resolved issue (`Closes #11`, `Closes #20`); use
+                  `Relates to #X` instead for an issue only partially addressed (stays open)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 ```
@@ -98,11 +115,17 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 
 ## Open the DRAFT PR
 
-`gh pr create --draft --base main --title "{{PR_TITLE}} (closes #{{N}})" --body "<body>"`
-Body MUST contain: **Summary** (one line, incl. `Closes #{{N}}`) · **Reproduced root cause +
-evidence** (file:line + the failure mechanism) · **The fix and why it's best-practice** ·
-**Testing** (exact commands run + their results) · **Dependencies / related** (cross-link open
-issues/PRs touching the same files/cluster; note any deferrals + why). End the body with:
+`gh pr create --draft --base main --title "{{PR_TITLE}}" --body "<body>"`
+Body MUST contain: **Summary** (one line) · **a closing/relating line for EACH issue in
+{{ISSUES}}** — use `Closes #X` for an issue this PR **fully resolves** (it auto-closes on merge),
+but `Relates to #X` / `Part of #X` for one this PR only **partially** addresses (separate
+concerns remain → it stays OPEN for follow-up; flag it as DONE-NO-CLOSE in your report + sign-out
+so the orchestrator knows it's intentionally still open, not stranded). Every issue in {{ISSUES}}
+gets exactly one such line — never leave one unmentioned. · **Reproduced root cause + evidence**
+(file:line + the failure mechanism)
+· **The fix and why it's best-practice** · **Testing** (exact commands run + their results) ·
+**Dependencies / related** (cross-link open issues/PRs touching the same files/cluster; note any
+deferrals + why). End the body with:
 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
 
 ## If BLOCKED (ambiguity you cannot resolve within scope)
@@ -117,11 +140,12 @@ issues/PRs touching the same files/cluster; note any deferrals + why). End the b
 After the draft PR exists (or if you abandon/block), post ONE sign-out comment on **every issue
 you cover** so the supervisor never mistakes a finished/crashed worker for an active one:
 
-- Done: `gh issue comment {{N}} --body "🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out, over and out. PR #<n> opened (draft); body uses \`Closes #{{N}}\` so the issue auto-closes on merge. No longer actively working — now in the orchestrator's review pipeline."`
+- Done (fully-resolved issue): post on each such issue — `gh issue comment THAT_NUM --body "🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out, over and out. PR #N opened (draft); its body lists 'Closes #THIS' so this issue auto-closes on merge. No longer actively working — now in the orchestrator's review pipeline."` (Truthful only because the PR body carries that issue's `Closes` line — verify before posting.)
+- DONE-NO-CLOSE (partially-addressed issue that stays open): sign out — `🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out. PR #N addresses part of this (linked 'Relates to'); separate concerns remain, so this issue stays OPEN for follow-up. Over and out — orchestrator, reassign/close as you see fit.`
 - Blocked: sign out noting you're blocked on the posted questions (§ If BLOCKED) and not working until answered.
 - Abandoned: `... — could not complete: <reason>. No viable PR. Issue is FREE FOR PICKUP.`
-  Do NOT post a separate "closing" comment — `Closes #{{N}}` in the PR body handles closure; the
-  sign-out + the orchestrator's acceptance summary are the only comments needed.
+  Do NOT post a separate "closing" comment — the per-issue `Closes #X` lines in the PR body
+  handle closure; the sign-out + the orchestrator's acceptance summary are the only comments needed.
 
 ## DO NOT
 

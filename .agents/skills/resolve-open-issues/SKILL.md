@@ -174,8 +174,10 @@ classify:
 **Waking the subagent on red** — _warm resume_ if its `agentId` is still live & recent (ledger):
 `SendMessage` the failing check + log tail and "fix on your existing branch/worktree, push, then
 report" (keeps its context). _Cold resume_ after a crash (agentId lost): dispatch a **fresh**
-worker with the per-issue prompt + "branch/worktree/PR `fix/issue-N-*` already exist — resume
-there, do not recreate" + the failing-check detail; the public PR thread + ledger are what make
+worker with the per-issue prompt + "branch/worktree/PR `<exact branch from the ledger>` already
+exist — resume there, do not recreate" (the branch is named for the worker's primary issue; pass
+the real name, not a guessed `fix/issue-N` pattern) + the failing-check detail; the public PR
+thread + ledger are what make
 this possible. After the fix pushes, the token stays DRAFT and re-enters this loop until green.
 Bound retries (~3) — past that, escalate (§7) rather than loop forever.
 
@@ -430,9 +432,9 @@ choice, conflicting acceptance criteria, a missing decision, an unexpected block
   - **Warm resume** (preferred if the worker's agentId is still live & recent): SendMessage to
     that agentId with the answer + "continue to draft from your existing branch/PR."
   - **Cold resume** (after a crash/long gap): dispatch a _fresh_ worker with the original
-    per-issue prompt **plus** the Q&A and "your branch/worktree/PR `fix/issue-N-*` already
-    exist — resume from there, do not recreate." Cold resume is why the public thread is the
-    source of truth: it survives losing the agentId.
+    per-issue prompt **plus** the Q&A and "your branch/worktree/PR `<exact branch from the
+ledger>` already exist — resume from there, do not recreate." Cold resume is why the public
+    thread is the source of truth: it survives losing the agentId.
 - The resumed worker incorporates the answer, finishes to draft, reports; the token re-enters
   the pipeline at DRAFT. Unpark.
 
@@ -473,13 +475,19 @@ Keep those two; don't add a third hand-closing comment when auto-close is wired.
 
 **Orchestrator — verify, don't assume (every loop, for each ready/merged PR):**
 
-- Confirm the auto-close link exists:
-  `gh pr view <PR> --json closingIssuesReferences --jq '[.closingIssuesReferences[]?.number]'`.
-  - **Non-empty** → the issue WILL auto-close on merge; do nothing manual.
-  - **Empty (PR only _references_ the issue)** → it will NOT auto-close. Either edit the PR
-    body to add `Closes #N` (preferred), or on merge **manually close** the issue with a
-    one-line _proposed-closure_ comment citing the merged PR. Never leave a resolved issue
-    silently open — that's the state that makes a supervisor think work is still in flight.
+- Reconcile the auto-close links against **every** issue the worker reported in `ISSUES:` — not
+  merely that the list is non-empty:
+  `gh pr view <PR> --json closingIssuesReferences --jq '[.closingIssuesReferences[]?.number]'`,
+  then compare that set against `ISSUES:` **and** the worker's per-issue intent (a worker may
+  deliberately only `Relates to` an issue it partially addressed — see DONE-NO-CLOSE).
+  - **Each issue is either auto-closing OR explicitly DONE-NO-CLOSE** → correct; do nothing
+    manual. The partially-addressed issue stays open on purpose (separate concerns remain).
+  - **An issue the worker considers _fully resolved_ is missing its `Closes` link** (a real
+    strand — e.g. folded #11+#20, both done, but body only lists `Closes #11`) → fix it: edit
+    the PR body to add `Closes #N` (preferred), or on merge **manually close** with a one-line
+    _proposed-closure_ comment citing the merged PR. Never leave a _resolved_ issue silently
+    open — that's the state that makes a supervisor
+    think work is still in flight.
 - **Pickup rule:** an issue is redispatchable if it is OPEN **and** (no live worker owns it)
   **and** (its latest sign-out is ABANDONED, or there is a claim comment but NO sign-out and
   the worker is not live = crashed). Never redispatch an issue whose sign-out is DONE/DRAFT or
