@@ -16,7 +16,7 @@
     "lint": "eslint .",
     "test": "npm run test:unit",
     "test:unit": "JEST_TIER=unit jest",
-    "test:integration": "JEST_TIER=integration jest",
+    "test:integration": "JEST_TIER=integration jest --runInBand",
     "test:e2e": "JEST_TIER=e2e jest"
   },
   "devDependencies": {
