@@ -121,7 +121,8 @@ A defense-in-depth set of gates runs in CI (see [`security.yml`](.github/workflo
 | Dependencies | **npm audit**, **OSV-Scanner**, **Grype** | Lockfile + filesystem CVEs |
 | SAST | **Semgrep**, **CodeQL** | JS/TS source |
 | Secrets | **Gitleaks** | Full git history |
-| Actions hardening | **zizmor** | The workflow files themselves |
+| Actions hardening | **zizmor** + **actionlint** | The workflow files themselves |
+| Threat model | **threat-composer** | `threat-model.tc.json` (design-time artifact) |
 
 The stack is hardened to pass cdk-nag and checkov cleanly (TLS, encryption, least-privilege IAM, DLQ, KMS-encrypted logs). All GitHub Actions are pinned to commit SHAs with least-privilege `permissions`.
 

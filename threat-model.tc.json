@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "applicationInfo": {
+    "name": "e2e-ministack",
+    "description": "### Overview\n\nA minimal AWS CDK (TypeScript) stack — an S3 data bucket (with a server-access-log bucket) and a Node.js Lambda (`cdk-doubler`) with a customer-managed least-privilege role, KMS-encrypted log group, and an SQS dead-letter queue. The stack is exercised end-to-end against MiniStack (a local AWS emulator) in CI.\n\n### Threat-modeling scope\n\nThis is a **starter** threat model authored by hand to seed the repo. Open it in the [Threat Composer](https://github.com/awslabs/threat-composer) web app or the AWS Toolkit VS Code extension to expand it. The threats below track the resources actually defined in `lib/ministack-stack.ts`."
+  },
+  "architecture": {
+    "description": "### Components\n\n- **DataBucket** (`cdk-demo-bucket`) — S3, SSE (S3-managed), TLS enforced, public access blocked, versioned, access logging to LogBucket.\n- **LogBucket** (`cdk-demo-log-bucket`) — S3, receives server access logs.\n- **Doubler** (`cdk-doubler`) — Node.js 24 Lambda; doubles `event.n`.\n- **DoublerRole** — customer-managed IAM role, scoped write to the function's log group only.\n- **DoublerLogGroup** — CloudWatch Logs, KMS-encrypted (`DoublerLogKey`), 1-week retention.\n- **DoublerDlq** — SQS dead-letter queue (KMS-managed encryption, TLS enforced)."
+  },
+  "assumptions": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "numericId": 1,
+      "content": "Production deployments target a real AWS account; MiniStack is used only for local/CI testing and is not internet-exposed.",
+      "tags": ["scope"]
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "numericId": 2,
+      "content": "AWS account-level guardrails (SCPs, GuardDuty, CloudTrail) exist outside this stack and are out of scope for this model.",
+      "tags": ["scope"]
+    }
+  ],
+  "mitigations": [
+    {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "numericId": 1,
+      "content": "S3 buckets enforce TLS (`enforceSSL`), block all public access, and use SSE — preventing plaintext transport and public exposure.",
+      "tags": ["s3"]
+    },
+    {
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "numericId": 2,
+      "content": "The Lambda uses a customer-managed role granting only scoped CloudWatch Logs write to its own log group (no AWS-managed policy, no wildcard resources).",
+      "tags": ["iam"]
+    },
+    {
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "numericId": 3,
+      "content": "Failed asynchronous Lambda invocations are captured by an encrypted SQS dead-letter queue, preserving evidence and preventing silent data loss.",
+      "tags": ["lambda"]
+    },
+    {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "numericId": 4,
+      "content": "Lambda has a reserved concurrency limit, bounding blast radius and cost from a runaway or abusive invocation pattern.",
+      "tags": ["lambda", "availability"]
+    }
+  ],
+  "threats": [
+    {
+      "id": "f0000000-0000-4000-8000-000000000001",
+      "numericId": 1,
+      "threatSource": "An internet-based actor",
+      "prerequisites": "without authentication",
+      "threatAction": "attempt to read or list objects in the data bucket",
+      "threatImpact": "disclosure of stored data",
+      "impactedGoal": ["confidentiality"],
+      "impactedAssets": ["s3 data bucket"],
+      "statement": "An internet-based actor without authentication can attempt to read or list objects in the data bucket, which leads to disclosure of stored data, resulting in reduced confidentiality of s3 data bucket",
+      "tags": ["s3"]
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000002",
+      "numericId": 2,
+      "threatSource": "An on-path actor",
+      "prerequisites": "in a man-in-the-middle position",
+      "threatAction": "intercept S3 traffic sent over plaintext HTTP",
+      "threatImpact": "disclosure or tampering of objects in transit",
+      "impactedGoal": ["confidentiality", "integrity"],
+      "impactedAssets": ["s3 data bucket"],
+      "statement": "An on-path actor in a man-in-the-middle position can intercept S3 traffic sent over plaintext HTTP, which leads to disclosure or tampering of objects in transit, resulting in reduced confidentiality and integrity of s3 data bucket",
+      "tags": ["s3"]
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000003",
+      "numericId": 3,
+      "threatSource": "An actor who can influence the Lambda's input",
+      "prerequisites": "with the ability to invoke the function",
+      "threatAction": "send malformed or oversized payloads to the function",
+      "threatImpact": "unhandled errors or excessive resource consumption",
+      "impactedGoal": ["availability"],
+      "impactedAssets": ["cdk-doubler lambda"],
+      "statement": "An actor who can influence the Lambda's input with the ability to invoke the function can send malformed or oversized payloads to the function, which leads to unhandled errors or excessive resource consumption, resulting in reduced availability of cdk-doubler lambda",
+      "tags": ["lambda"]
+    },
+    {
+      "id": "f0000000-0000-4000-8000-000000000004",
+      "numericId": 4,
+      "threatSource": "An actor with a foothold in the function's execution role",
+      "prerequisites": "having compromised the function",
+      "threatAction": "attempt to use the role's permissions to reach other AWS resources",
+      "threatImpact": "lateral movement beyond logging",
+      "impactedGoal": ["confidentiality", "integrity"],
+      "impactedAssets": ["doubler iam role"],
+      "statement": "An actor with a foothold in the function's execution role having compromised the function can attempt to use the role's permissions to reach other AWS resources, which leads to lateral movement beyond logging, resulting in reduced confidentiality and integrity of doubler iam role",
+      "tags": ["iam", "lambda"]
+    }
+  ],
+  "mitigationLinks": [
+    { "mitigationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "linkedId": "f0000000-0000-4000-8000-000000000001" },
+    { "mitigationId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "linkedId": "f0000000-0000-4000-8000-000000000002" },
+    { "mitigationId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "linkedId": "f0000000-0000-4000-8000-000000000003" },
+    { "mitigationId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "linkedId": "f0000000-0000-4000-8000-000000000003" },
+    { "mitigationId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "linkedId": "f0000000-0000-4000-8000-000000000004" }
+  ],
+  "assumptionLinks": [
+    { "type": "Threat", "assumptionId": "11111111-1111-4111-8111-111111111111", "linkedId": "f0000000-0000-4000-8000-000000000001" }
+  ]
+}

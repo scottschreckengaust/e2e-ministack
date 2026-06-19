@@ -73,6 +73,12 @@ Two workflows. `aws-integration-tests.yml` lints, runs the cdk-nag synth gate, t
 - **Dependency/supply-chain** — `npm audit --audit-level=high`, OSV-Scanner (lockfile), Grype (filesystem).
 - **SAST/secrets** — Semgrep (`--config=auto --error`), Gitleaks (full history), CodeQL (JS/TS).
 - **zizmor** — audits the workflow files themselves. To keep it clean: pin every action to a **commit SHA** (not a tag), set top-level `permissions: contents: read`, and `persist-credentials: false` on every checkout.
+- **actionlint** — separate workflow (`actionlint.yml`), path-triggered on `.github/workflows/**`. Validates workflow *correctness* (schema, shellcheck on `run:` blocks) — complements zizmor's *security* audit.
+- **Threat model** — `threat-model.tc.json` is an [AWS threat-composer](https://github.com/awslabs/threat-composer) artifact (design-time, hand-authored). Edit it in the threat-composer web app or the AWS Toolkit VS Code extension. CI only checks it parses and has the expected sections — threat-composer has no credential-free CI generator (its AI generator needs a real Bedrock account), so this is a human-maintained artifact, not an automated finding source.
+
+### Not used here (would need a real AWS account)
+
+cdk-nag/checkov are *shift-left* (analyze the template). **ScoutSuite** and **Prowler** are *runtime CSPM* — they audit a deployed account's live config (real IAM trust, actual public buckets, account settings) via cloud APIs, which a template can't reveal. This repo has no real-account stage (only MiniStack), and neither tool works meaningfully against the emulator, so they're intentionally omitted. Add them as a CSPM gate if/when a real AWS account is introduced.
 
 ## Dependency notes
 

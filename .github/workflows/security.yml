@@ -123,6 +123,32 @@ jobs:
         # Hard-fail on any check; CKV_AWS_117 is skipped via resource metadata.
         run: checkov -d cdk.out --framework cloudformation --compact
 
+  # ── Threat model (design-time artifact) ─────────────────────────────────
+  threat-model:
+    name: Threat model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+      # threat-composer is a design-time authoring tool (no CI generator that
+      # works without a real Bedrock account), so the gate is simply: the
+      # committed model parses and carries the expected sections. Edit it in
+      # the Threat Composer app / VS Code extension; expand as the stack grows.
+      - name: Validate threat-model.tc.json
+        run: |
+          node -e '
+            const tc = require("./threat-model.tc.json");
+            const need = ["schema","applicationInfo","threats","mitigations","assumptions"];
+            const missing = need.filter((k) => !(k in tc));
+            if (missing.length) { console.error("Missing sections:", missing); process.exit(1); }
+            if (!tc.threats.length) { console.error("No threats defined"); process.exit(1); }
+            console.log("threat-model.tc.json OK:", tc.threats.length, "threats");
+          '
+
   # ── GitHub Actions workflow hardening ───────────────────────────────────
   zizmor:
     name: Zizmor (Actions audit)
