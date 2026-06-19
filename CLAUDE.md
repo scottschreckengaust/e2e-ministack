@@ -80,6 +80,21 @@ Two workflows. `aws-integration-tests.yml` lints, runs the cdk-nag synth gate, t
 
 cdk-nag/checkov are *shift-left* (analyze the template). **ScoutSuite** and **Prowler** are *runtime CSPM* — they audit a deployed account's live config (real IAM trust, actual public buckets, account settings) via cloud APIs, which a template can't reveal. This repo has no real-account stage (only MiniStack), and neither tool works meaningfully against the emulator, so they're intentionally omitted. Add them as a CSPM gate if/when a real AWS account is introduced.
 
+## Pre-commit hooks
+
+Fast local tier mirroring a subset of CI (`.pre-commit-config.yaml`). One-time setup:
+
+```bash
+pip install pre-commit   # or: brew install pre-commit
+pre-commit install
+```
+
+- Hooks: standard hygiene (large files, merge conflicts, shebang/executable consistency, EOF/whitespace, `check-json`/`check-yaml`, private-key + AWS-credential detection), **gitleaks** (secrets), **actionlint** (workflows), and `local` **eslint** + **tsc** that reuse the repo's pinned `node_modules` (so the hook and CI run identical tooling).
+- `tsconfig.json` is excluded from `check-json` (it's JSONC — has comments).
+- **`bin/app.ts` is mode `100755`** (executable) on purpose — it has a `#!/usr/bin/env node` shebang, so the shebang/executable hooks require it. Don't `chmod -x` it.
+- gitleaks/actionlint build from Go source on first install. Behind a TLS-intercepting proxy (e.g. corporate networks blocking `proxy.golang.org`), run with **`GOPROXY=direct`**.
+- This is a convenience tier, not an enforcing control (`--no-verify` bypasses it; absent until `pre-commit install`). CI remains the source of truth; the slow gates (cdk-nag synth, checkov, CodeQL, grype, MiniStack E2E) stay in CI only.
+
 ## Dependency notes
 
 - `package.json` has an `overrides` forcing **`js-yaml ^4.2.0`**. The Jest/Istanbul coverage toolchain pulls `js-yaml@^3` transitively, which carries a moderate DoS (GHSA-h67p-54hq-rp68). v4 is safe here because the only consumer (`@istanbuljs/load-nyc-config`) calls `js-yaml.load()`, which still exists in v4 (only `safeLoad` was removed). `npm audit` should report 0 vulnerabilities — don't accept `npm audit fix`'s suggestion to downgrade `ts-jest`.
