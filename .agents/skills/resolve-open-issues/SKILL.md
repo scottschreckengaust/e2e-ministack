@@ -79,16 +79,17 @@ Each issue is a token moving through states. The orchestrator advances tokens on
 ```
 
 - **BACKLOG** — ordered, not yet dispatched.
-- **BUILDING** — a worker is active (counts against `max_building`/draft slots).
+- **BUILDING** — a worker is active (counts against the `max_draft` funnel).
 - **DRAFT** — PR open, worker reported & stopped; CI running. Still a build/draft slot.
 - **BLOCKED** — worker escalated (§7); **parked, frees its slot**, awaits a human answer.
 - **READY** — CI green + promoted by orchestrator (counts against `max_ready`).
 - **MERGED** — approved & merged; frees a ready slot, advances `main`, triggers the
   rebase+refill cascade (§6), then the issue is closed.
 
-Slot accounting (balanced): `building+draft ≤ max_draft(2)` gates new dispatches;
-`ready ≤ max_ready(3)` gates promotions; `in_flight ≤ 5` is the global ceiling. BLOCKED
-tokens do not count.
+Slot accounting: `building+draft ≤ max_draft` gates new dispatches; `ready ≤ max_ready` gates
+promotions; `in_flight ≤ max_in_flight` is the global ceiling. All three derive from the
+injected `--max-in-flight` (§2, §5a): `max_draft = max_in_flight − max_ready`. BLOCKED tokens
+do not count.
 
 ---
 
@@ -134,9 +135,9 @@ free. The monitor is a re-check loop owned by the orchestrator; the subagent own
     stamp `ci_green_at`; promote if slot-free (§4 step 4).
   - **pending** (any check not COMPLETED) → do nothing yet; ensure a CI_POLL wakeup is set
     (`270s`, cache-warm) and re-check next loop.
-  - **red** (any FAILURE/CANCELLED/TIMED*OUT) → **classify before acting** (§4b). A \_transient*
-    failure (rate-limit / network) is re-run, NOT fixed; a _real_ failure wakes the subagent.
-    Do NOT promote either way.
+  - **red** (any `FAILURE`/`CANCELLED`/`TIMED_OUT`) → **classify before acting** (§4b). A
+    _transient_ failure (rate-limit / network) is re-run, NOT fixed; a _real_ failure wakes the
+    subagent. Do NOT promote either way.
 - **Waking the subagent on red:**
   - _Warm resume_ — if the worker's `agentId` is still live & recent (persisted in the
     ledger), `SendMessage` to it with the failing check name + its log tail and "fix on your
@@ -194,8 +195,9 @@ caps queueing or cancelling jobs.
 
 2. **Classify the root cause:**
    - **Transient (rate-limit / network / registry throttle / runner flake)** → re-run. Tells:
-     `rate limit`, `429`, `toomanyrequests`, `TLS handshake timeout`, `i/o timeout`, `connection
-reset`, `pull access ... denied` _after_ a throttle, a job `cancelled` by a concurrency cap.
+     `rate limit`, `429`, `toomanyrequests`, `TLS handshake timeout`, `i/o timeout`,
+     `connection reset`, `pull access ... denied` after a throttle, a job `cancelled` by a
+     concurrency cap.
    - **Real (test/lint/build/scan finding)** → NOT a rate limit. Wake the subagent (§4a) to fix
      the actual failure. Re-running will just fail again and burn quota.
 3. **Act on transient — re-run only the failed jobs, after the window resets:**
@@ -206,8 +208,8 @@ reset`, `pull access ... denied` _after_ a throttle, a job `cancelled` by a conc
      cheaper, faster, less load). Bound retries (e.g. ≤2 transient re-runs per PR); if it keeps
      failing the same way, escalate (§7) — it may not actually be transient.
    - Log the re-run in the ledger (`rerun_count`) so silent infinite-retry can't hide.
-4. **Reduce recurrence:** stagger work to ease Actions load — lean toward the `serial` dial
-   (§5) during a throttle, keep fewer PRs triggering CI at once, and let the merge-paced
+4. **Reduce recurrence:** stagger work to ease Actions load — ratchet `max_in_flight` down
+   (§5a) during a throttle, keep fewer PRs triggering CI at once, and let the merge-paced
    pipeline (one merge → one promote → one dispatch) naturally rate-limit new workflow runs.
 
 **Golden rule:** a re-run is only valid for a _confirmed-transient_ failure. Inspect first;
@@ -274,10 +276,10 @@ browser session cookie, not the `gh` token). Instead:
   ceiling**. If it is **absent, ASK before dispatching** — and make the question concrete by
   pointing at the setting they'd read it from:
 
-  > \*"How many open PRs may I keep in flight at once? Your repo's per-user cap is on the
-  > settings page — open `https://github.com/<owner>/<repo>/settings/interaction_limits` and use
-  > the 'maximum open pull requests per user' value there. (I can't read it via API — it's
-  > UI-only.) Default **3** if you'd rather I just start conservative; ceiling is 1000."\*\*
+  > How many open PRs may I keep in flight at once? Your repo's per-user cap is on the settings
+  > page — open `https://github.com/<owner>/<repo>/settings/interaction_limits` and use the
+  > "maximum open pull requests per user" value there. (I can't read it via API — it's UI-only.)
+  > Default **3** if you'd rather I just start conservative; ceiling is 1000.
 
 - **Range `1..1000`** (1000 mirrors the GitHub UI's own max; there is no smaller built-in limit).
 - **Adaptive ratchet (seed both from the answer):**
@@ -483,7 +485,8 @@ high `review_latency` ⇒ don't add build parallelism; high `rebase_count` ⇒ r
 
 **Ledger** lives at the project's session-memory file (here `.remember/remember.md`) and is
 the crash spine — a fresh session reconstructs in-flight state from it + the issue/PR
-annotations. It MUST hold: roles/identity, the active profile + caps, the skip list, the
+annotations. It MUST hold: roles/identity, the current `max_in_flight`/`max_ready` + ratchet
+log, the skip list, the
 conflict clusters, the ordered backlog, the per-issue STATUS table (state + the 6 epoch
 stamps + PR#/branch/worktree/cluster), blocked questions, and "next action on resume."
 
@@ -509,8 +512,8 @@ Don't pick 300s (worst of both — pays the cache miss without amortizing it).
   the pinned `npm`; git's hook subprocess may not inherit the mise PATH, so `git commit`
   fails with "Executable `npm` not found" even though `pre-commit run` passed directly.
   Fix: export PATH **in the same shell invocation** as `git commit` (workers are told this).
-- **semgrep PostToolUse hook** errors "No SEMGREP*APP_TOKEN" on every Write/Edit — it fires
-  \_after* the write, so the file is still created; it's auth-missing noise, not a finding.
+- **semgrep PostToolUse hook** errors `No SEMGREP_APP_TOKEN` on every Write/Edit — it fires
+  _after_ the write, so the file is still created; it's auth-missing noise, not a finding.
   Don't chase it; flag it once.
 - **Worktrees branch from `origin/main`**, not the current canonical-root branch — verify
   the base HEAD when a worker reports a surprising base.
@@ -532,5 +535,5 @@ Don't pick 300s (worst of both — pays the cache miss without amortizing it).
 - `prompts/subagent-issue.md` — the parameterized per-issue worker prompt (`{{PLACEHOLDERS}}`).
   The orchestrator fills it per issue. Includes the report-back schema + the §7 escalation.
 
-To re-run from scratch: read this SKILL, adopt `balanced`, seed the ledger from
-`gh issue list --state open`, then run the loop (§4).
+To re-run from scratch: read this SKILL, get `--max-in-flight` (ask the human if not injected —
+§5a), seed the ledger from `gh issue list --state open`, then run the merge-train loop (§4).

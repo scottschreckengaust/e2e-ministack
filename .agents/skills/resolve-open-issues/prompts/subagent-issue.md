@@ -13,16 +13,17 @@ Report back when done. One issue, one tight scope.
 
 ## Environment (do first, in every shell)
 
-- `export PATH="/home/scoschre/.local/share/mise/installs/node/24.17.0/bin:$PATH"` — verify
-  `node --version` → v24.17.0. (Adjust the path to the repo's pinned Node if it changes.)
+- **Put the pinned Node on PATH** — prefer an already-present `node`, else fall back to mise:
+  `command -v node >/dev/null 2>&1 || export PATH="$(mise where node)/bin:$PATH"`. Verify
+  `node --version` matches the repo's pin (`mise.toml`).
 - Canonical repo root: `{{REPO_ROOT}}`. `gh` is authenticated as `{{GH_LOGIN}}`.
 - **KNOWN ENV QUIRKS — don't be derailed:**
   - (a) A `PostToolUse` **semgrep** hook prints `No SEMGREP_APP_TOKEN` on every file write. It
     fires AFTER the write; the file IS saved. Ignore it (it's auth-missing noise, not a finding).
   - (b) git's **pre-commit hook subprocess may not inherit the mise PATH** → `git commit` can
-    fail `Executable npm not found` even when `pre-commit run` passed directly. Fix: run the
-    commit with PATH exported in the SAME invocation:
-    `export PATH="/home/scoschre/.local/share/mise/installs/node/24.17.0/bin:$PATH" && git commit -m "..."`.
+    fail `Executable npm not found` even when `pre-commit run` passed directly. Fix: ensure
+    Node is on PATH in the SAME invocation as the commit:
+    `{ command -v node >/dev/null 2>&1 || export PATH="$(mise where node)/bin:$PATH"; } && git commit -m "..."`.
   - (c) Worktrees branch from `origin/main`, not the current canonical-root branch.
 
 ## The issue: #{{N}} — {{TITLE}}

@@ -16,7 +16,9 @@ sets the goal + config; the SKILL says how to run the loop.
 
 ## Setup (once)
 
-- `export PATH="/home/scoschre/.local/share/mise/installs/node/24.17.0/bin:$PATH"` (mise Node 24).
+- **Ensure the pinned Node is on PATH** — use `node` if it's already there, else fall back to
+  mise: `command -v node >/dev/null 2>&1 || export PATH="$(mise where node)/bin:$PATH"`. Confirm
+  `node --version` matches the repo's pin (`mise.toml`). Do this in every shell.
 - Canonical repo root = the main checkout (worktrees are created under `<root>/.claude/worktrees/`).
 - Confirm identity: `gh api user --jq .login`. Issue claims + PRs authored under it. Each
   worker's public traceable identity is `claude-agent:issue-N`.
@@ -32,9 +34,9 @@ sets the goal + config; the SKILL says how to run the loop.
 - **Range `1..1000`** (1000 = the UI's own max; there is no smaller built-in limit).
 - **Adaptive ratchet:** start `max_in_flight` at `N` (default 3). Each clean loop (CI green
   first-try AND `gh api rate_limit` core-remaining >1000) ratchet **up by 1** toward the
-  ceiling; on any rate-limit signal (§4b) ratchet **down by 1** (floor 1) + widen CI-poll. Log
-  every change (`old→new` + trigger) in the ledger. `max_ready` stays **1** (train front);
-  `max_in_flight` governs only the draft-funnel width.
+  ceiling; on any rate-limit signal (§4b) ratchet **down by 1** (floor 1) + widen CI-poll.
+  `max_ready` starts at 1 and may grow (cap ~3) only when merges are smooth and clusters
+  disjoint (SKILL §5a). Log every change (`knob: old→new` + trigger) in the ledger.
 
 ## Pilot mode (default for a fresh session)
 
@@ -42,18 +44,18 @@ Run PILOT MODE: take the first `N` issues (default **3**) fully end-to-end
 (BACKLOG→…→MERGED) under the merge-train, then continue the steady-state loop. Set `N=1` for a
 single-issue dry run. (SKILL §5b.)
 
-## Authoritative config (captured clarifications — the `balanced` default)
+## Authoritative config
 
-- **Pipeline caps:** `max_ready = 1` (merge-train front) + draft funnel up to
-  `max_in_flight − 1`; total open PRs ≤ the injected `--max-in-flight` (default 3, ceiling
-  1000). (Dial + adaptive ratchet: SKILL §5 / §5a.)
+- **Pipeline caps:** `max_ready` starts at 1 (merge-train front) + draft funnel of
+  `max_in_flight − max_ready`; total open PRs ≤ the injected `--max-in-flight` (default 3,
+  ceiling 1000). Both caps adapt (SKILL §5a). (Dial: SKILL §5.)
 - **Worker contract:** each issue gets ONE background worker (`prompts/subagent-issue.md`) that
   goes root-cause → worktree → TDD → local gates → **draft PR** → report, then **STOPS**.
   Workers never mark ready, never poll CI in a loop, never close issues, never touch
   out-of-scope files, never remove their worktree.
 - **Promotion is orchestrator-only and green-gated:** promote draft→ready **only** when CI is
-  all-green AND ready_count < 3 AND no other PR from the same hot cluster is already ready.
-  Put a timer on CI (don't promote on elapsed time). On CI-red, wake the worker to fix.
+  all-green AND `ready_count < max_ready` AND no other PR from the same hot cluster is already
+  ready. Put a timer on CI (don't promote on elapsed time). On CI-red, wake the worker to fix.
 - **Conflict policy:** parallel-with-rebase-at-merge; **serialize the _ready_ state within hot
   clusters** (workflows; stack+snapshot) so only one of each is ready at a time. On each merge,
   rebase the next same-cluster PR onto main, re-green, then promote.
@@ -100,7 +102,7 @@ failures** (registry-pull throttle, 429 from a step, concurrency caps). For a re
 inspect the log first (`gh run view <id> --log-failed`) and classify: **transient** (rate-limit /
 network) → `gh run rerun <id> --failed` _after_ confirming you're not still being limited (bound
 to ≤2 retries, log `rerun_count`); **real** (test/lint/scan finding) → wake the subagent to fix.
-Never blind-retry. During a throttle, ratchet the dial toward `serial`.
+Never blind-retry. During a throttle, ratchet `max_in_flight` down (SKILL §5a).
 
 ## Resource sizing
 
