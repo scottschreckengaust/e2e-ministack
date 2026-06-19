@@ -15,12 +15,14 @@ concurrency dial, rebase/refill cascade, stuck/resume, metrics, timers, gotchas)
 sets the goal + config; the SKILL says how to run the loop.
 
 ## Setup (once)
+
 - `export PATH="/home/scoschre/.local/share/mise/installs/node/24.17.0/bin:$PATH"` (mise Node 24).
 - Canonical repo root = the main checkout (worktrees are created under `<root>/.claude/worktrees/`).
 - Confirm identity: `gh api user --jq .login`. Issue claims + PRs authored under it. Each
   worker's public traceable identity is `claude-agent:issue-N`.
 
 ## Launch parameter: `--max-in-flight N` (injected; the open-PR ceiling)
+
 - **`N` is the hard ceiling on open PRs.** It is **injected at launch**, NOT discovered: the
   repo's `settings/interaction_limits` "max open PRs per user" is a GitHub UI-only control with
   **no API** (`gh api repos/{o}/{r}/interaction-limits` → `{}`, `.../rulesets` → `[]`). Do NOT
@@ -35,11 +37,13 @@ sets the goal + config; the SKILL says how to run the loop.
   `max_in_flight` governs only the draft-funnel width.
 
 ## Pilot mode (default for a fresh session)
+
 Run PILOT MODE: take the first `N` issues (default **3**) fully end-to-end
 (BACKLOG→…→MERGED) under the merge-train, then continue the steady-state loop. Set `N=1` for a
 single-issue dry run. (SKILL §5b.)
 
 ## Authoritative config (captured clarifications — the `balanced` default)
+
 - **Pipeline caps:** `max_ready = 1` (merge-train front) + draft funnel up to
   `max_in_flight − 1`; total open PRs ≤ the injected `--max-in-flight` (default 3, ceiling
   1000). (Dial + adaptive ratchet: SKILL §5 / §5a.)
@@ -50,7 +54,7 @@ single-issue dry run. (SKILL §5b.)
 - **Promotion is orchestrator-only and green-gated:** promote draft→ready **only** when CI is
   all-green AND ready_count < 3 AND no other PR from the same hot cluster is already ready.
   Put a timer on CI (don't promote on elapsed time). On CI-red, wake the worker to fix.
-- **Conflict policy:** parallel-with-rebase-at-merge; **serialize the *ready* state within hot
+- **Conflict policy:** parallel-with-rebase-at-merge; **serialize the _ready_ state within hot
   clusters** (workflows; stack+snapshot) so only one of each is ready at a time. On each merge,
   rebase the next same-cluster PR onto main, re-green, then promote.
 - **Folding:** combine tightly-coupled issues into one PR only when the review is simple/obvious
@@ -65,6 +69,7 @@ single-issue dry run. (SKILL §5b.)
   with per-issue epoch stamps + states + worker agentIds. Refine the SKILL during the run.
 
 ## Per-issue workflow (delegated to each worker; you supervise)
+
 0. **Claim** — worker comments `@<login> working on it (claude-agent:issue-N) — branch fix/issue-N-<slug>`.
 1. **Root cause first** — reproduce empirically (run code, don't theorize). Search adjacent open
    issues; fold or annotate shared-file/shared-cause dependencies.
@@ -80,6 +85,7 @@ single-issue dry run. (SKILL §5b.)
    (cross-link issues/PRs touching the same area). Worker then STOPS and reports.
 
 ## Orchestrator loop (you; every wakeup) — see SKILL §4
+
 Reconcile (gh pr list + ledger) → collect worker reports → poll `gh pr checks` → promote
 green drafts (slot+cluster gated) with merge-guidance annotation → on merge close the issue with
 an acceptance-point summary + run rebase/refill cascade → handle escalations → refill to caps →
@@ -87,32 +93,36 @@ update metrics + ledger → `ScheduleWakeup` (CI_POLL 270s while checks run; 120
 STOP when backlog empty AND nothing in flight (emit final per-PR status table).
 
 ## Rate limits (SKILL §4b)
+
 Expect two kinds on a long batch: (1) your own `gh`/API limit — check `gh api rate_limit`,
 remedy is to **slow polling** and wait for reset; (2) Actions-side limits that surface as **job
 failures** (registry-pull throttle, 429 from a step, concurrency caps). For a red check, ALWAYS
 inspect the log first (`gh run view <id> --log-failed`) and classify: **transient** (rate-limit /
-network) → `gh run rerun <id> --failed` *after* confirming you're not still being limited (bound
+network) → `gh run rerun <id> --failed` _after_ confirming you're not still being limited (bound
 to ≤2 retries, log `rerun_count`); **real** (test/lint/scan finding) → wake the subagent to fix.
 Never blind-retry. During a throttle, ratchet the dial toward `serial`.
 
 ## Resource sizing
+
 Start `max_in_flight` at the injected `N` (default 3) and watch the first wave's local-gate
 timings + `gh api rate_limit`; apply the adaptive ratchet (SKILL §5a) — up while the box stays
 comfortable and CI is clean, down on rate-limits or piling rebases/CI-failures.
 
 ## Closure & sign-out (SKILL §7b — avoid stranding / double-dispatch)
+
 - **Don't hand-close when auto-close is wired.** Verify each ready/merged PR actually links its
   issue: `gh pr view <PR> --json closingIssuesReferences`. Non-empty → merging auto-closes it
   (a separate "closing" comment is redundant — keep only the acceptance-point summary + the
-  worker's sign-out). **Empty (PR merely references #N) → it will NOT auto-close**: add `Closes
-  #N` to the PR body, or manually close on merge with a one-line proposed-closure comment.
+  worker's sign-out). **Empty (PR merely references #N) → it will NOT auto-close**: add
+  `Closes #N` to the PR body, or manually close on merge with a one-line proposed-closure comment.
 - **Sign-out disambiguates exit.** Each worker's final public act is
   `🤖 claude-agent:issue-N — signing out, over and out.` + terminal state (DONE/DRAFT, BLOCKED,
   or ABANDONED→free for pickup). **Pickup rule:** redispatch an issue iff OPEN + no live worker
-  + (sign-out=ABANDONED, or a claim comment with NO sign-out and worker not live = crashed).
-  Never redispatch DONE/DRAFT or BLOCKED.
+  - (sign-out=ABANDONED, or a claim comment with NO sign-out and worker not live = crashed).
+    Never redispatch DONE/DRAFT or BLOCKED.
 
 ## Never
+
 Never mark a PR ready while any check is red or pending. Never let a worker edit outside its
 issue scope. Report blockers immediately. When the set is empty, report one line per PR
 (number, URL, state, CI result) and stop.
