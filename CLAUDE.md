@@ -114,7 +114,10 @@ pre-commit install
 
 ## Dependency notes
 
-- `package.json` has an `overrides` forcing **`js-yaml ^4.2.0`**. The Jest/Istanbul coverage toolchain pulls `js-yaml@^3` transitively, which carries a moderate DoS (GHSA-h67p-54hq-rp68). v4 is safe here because the only consumer (`@istanbuljs/load-nyc-config`) calls `js-yaml.load()`, which still exists in v4 (only `safeLoad` was removed). `npm audit` should report 0 vulnerabilities — don't accept `npm audit fix`'s suggestion to downgrade `ts-jest`.
+- `package.json` defines **three** `overrides`, each forcing a transitive dependency up to a patched version. All are docs-only safety floors enforced by the lockfile (`npm ci`), and `npm audit --audit-level=high` reports 0 vulnerabilities. Don't accept `npm audit fix`'s suggestion to downgrade `ts-jest`. Re-derive the consumer lists below with `npm ls js-yaml markdown-it qs` if they drift.
+  - **`js-yaml ^4.2.0`** — the Jest/Istanbul coverage toolchain pulls `js-yaml@^3` transitively, which carries a moderate DoS (GHSA-h67p-54hq-rp68). v4 is safe here because both consumers call `js-yaml.load()`, which still exists in v4 (only `safeLoad` was removed). Two consumers resolve to `js-yaml@4.2.0`: `markdownlint-cli2` (direct) and `@istanbuljs/load-nyc-config` (via `ts-jest → @jest/transform → babel-plugin-istanbul`).
+  - **`markdown-it ^14.2.0`** — pulled by `markdownlint-cli2`. Forces past older `markdown-it` advisories (ReDoS/uncontrolled-resource-consumption in `<14`). `markdownlint-cli2` is compatible with v14, so the bump is transparent.
+  - **`qs ^6.15.2`** — pulled by `@stryker-mutator/core → typed-rest-client`. Forces past the prototype-pollution class of `qs` advisories; `typed-rest-client` only uses `qs.stringify`, which is API-stable across the bump.
 - The GitHub-side Dependabot "npm_and_yarn … js-yaml" updates fail because the fix lives in this override, not a direct-dep bump; that's expected, not a CI regression.
 
 ## Repository conventions
