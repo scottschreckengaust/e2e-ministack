@@ -1,4 +1,4 @@
-name: AWS Integration Tests
+name: CI
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
               - 'tsconfig.json'
               - 'cdk.json'
               - 'jest.config.js'
-              - '.github/workflows/aws-integration-tests.yml'
+              - '.github/workflows/ci.yml'
 
   # Fast, synth-only tier. Gates the expensive integration job below.
   unit:

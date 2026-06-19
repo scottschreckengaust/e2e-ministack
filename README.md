@@ -6,7 +6,7 @@
 
 Deploy a real CDK stack and run integration tests against it entirely on your laptop (or in CI), using [MiniStack](https://github.com/ministackorg/ministack) as a local AWS emulator.
 
-[![CI](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/aws-integration-tests.yml/badge.svg)](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/aws-integration-tests.yml)
+[![CI](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/ci.yml/badge.svg)](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/ci.yml)
 [![Security](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/security.yml/badge.svg)](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/security.yml)
 ![AWS CDK](https://img.shields.io/badge/AWS_CDK-2.260-FF9900?logo=amazonaws&logoColor=white)
 ![Node](https://img.shields.io/badge/node-24-339933?logo=node.js&logoColor=white)

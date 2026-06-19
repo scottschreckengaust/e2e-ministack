@@ -44,7 +44,7 @@ JEST_TIER=integration npx jest -t "invokes the deployed Lambda"
 npm run test:unit -- -u
 ```
 
-CI runs this same sequence — see `.github/workflows/aws-integration-tests.yml`.
+CI runs this same sequence — see `.github/workflows/ci.yml`.
 
 ## Architecture / layout
 
@@ -74,7 +74,7 @@ These were established by running the stack, not from docs alone — don't "simp
 
 ## Security checks
 
-Two workflows. `aws-integration-tests.yml` lints, runs the cdk-nag synth gate, then deploys/tests. `security.yml` runs the scanners (also on a weekly cron).
+Two workflows. `ci.yml` (jobs: changes → unit → integration) lints, runs unit tests + the cdk-nag synth gate, then deploys/tests against MiniStack. `security.yml` runs the scanners (also on a weekly cron).
 
 - **cdk-nag (AwsSolutions)** — runs *inside* `cdk synth` (wired in `bin/app.ts` via `Validations.of(app).addPlugins(...)`, the v3 API — NOT the v2 `Aspects` API). Any unsuppressed finding fails synth. The stack is hardened to pass cleanly. Suppressions use CDK-native `Validations.of(construct).acknowledge({ id, reason })` — but note cdk-nag v3 **removed `NagSuppressions`**, and granular rule IDs containing `::` (e.g. `IAM5[Resource::arn:<AWS::Partition>:...]`) **cannot be acknowledged** (CDK reserves `::`), so such findings must be fixed structurally, not suppressed.
 - **ESLint** (`npm run lint`) — flat config, typescript-eslint.
