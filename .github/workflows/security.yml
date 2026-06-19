@@ -1,0 +1,131 @@
+name: Security
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Weekly run so newly-disclosed CVEs are caught even without a push.
+    - cron: "0 6 * * 1"
+
+# Least privilege by default; jobs opt into more where needed.
+permissions:
+  contents: read
+
+jobs:
+  # ── Static analysis of the TypeScript / CDK source ──────────────────────
+  codeql:
+    name: CodeQL (JS/TS)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Run Semgrep
+        # --error makes findings fail the job.
+        run: |
+          pipx install semgrep || pip install semgrep
+          semgrep scan --config=auto --error --exclude=node_modules --exclude=cdk.out
+
+  # ── Dependency / supply-chain vulnerabilities ───────────────────────────
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npm audit --audit-level=high
+
+  osv-scanner:
+    name: OSV Scanner
+    # Reusable workflow published by the OSV project (handles its own checkout).
+    permissions:
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+    with:
+      scan-args: |-
+        --lockfile=./package-lock.json
+
+  grype:
+    name: Grype FS scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          path: "."
+          fail-build: true
+          severity-cutoff: high
+
+  # ── Secrets ─────────────────────────────────────────────────────────────
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0 # full history so all commits are scanned
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Infrastructure-as-code (synthesized CloudFormation) ─────────────────
+  iac:
+    name: IaC scan (cfn-lint + checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+      - run: npm ci
+      - name: Synthesize CloudFormation
+        run: npm run synth
+      - name: Install scanners
+        run: pipx install cfn-lint checkov || pip install cfn-lint checkov
+      - name: cfn-lint
+        # Fail on errors only — the two W warnings (legacy AccessControl prop,
+        # used by CDK's own access logging; and a redundant dependency hint)
+        # are expected and not actionable.
+        run: cfn-lint cdk.out/*.template.json --non-zero-exit-code error
+      - name: checkov
+        # Hard-fail on any check; CKV_AWS_117 is skipped via resource metadata.
+        run: checkov -d cdk.out --framework cloudformation --compact
+
+  # ── GitHub Actions workflow hardening ───────────────────────────────────
+  zizmor:
+    name: Zizmor (Actions audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d # v0.5.6

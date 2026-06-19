@@ -63,6 +63,17 @@ These were established by running the stack, not from docs alone — don't "simp
 - `aws-cdk-lib` is pinned to **2.260.0**. Note `lambda.Runtime.NODEJS_24_X` requires >= 2.230.0 (2.220.0 and earlier lack it), so don't downgrade below that.
 - `aws-cdk` (CLI) is **2.1128.0**. Post-2.179 the CLI versions diverged from the library (CLI is numbered `2.10xx.x`/`2.11xx.x`), so they are pinned independently and are not expected to match.
 
+## Security checks
+
+Two workflows. `aws-integration-tests.yml` lints, runs the cdk-nag synth gate, then deploys/tests. `security.yml` runs the scanners (also on a weekly cron).
+
+- **cdk-nag (AwsSolutions)** — runs *inside* `cdk synth` (wired in `bin/app.ts` via `Validations.of(app).addPlugins(...)`, the v3 API — NOT the v2 `Aspects` API). Any unsuppressed finding fails synth. The stack is hardened to pass cleanly. Suppressions use CDK-native `Validations.of(construct).acknowledge({ id, reason })` — but note cdk-nag v3 **removed `NagSuppressions`**, and granular rule IDs containing `::` (e.g. `IAM5[Resource::arn:<AWS::Partition>:...]`) **cannot be acknowledged** (CDK reserves `::`), so such findings must be fixed structurally, not suppressed.
+- **ESLint** (`npm run lint`) — flat config, typescript-eslint.
+- **checkov + cfn-lint** — scan synthesized `cdk.out` templates. checkov hard-fails (43 pass / 0 fail / 1 skip). `CKV_AWS_117` (Lambda-in-VPC) is skipped via CloudFormation `Metadata` (`checkov: { skip: [...] }`) injected with `cfnFn.addMetadata(...)` — the only way to suppress on CDK-generated templates. cfn-lint's two `W` warnings (`AccessControl` legacy prop, redundant dependency) are expected and not failed on.
+- **Dependency/supply-chain** — `npm audit --audit-level=high`, OSV-Scanner (lockfile), Grype (filesystem).
+- **SAST/secrets** — Semgrep (`--config=auto --error`), Gitleaks (full history), CodeQL (JS/TS).
+- **zizmor** — audits the workflow files themselves. To keep it clean: pin every action to a **commit SHA** (not a tag), set top-level `permissions: contents: read`, and `persist-credentials: false` on every checkout.
+
 ## Dependency notes
 
 - `package.json` has an `overrides` forcing **`js-yaml ^4.2.0`**. The Jest/Istanbul coverage toolchain pulls `js-yaml@^3` transitively, which carries a moderate DoS (GHSA-h67p-54hq-rp68). v4 is safe here because the only consumer (`@istanbuljs/load-nyc-config`) calls `js-yaml.load()`, which still exists in v4 (only `safeLoad` was removed). `npm audit` should report 0 vulnerabilities — don't accept `npm audit fix`'s suggestion to downgrade `ts-jest`.

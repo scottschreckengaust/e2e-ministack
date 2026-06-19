@@ -7,6 +7,7 @@
 Deploy a real CDK stack and run integration tests against it entirely on your laptop (or in CI), using [MiniStack](https://github.com/ministackorg/ministack) as a local AWS emulator.
 
 [![CI](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/aws-integration-tests.yml/badge.svg)](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/aws-integration-tests.yml)
+[![Security](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/security.yml/badge.svg)](https://github.com/scottschreckengaust/e2e-ministack/actions/workflows/security.yml)
 ![AWS CDK](https://img.shields.io/badge/AWS_CDK-2.260-FF9900?logo=amazonaws&logoColor=white)
 ![Node](https://img.shields.io/badge/node-24-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript&logoColor=white)
@@ -107,6 +108,22 @@ These were learned by running it, not from docs — the defaults bite in non-obv
 | 🌐 `--network host` is required | Makes MiniStack's loopback the host so sibling RDS/Lambda ports resolve (Linux-only; fine on `ubuntu-latest`). |
 | 🔑 Set **both** `AWS_ENDPOINT_URL` *and* `AWS_ENDPOINT_URL_S3` | Bare `cdk` (CLI ≥ 2.1000) needs the S3-specific var; S3 virtual-host addressing can't be inferred. No `cdklocal` wrapper needed. |
 | 🪣 Avoid `autoDeleteObjects: true` | Its custom-resource Lambda stalls the deploy against the emulator. Use `cdk destroy` / reset. |
+
+## 🔒 Security checks
+
+A defense-in-depth set of gates runs in CI (see [`security.yml`](.github/workflows/security.yml)); most also run locally.
+
+| Layer | Tool | Scope |
+| --- | --- | --- |
+| CDK best practices | **cdk-nag** (AwsSolutions) | Fails `cdk synth` on violations — wired into the build |
+| Lint | **ESLint** + typescript-eslint | TypeScript construct code |
+| IaC | **checkov** + **cfn-lint** | Synthesized CloudFormation (`cdk.out`) |
+| Dependencies | **npm audit**, **OSV-Scanner**, **Grype** | Lockfile + filesystem CVEs |
+| SAST | **Semgrep**, **CodeQL** | JS/TS source |
+| Secrets | **Gitleaks** | Full git history |
+| Actions hardening | **zizmor** | The workflow files themselves |
+
+The stack is hardened to pass cdk-nag and checkov cleanly (TLS, encryption, least-privilege IAM, DLQ, KMS-encrypted logs). All GitHub Actions are pinned to commit SHAs with least-privilege `permissions`.
 
 ## 📚 References
 
