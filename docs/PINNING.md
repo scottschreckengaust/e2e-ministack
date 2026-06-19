@@ -11,6 +11,7 @@ supply-chain safety. This file is the authoritative inventory.
 | npm dependencies (transitive) | `package-lock.json` + `npm ci`       | exact, lockfile-resolved                 |
 | `aws-cdk`, `aws-cdk-lib`      | `package.json`                       | exact (`2.1128.0`, `2.260.0`)            |
 | Node.js                       | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                  |
+| npm (via Corepack)            | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                    |
 | MiniStack image               | `ci.yml`                             | digest (`@sha256:c5ce466…`)              |
 | CodeQL analyzer bundle        | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                  |
 | Semgrep                       | `security.yml`                       | `==1.167.0`                              |
@@ -28,7 +29,11 @@ supply-chain safety. This file is the authoritative inventory.
 - **npm `^`/`~` ranges in `package.json`** — these are resolution _floors_
   only. `npm ci` installs exactly what `package-lock.json` says, so the actual
   install is pinned. The ranges document intended compatibility; the lockfile
-  is the source of truth. (Run `npm ci`, never `npm install`, in CI.)
+  is the source of truth. (Run `npm ci`, never `npm install`, in CI.) Note this
+  is about the dependency _ranges_, not npm itself — the npm **tool** is now
+  pinned via `packageManager` (Corepack) + an `engines.node` guardrail (see the
+  Pinned table). Activating it in CI (`corepack enable` in the setup-node steps)
+  is a recommended follow-up.
 - **`uv` / `uvx` / `pipx` / `pip` runners themselves** — provided by the local
   environment / GitHub runner image. Their _outputs_ are pinned (the package
   versions above); the launchers are not. Pin via a `setup-uv`/`setup-python`
