@@ -107,7 +107,7 @@ exports[`MiniStackStack — snapshot matches the synthesized CloudFormation snap
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-000000000000-us-east-1",
-          "S3Key": "b6d1e4792d49781e1f8afc25e1bab445ce42d8af9b6049f1569f91a5680a6bf2.zip",
+          "S3Key": "ccbd738dbdac9d2adef815c28d9b8cb9e8af76dc17e324689fc7deac412a0afa.zip",
         },
         "DeadLetterConfig": {
           "TargetArn": {

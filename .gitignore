@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Claude Code isolated worktrees (created by EnterWorktree; never committed)
+.claude/worktrees/
+
 # CDK
 cdk.out/
 # Compiled TS output (sources are .ts; emit is transient). Scoped to the
