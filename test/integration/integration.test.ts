@@ -28,11 +28,36 @@ describe('MiniStack CDK integration', () => {
         Payload: Buffer.from(JSON.stringify({ n: 21 })),
       }),
     );
+    // Fail fast on an unhandled Lambda error: with the default RequestResponse
+    // invocation type an UNHANDLED throw still returns HTTP 200 at the SDK
+    // layer with FunctionError:'Unhandled' and an error-envelope payload
+    // ({errorType,errorMessage,trace}) that has no `statusCode`. Asserting
+    // these first surfaces the real stack trace instead of an opaque
+    // "payload.statusCode is undefined" failure further down.
+    expect(res.FunctionError).toBeUndefined();
+    expect(res.StatusCode).toBe(200);
     const payload = JSON.parse(Buffer.from(res.Payload!).toString());
     expect(payload.statusCode).toBe(200);
     expect(payload.doubled).toBe(42);
     // Confirm the function actually ran on the Node 24 runtime.
     expect(payload.nodeVersion).toMatch(/^v24\./);
+  });
+
+  it('returns a handled 400 for non-numeric input (no FunctionError)', async () => {
+    // The handler validates input shape and *returns* a 400 envelope for a
+    // non-finite `n` (e.g. Number('abc') -> NaN); it does not throw. So the
+    // SDK call succeeds (StatusCode 200, FunctionError undefined) and the
+    // 400 lives in the parsed payload, not the HTTP/invoke layer.
+    const res = await lambda.send(
+      new InvokeCommand({
+        FunctionName: 'cdk-doubler',
+        Payload: Buffer.from(JSON.stringify({ n: 'abc' })),
+      }),
+    );
+    expect(res.FunctionError).toBeUndefined();
+    expect(res.StatusCode).toBe(200);
+    const payload = JSON.parse(Buffer.from(res.Payload!).toString());
+    expect(payload.statusCode).toBe(400);
   });
 
   it('round-trips an object through the deployed S3 bucket', async () => {
