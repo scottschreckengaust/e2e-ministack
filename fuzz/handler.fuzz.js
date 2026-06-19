@@ -42,7 +42,22 @@ module.exports.fuzz = async (data) => {
   if (res.statusCode !== 200 && res.statusCode !== 400) {
     throw new Error(`unexpected statusCode: ${res.statusCode}`);
   }
-  if (res.statusCode === 200 && !Number.isFinite(res.doubled)) {
-    throw new Error(`200 with non-finite doubled: ${res.doubled}`);
+  // nodeVersion is an always-present invariant on EVERY branch (index.d.ts
+  // declares `nodeVersion: string`); verify it regardless of status.
+  if (typeof res.nodeVersion !== 'string' || res.nodeVersion === '') {
+    throw new Error(`missing/empty nodeVersion: ${res.nodeVersion}`);
+  }
+  if (res.statusCode === 200) {
+    if (!Number.isFinite(res.doubled)) {
+      throw new Error(`200 with non-finite doubled: ${res.doubled}`);
+    }
+  } else {
+    // 400-branch body shape: a non-empty error string and no `doubled`.
+    if (typeof res.error !== 'string' || res.error === '') {
+      throw new Error(`400 with missing/empty error: ${res.error}`);
+    }
+    if (res.doubled !== undefined) {
+      throw new Error(`400 must not carry doubled: ${res.doubled}`);
+    }
   }
 };
