@@ -90,7 +90,9 @@ run` plus the relevant `package.json`/CI scripts — don't hard-code a list (it 
    **Never regress a gate below its current high-water mark** (e.g. the mutation tier is at
    **100%** today — keep it there, even though CI's floor is lower). If the synthesized template
    changed: update the snapshot (`-u`) **deliberately** and inspect the diff. (Details: worker prompt.)
-5. **Commit** (`Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`) + push `-u`.
+5. **Commit** (append the co-author trailer you inject as `{{COAUTHOR_TRAILER}}` — e.g.
+   `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`; set it once here so the model name
+   never rots in two files) + push.
 6. **Draft PR** (`gh pr create --draft`) with: Summary (`closes #N`), reproduced root cause +
    evidence, the fix + why it's best-practice, Testing (commands + results), Dependencies/related
    (cross-link issues/PRs touching the same area). Worker then STOPS and reports.

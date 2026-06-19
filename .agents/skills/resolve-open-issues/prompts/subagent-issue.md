@@ -36,7 +36,7 @@ LABELS: {{LABELS}}. Cluster: {{CLUSTER}}.
 ROOT CAUSE (triaged — CONFIRM empirically by reading the cited code, don't take it on faith):
 {{ROOT_CAUSE_WITH_FILE_LINES}}
 
-## The fix (keep scope tight to this issue)
+## The fix (keep scope tight to {{ISSUES}})
 
 {{REQUIRED_FIX_STEPS}}
 
@@ -108,8 +108,11 @@ Stage only your scoped files. Commit (conventional + trailer EXACTLY):
 Closes #{{N}}   ← one line PER fully-resolved issue (`Closes #11`, `Closes #20`); use
                   `Relates to #X` instead for an issue only partially addressed (stays open)
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+{{COAUTHOR_TRAILER}}
 ```
+
+(`{{COAUTHOR_TRAILER}}` is injected by the orchestrator — a single source so the model name
+can't rot in two files; e.g. `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.)
 
 `git push`
 
@@ -149,9 +152,10 @@ you cover** so the supervisor never mistakes a finished/crashed worker for an ac
 
 ## DO NOT
 
-No `gh pr ready`. No CI poll-loop — at most ONE quick post-push `gh pr checks` glance to catch an
-instant lint/unit break, then STOP (do not wait for the full run). No manually closing the issue
-(let `Closes #{{N}}` + merge do it). No editing out-of-scope files. No removing the worktree.
+No `gh pr ready`. No CI polling at all — you've signed out; the orchestrator owns CI and will
+wake you if a check goes red (§ resume). No manually closing the issue (let the `Closes #X` lines
+
+- merge do it). No editing out-of-scope files. No removing the worktree.
 
 ## Report back (your final message = structured data for the orchestrator, EXACTLY)
 

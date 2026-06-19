@@ -121,8 +121,10 @@ where folding and cluster assignment are decided, before any dispatch:
    reasonably take them in a single scope — e.g. the same mechanical change across several files,
    or a fix plus its directly-entailed test/doc update. Folding is encouraged here, not avoided:
    it cuts review and rebase overhead when the shared concern is obvious. When unsure whether a
-   reviewer would want them together, keep them separate. Record each fold (which issues → which
-   worker) and annotate every folded issue.
+   reviewer would want them together, keep them separate. **Never fold across clusters** — every
+   issue in a fold must share the same cluster, so the resulting PR has exactly one cluster tag
+   and §6's one-ready-per-cluster serialization stays well-defined. Record each fold (which
+   issues → which worker) and annotate every folded issue.
 4. Write the resulting **ordered backlog + cluster map + fold decisions** to the ledger (§8) so a
    crash can rebuild them. This map is what the loop's "cluster-priority order" (steps 4, 7)
    refers to.
@@ -133,7 +135,7 @@ where folding and cluster assignment are decided, before any dispatch:
    (cheap, idempotent — survives crashes). Stamp `now=$(date +%s)`.
 2. **Collect worker reports** — for any finished background worker, record
    PR#/branch/worktree/gates/`draft_at`; mark DRAFT (or BLOCKED if it escalated).
-3. **Poll CI** — for each DRAFT/READY PR: `gh pr checks <url>`. On all-green that wasn't
+3. **Poll CI** — for each DRAFT/READY PR: `gh pr checks <pr>`. On all-green that wasn't
    green before, stamp `ci_green_at`. On red: dispatch a fix (warm-resume the worker, or a
    fresh worker) scoped to the failure; do NOT promote.
 4. **Promote** (draft→ready) — for each green DRAFT, **in cluster-priority order**, if
@@ -160,7 +162,7 @@ A PR is **never** promoted on elapsed time — only on **all-green CI** while a 
 free. Background subagents **cannot self-schedule** a wakeup, so `ScheduleWakeup` is the
 orchestrator's job: **orchestrator schedules the re-check; subagent performs any fix.**
 
-Each loop, for every DRAFT/READY PR, read `gh pr checks <url>` (or `statusCheckRollup`) and
+Each loop, for every DRAFT/READY PR, read `gh pr checks <pr>` (or `statusCheckRollup`) and
 classify:
 
 - **all-green** (0 failed, 0 pending; `skipping` is fine — e.g. fuzz is skipped on PRs) → stamp
@@ -174,16 +176,21 @@ classify:
 **Waking the subagent on red** — _warm resume_ if its `agentId` is still live & recent (ledger):
 `SendMessage` the failing check + log tail and "fix on your existing branch/worktree, push, then
 report" (keeps its context). _Cold resume_ after a crash (agentId lost): dispatch a **fresh**
-worker with the per-issue prompt + "branch/worktree/PR `<exact branch from the ledger>` already
-exist — resume there, do not recreate" (the branch is named for the worker's primary issue; pass
-the real name, not a guessed `fix/issue-N` pattern) + the failing-check detail; the public PR
-thread + ledger are what make
-this possible. After the fix pushes, the token stays DRAFT and re-enters this loop until green.
-Bound retries (~3) — past that, escalate (§7) rather than loop forever.
+worker with the per-issue prompt + "branch/worktree/PR `<exact branch>` already exist — resume
+there, do not recreate" + the failing-check detail. **Get the exact branch from the public
+artifacts, not a guess:** the PR's head branch (`gh pr view <PR> --json headRefName`) or, if no
+PR yet, the worker's claim comment (which records the branch) or `gh pr list`/`git ls-remote
+--heads origin 'fix/issue-*'`. The branch is named for the worker's primary (lowest) issue and
+its slug is free-text, so never reconstruct it from an `fix/issue-N` pattern — read it. This is
+why the claim comment + PR are the source of truth: cold resume works even if the ledger is lost.
+After the fix pushes, the token stays DRAFT and re-enters this loop until green. Bound retries
+(~3) — past that, escalate (§7) rather than loop forever.
 
-A worker **does not poll its own CI** (it would busy-wait ~15–30 min, burning its context for no
-work) — the orchestrator's single timer covers _all_ open PRs at once. (Optional: a worker MAY do
-**one** quick post-push check to catch an instant lint/unit break, then stop — never loop.)
+A worker **does not poll its own CI** at all (it would busy-wait ~15–30 min, burning its context
+for no work, and it has already signed out as its final act) — the orchestrator's single timer
+covers _all_ open PRs at once and wakes the worker if a check goes red. Its local gates already
+caught instant lint/unit breaks before the push, so a post-push self-check would only duplicate
+the orchestrator's first poll one cycle later.
 
 ---
 
@@ -432,9 +439,10 @@ choice, conflicting acceptance criteria, a missing decision, an unexpected block
   - **Warm resume** (preferred if the worker's agentId is still live & recent): SendMessage to
     that agentId with the answer + "continue to draft from your existing branch/PR."
   - **Cold resume** (after a crash/long gap): dispatch a _fresh_ worker with the original
-    per-issue prompt **plus** the Q&A and "your branch/worktree/PR `<exact branch from the
-ledger>` already exist — resume from there, do not recreate." Cold resume is why the public
-    thread is the source of truth: it survives losing the agentId.
+    per-issue prompt **plus** the Q&A and "your branch/worktree/PR `<exact branch>` already
+    exist — resume from there, do not recreate." Read the exact branch from the PR
+    (`gh pr view --json headRefName`) or the claim comment — never guess a `fix/issue-N` pattern.
+    Cold resume is why the public thread is the source of truth: it survives losing the agentId.
 - The resumed worker incorporates the answer, finishes to draft, reports; the token re-enters
   the pipeline at DRAFT. Unpark.
 
@@ -494,6 +502,14 @@ Keep those two; don't add a third hand-closing comment when auto-close is wired.
   BLOCKED. **DONE-NO-CLOSE** is not auto-redispatchable — it's a _human/orchestrator decision_
   (close as resolved-elsewhere, relabel, or re-scope into a fresh dispatch); the worker that
   signed out is done either way and its slot is freed.
+- **⚠️ Cold-resume hazard — "claim, no sign-out" is ambiguous between crashed and
+  currently-running.** On a fresh/cold-resumed orchestrator the agentId liveness map is gone, so
+  every in-progress worker also looks "not live." Do **not** treat that as crashed and
+  redispatch immediately — that double-dispatches live workers. Instead **probe the public
+  artifacts first**: if a branch exists (`git ls-remote --heads origin 'fix/issue-N-*'`) or a
+  draft PR exists, assume work is in flight — adopt it (cold-resume that worker, §4a) rather than
+  start a new one. Only treat it as crashed/redispatchable when **no branch and no PR** exist
+  after a grace re-poll (one CI_POLL cycle). When in doubt, re-poll before redispatching.
 
 ---
 
