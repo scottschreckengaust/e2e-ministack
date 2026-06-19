@@ -2,10 +2,28 @@
 [extend]
 useDefault = true
 
-[allowlist]
-description = "CDK synth artifacts contain high-entropy asset hashes that are not secrets"
-# CloudFormation snapshot: S3Key/asset digests are deterministic content
-# hashes, not credentials. Scope the allowlist to the snapshot file only.
-paths = [
-  '''test/unit/__snapshots__/.*\.snap''',
+# CDK synth artifacts embed deterministic content-hash digests (64 lowercase
+# hex chars) in S3 asset keys and the bootstrap asset-bucket name. gitleaks'
+# generic-api-key rule flags them as high-entropy "secrets" even though they
+# are not credentials.
+#
+# Scope the allowlist to the asset-hash *pattern itself* (issue #30), NOT to
+# the snapshot file as a whole. A path-only allowlist (`paths = [...]`) would
+# suppress EVERY rule for the entire file, so a genuine secret later inlined
+# into the snapshot (e.g. Lambda inline code or an env var) would go unseen.
+# By allowlisting only secrets whose value matches the asset-hash regexes, any
+# other leaked credential in the snapshot is still detected.
+#
+# NOTE: `paths` and `regexes` inside one allowlist combine with OR (a path
+# match alone allowlists the finding), which would reintroduce the blanket
+# suppression. So the path is intentionally omitted and the regexes alone gate
+# the allowlist; the anchored patterns below cannot match a real secret.
+[[allowlists]]
+description = "CDK deterministic asset hashes (S3 asset keys + bootstrap bucket) are not secrets"
+regexTarget = "secret"
+regexes = [
+  # CDK asset object key: 64-hex content digest with an artifact extension.
+  '''^[a-f0-9]{64}\.(?:zip|json)$''',
+  # CDK bootstrap asset bucket name: cdk-<qualifier hex>-assets-<account>-<region>.
+  '''^cdk-[a-f0-9]{8,}-assets-[0-9]{12}-[a-z0-9-]+$''',
 ]
