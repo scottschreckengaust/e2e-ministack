@@ -60,6 +60,18 @@ export class MiniStackStack extends cdk.Stack {
       enableKeyRotation: true,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
+    // Confused-deputy guard: scope the grant to the single Lambda log group via
+    // an ArnLike condition on the kms:EncryptionContext:aws:logs:arn key. CloudWatch
+    // Logs passes the target log-group ARN as encryption context, so this restricts
+    // the service principal to using the key only on this account/region's
+    // /aws/lambda/cdk-doubler log group (AWS's documented CMK-for-single-log-group
+    // pattern), instead of an unconditional Resource:'*' grant.
+    const logGroupArn = cdk.Stack.of(this).formatArn({
+      service: 'logs',
+      resource: 'log-group',
+      resourceName: `/aws/lambda/${functionName}`,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    });
     logKey.addToResourcePolicy(
       new iam.PolicyStatement({
         principals: [
@@ -73,6 +85,11 @@ export class MiniStackStack extends cdk.Stack {
           'kms:Describe*',
         ],
         resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': logGroupArn,
+          },
+        },
       }),
     );
 
