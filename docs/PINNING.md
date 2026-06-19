@@ -21,6 +21,7 @@ supply-chain safety. This file is the authoritative inventory.
 | threat-composer-ai (uvx)      | `.mcp.json`                          | git commit SHA                           |
 | Prettier, markdownlint-cli2   | `package.json` + lockfile            | exact, lockfile-resolved                 |
 | Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                 |
+| fast-check, jazzer.js (fuzz)  | `package.json` + lockfile            | exact, lockfile-resolved                 |
 
 ## Intentionally NOT pinned (with reasons)
 

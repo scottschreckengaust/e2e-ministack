@@ -22,6 +22,11 @@ test/**/*.d.ts
 .stryker-tmp/
 reports/
 
+# jazzer.js fuzzing: corpus is cached in CI (not committed); crash inputs are
+# generated artifacts.
+.fuzz-corpus/
+crash-*
+
 # Logs / OS
 *.log
 .DS_Store

@@ -87,6 +87,7 @@ PASS test/integration/integration.test.ts
 | `npm run test:integration` | Jest + AWS SDK against deployed MiniStack resources        |
 | `npm run test:e2e`         | Placeholder for a real-account stage (skipped)             |
 | `npm run test:mutation`    | Stryker mutation testing of the Lambda logic (gate: >=80%) |
+| `npm run fuzz`             | jazzer.js coverage-guided fuzzing (see `fuzz/README.md`)   |
 | `npm run destroy`          | `cdk destroy --force`                                      |
 
 Reset MiniStack state between runs (cheaper than restarting): `curl -X POST http://localhost:4566/_ministack/reset`

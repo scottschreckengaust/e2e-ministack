@@ -33,6 +33,7 @@ npm test               # alias for test:unit
 npm run test:integration  # jest AWS-SDK tests against deployed MiniStack resources
 npm run test:e2e       # placeholder for a real-account stage (currently skipped)
 npm run test:mutation  # Stryker mutation testing of the Lambda logic (gate: >=80%)
+npm run fuzz           # jazzer.js coverage-guided fuzzing (needs GLIBC >= 2.38)
 npm run destroy        # cdk destroy --force
 
 # Reset MiniStack state between runs (faster than restarting the container):
@@ -57,6 +58,7 @@ CI runs this same sequence — see `.github/workflows/ci.yml`.
   - `test/integration/` — Jest + AWS SDK v3 clients pointed at `AWS_ENDPOINT_URL`, against deployed MiniStack resources. Assumes `cdk deploy` already ran.
   - `test/e2e/` — placeholder (`describe.skip`) for a future real-account deployment stage.
 - **Mutation testing** — `npm run test:mutation` (Stryker) mutates `lambda/index.js` against the unit tier; CI gate breaks under 80% (currently 100%). Scoped to the Lambda logic only — the CDK stack is declarative config Stryker can't tie to synth output (mutants show as "no coverage"), so it's covered by cdk-nag/checkov/assertions/snapshot instead. `incremental: true` caches per-mutant verdicts; CI restores/saves that cache via `actions/cache`.
+- **Fuzzing** — `fuzz/handler.fuzz.js` is a jazzer.js (libFuzzer) target asserting the handler never throws and never returns a non-finite `doubled`. fast-check property tests live in the unit tier (always-on gate); jazzer is a separate, time-boxed `fuzz` job that runs on schedule/`workflow_dispatch` only (fuzzing is exploratory, not a fast gate) and needs **GLIBC >= 2.38** (fine on `ubuntu-latest`; won't run on older hosts). The corpus is cached across runs; crash inputs upload as an artifact.
 
 ## Why these flags / non-obvious constraints
 
