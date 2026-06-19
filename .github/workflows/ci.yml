@@ -12,12 +12,20 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs for the same ref. Rapid PR pushes otherwise launch
+# multiple full copies of the integration job, each mounting the host Docker
+# socket and spawning sibling containers — wasteful and contention-prone.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Decide which jobs are relevant for this event. On schedule, everything
   # runs; on push/PR, jobs gate on whether matching paths changed.
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -57,6 +65,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -64,6 +73,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '24.17.0'
+          cache: 'npm'
       - run: npm ci
       - name: Lint (eslint)
         run: npm run lint
@@ -100,6 +110,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -107,6 +118,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '24.17.0'
+          cache: 'npm'
       - run: npm ci
       # Restore Stryker's incremental result cache so only mutants in changed
       # files are re-tested. The key uses github.run_id (unique every run) so
@@ -140,6 +152,8 @@ jobs:
     name: Fuzzing (jazzer.js)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Headroom over the 120s (-max_total_time) fuzz run plus install/build.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -147,6 +161,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '24.17.0'
+          cache: 'npm'
       - run: npm ci
       # Persist the fuzzing corpus across runs so discovered inputs accumulate
       # and later runs start from prior coverage (rolling key, like mutation).
@@ -185,6 +200,10 @@ jobs:
     # head-repo comparison for trusted-vs-fork.)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    # MiniStack deploy + integration is the long pole (container pull, health
+    # wait, bootstrap, deploy, tests); 30m gives headroom without burning the
+    # 6h default if MiniStack/Lambda hangs.
+    timeout-minutes: 30
 
     # NOTE: MiniStack is NOT run as a `services:` container.
     # Lambda / ECS / RDS / ElastiCache work by having MiniStack spawn *sibling*
@@ -202,6 +221,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '24.17.0'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci

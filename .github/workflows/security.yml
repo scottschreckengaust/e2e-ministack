@@ -12,11 +12,18 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs for the same ref so rapid pushes don't pile up
+# duplicate scanner runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ── Static analysis of the TypeScript / CDK source ──────────────────────
   codeql:
     name: CodeQL (JS/TS)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       security-events: write # upload SARIF to code scanning
@@ -36,6 +43,7 @@ jobs:
   semgrep:
     name: Semgrep SAST
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -75,6 +83,7 @@ jobs:
   npm-audit:
     name: npm audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -82,6 +91,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '24.17.0'
+          cache: 'npm'
       - run: npm ci
       - name: npm audit (JSON report; enforce after upload)
         run: |
@@ -105,6 +115,7 @@ jobs:
   osv-scanner:
     name: OSV Scanner
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -148,6 +159,7 @@ jobs:
   grype:
     name: Grype FS scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -182,6 +194,7 @@ jobs:
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -218,6 +231,7 @@ jobs:
   iac:
     name: IaC scan (cfn-lint + checkov)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -228,6 +242,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '24.17.0'
+          cache: 'npm'
       - run: npm ci
       - name: Synthesize CloudFormation
         run: npm run synth
@@ -278,6 +293,7 @@ jobs:
   threat-model:
     name: Threat model
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -285,6 +301,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '24.17.0'
+          cache: 'npm'
       # threat-composer is a design-time authoring tool (no CI generator that
       # works without a real Bedrock account), so the gate is simply: the
       # committed model parses and carries the expected sections. Edit it in
@@ -306,6 +323,7 @@ jobs:
   actionlint:
     name: Actionlint (workflow correctness)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -320,6 +338,7 @@ jobs:
   zizmor:
     name: Zizmor (Actions audit)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
