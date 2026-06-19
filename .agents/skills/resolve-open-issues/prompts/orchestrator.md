@@ -21,7 +21,10 @@ sets the goal + config; the SKILL says how to run the loop.
   `node --version` matches the repo's pin (`mise.toml`). Do this in every shell.
 - Canonical repo root = the main checkout (worktrees are created under `<root>/.claude/worktrees/`).
 - Confirm identity: `gh api user --jq .login`. Issue claims + PRs authored under it. Each
-  worker's public traceable identity is `claude-agent:issue-N`.
+  worker's public traceable identity is `@<gh-login> (agent:wK)` — `wK` is a sequential handle
+  YOU assign at dispatch (`w1`, `w2`, …), not an issue number, since one worker may cover
+  several folded issues. The greppable resume token is `agent:wK`. The worker names the
+  issue(s) it covers in its claim.
 
 ## Launch parameter: `--max-in-flight N` (injected; the open-PR ceiling)
 
@@ -38,11 +41,12 @@ sets the goal + config; the SKILL says how to run the loop.
   `max_ready` starts at 1 and may grow (cap ~3) only when merges are smooth and clusters
   disjoint (SKILL §5a). Log every change (`knob: old→new` + trigger) in the ledger.
 
-## Pilot mode (default for a fresh session)
+## Pilot mode (optional on-ramp; default for a fresh repo)
 
-Run PILOT MODE: take the first `N` issues (default **3**) fully end-to-end
-(BACKLOG→…→MERGED) under the merge-train, then continue the steady-state loop. Set `N=1` for a
-single-issue dry run. (SKILL §5b.)
+**Steady-state** = the §4 loop with the adaptive ratchet live. **Pilot mode** only differs by
+**holding the ratchet flat** until the first PR goes fully BACKLOG→MERGED — so repo/CI surprises
+surface at low width. Once one PR merges clean, release the ratchet → steady-state. Skip pilot
+mode on a repo you've run before; set `N=1` for a strict single-issue dry run. (SKILL §5b.)
 
 ## Authoritative config
 
@@ -59,20 +63,24 @@ single-issue dry run. (SKILL §5b.)
 - **Conflict policy:** parallel-with-rebase-at-merge; **serialize the _ready_ state within hot
   clusters** (workflows; stack+snapshot) so only one of each is ready at a time. On each merge,
   rebase the next same-cluster PR onto main, re-green, then promote.
-- **Folding:** combine tightly-coupled issues into one PR only when the review is simple/obvious
-  (annotate every folded issue + note it for the supervisor). Else one-PR-per-issue.
+- **Folding (decided in Phase 0 triage, SKILL §4):** combine tightly-coupled issues into one
+  worker/PR when they share a concern and a reviewer can take them in one scope — encouraged, it
+  cuts review/rebase overhead. Annotate every folded issue + note it for the supervisor. Else
+  one-PR-per-issue.
 - **Sequencing for the human:** on each promotion post a "🔀 Merge guidance (for the reviewer)"
   comment **on the PR** (independent vs must-follow-#X, cluster, merge order), mirrored to the
   issue. Merge order is driven by clusters, NOT PR-number recency — say so.
 - **Stuck protocol:** a blocked worker posts numbered questions on the issue+PR under
-  `claude-agent:issue-N` and stops; a human answers by addressing that identity; the orchestrator
-  detects the reply and warm/cold-resumes (SKILL §7).
-- **Durability:** maintain the crash-recoverable ledger (here `.remember/remember.md`) every loop
-  with per-issue epoch stamps + states + worker agentIds. Refine the SKILL during the run.
+  `@<login> (agent:wK)` and stops; a human answers by addressing the `agent:wK` token; the
+  orchestrator detects the reply and warm/cold-resumes (SKILL §7).
+- **Durability:** maintain the crash-recoverable ledger every loop (any durable file outside a
+  worktree — a session-memory file if present, else a gitignored `.resolve-open-issues-ledger.md`
+  at the repo root; SKILL §8). It's a cache — the public issue/PR threads are the real source of
+  truth. Record per-worker epoch stamps + states + worker `wK`/agentIds. Refine the SKILL during the run.
 
 ## Per-issue workflow (delegated to each worker; you supervise)
 
-0. **Claim** — worker comments `@<login> working on it (claude-agent:issue-N) — branch fix/issue-N-<slug>`.
+0. **Claim** — worker comments on each issue it covers: `@<login> (agent:wK) working on it — issues #N[, #M …] — branch fix/issue-N-<slug>` (branch named for the primary/lowest issue).
 1. **Root cause first** — reproduce empirically (run code, don't theorize). Search adjacent open
    issues; fold or annotate shared-file/shared-cause dependencies.
 2. **Isolate** — `git worktree add -b fix/issue-N-<slug> .claude/worktrees/fix-issue-N-<slug> origin/main`; `npm ci`; push the branch to signal state.
@@ -88,10 +96,13 @@ single-issue dry run. (SKILL §5b.)
 
 ## Orchestrator loop (you; every wakeup) — see SKILL §4
 
+**First, once:** run **Phase 0 triage** (SKILL §4) — list issues, assign clusters by shared
+files, decide folds, write the ordered backlog + cluster map to the ledger. Then each wakeup:
+
 Reconcile (gh pr list + ledger) → collect worker reports → poll `gh pr checks` → promote
 green drafts (slot+cluster gated) with merge-guidance annotation → on merge close the issue with
 an acceptance-point summary + run rebase/refill cascade → handle escalations → refill to caps →
-update metrics + ledger → `ScheduleWakeup` (CI_POLL 270s while checks run; 1200–1800s idle) or
+update metrics + ledger → `ScheduleWakeup` (CI_POLL adapted to observed CI duration — SKILL §9; 1200–1800s idle) or
 STOP when backlog empty AND nothing in flight (emit final per-PR status table).
 
 ## Rate limits (SKILL §4b)
@@ -117,9 +128,9 @@ comfortable and CI is clean, down on rate-limits or piling rebases/CI-failures.
   (a separate "closing" comment is redundant — keep only the acceptance-point summary + the
   worker's sign-out). **Empty (PR merely references #N) → it will NOT auto-close**: add
   `Closes #N` to the PR body, or manually close on merge with a one-line proposed-closure comment.
-- **Sign-out disambiguates exit.** Each worker's final public act is
-  `🤖 claude-agent:issue-N — signing out, over and out.` + terminal state (DONE/DRAFT, BLOCKED,
-  or ABANDONED→free for pickup). **Pickup rule:** redispatch an issue iff OPEN + no live worker
+- **Sign-out disambiguates exit.** Each worker's final public act (on every issue it covers) is
+  `🤖 @<login> (agent:wK) — signing out, over and out.` + terminal state (DONE/DRAFT, BLOCKED,
+  DONE-NO-CLOSE, or ABANDONED→free for pickup). **Pickup rule:** redispatch an issue if OPEN + no live worker
   - (sign-out=ABANDONED, or a claim comment with NO sign-out and worker not live = crashed).
     Never redispatch DONE/DRAFT or BLOCKED.
 

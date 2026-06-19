@@ -31,10 +31,11 @@ repeatable, parameterized prompts — edit those, not ad-hoc copies.
 - **Orchestrator** (you, the main agent): owns the pipeline. Dispatches workers, polls CI,
   promotes draft→ready, rebases, merges/closes, refills, keeps the ledger + metrics,
   handles escalations. Stays in the loop across wakeups. Does NOT write issue fixes itself.
-- **Worker subagent** (one per issue, `run_in_background: true`): root-cause → worktree →
-  TDD → local gates → commit/push → **DRAFT PR** → report, then **STOP**. A worker NEVER
-  marks ready, NEVER polls CI, NEVER closes issues, NEVER touches files outside its issue's
-  scope, NEVER removes its worktree. If blocked, it escalates (§7) and stops.
+- **Worker subagent** (one per unit of work — usually one issue, sometimes a folded bundle;
+  `run_in_background: true`): root-cause → worktree → TDD → local gates → commit/push →
+  **DRAFT PR** → report, then **STOP**. A worker NEVER marks ready, NEVER polls CI, NEVER closes
+  issues, NEVER touches files outside its scope, NEVER removes its worktree. If blocked, it
+  escalates (§7) and stops.
 
 This split is what makes the cap enforceable: only one actor (the orchestrator) ever
 counts slots, so there's no race on "how many are ready."
@@ -56,12 +57,19 @@ use these.
   same-file PRs one-by-one as they merge. **Serialize the _ready_ state within hot
   clusters** (only one PR from a given shared-file cluster is "ready" at a time) to cut
   rebase thrash.
-- **Folding:** OK to combine tightly-coupled issues into one PR **only** when the review is
-  simple and obvious (e.g. "add concurrency + timeout + npm-cache to every workflow job").
-  Annotate every folded issue and the supervising agent. Prefer one-PR-per-issue otherwise.
-- **Identity:** issue claims + PR authorship under the gh login; each worker's public,
-  traceable identity is `claude-agent:issue-N`. The remote branch + draft PR are themselves
-  state signals for other workers / supervisors.
+- **Folding:** **combine** tightly-coupled issues into one worker/PR when they share a concern
+  and a reviewer can take them in a single scope (e.g. "add concurrency + timeout + npm-cache to
+  every workflow job", or a fix plus its entailed test/doc). This is encouraged — it cuts review
+  and rebase overhead. Fold decisions are made in **Phase 0 triage** (§4); annotate every folded
+  issue + the supervising agent. When a reviewer wouldn't obviously want them together, keep them
+  one-PR-per-issue.
+- **Identity:** issue claims + PR authorship under the gh login (`{{GH_LOGIN}}` from
+  `gh api user --jq .login`). Each worker's public, traceable identity is **`@<gh-login>
+(agent:wK)`** — where `wK` is a **sequential handle the orchestrator hands out at dispatch**
+  (`w1`, `w2`, …), NOT tied to an issue number, because one worker may cover several folded
+  issues (§ Folding). The greppable resume token is `agent:wK`. The worker states which
+  issue(s) it covers in its claim (e.g. `@scottschreckengaust (agent:w3) — issues #11, #20`).
+  The remote branch + draft PR are themselves state signals for other workers / supervisors.
 - **Escalation:** blocked workers post questions publicly under their identity and stop;
   humans answer by addressing that identity; the orchestrator resumes (§7).
 - **Durability:** keep a crash-recoverable ledger (§8). Refine this skill during the run.
@@ -73,13 +81,14 @@ use these.
 Each issue is a token moving through states. The orchestrator advances tokens on each loop.
 
 ```text
-            dispatch                 gates green + PR              CI all-green AND
- BACKLOG ───────────────▶ BUILDING ───────────────▶ DRAFT ─────────────────────────▶ READY
-    ▲                        │ blocked                  │ ci red          ready_count<cap
-    │ refill                 ▼                           ▼                              │
-    │                     BLOCKED ◀────────────────── (worker fixes) ◀── orchestrator   │ approve+merge
-    │  human answers addressing claude-agent:issue-N      pushes fix                     ▼
-    └──────────────────────── resume (warm/cold) ◀──────────────────────────────────  MERGED ──▶ close issue
+   dispatch      gate+PR        CI green & slot      approve + merge
+BACKLOG ─────▶ BUILDING ─────▶ DRAFT ─────────────▶ READY ─────────────▶ MERGED ─▶ close issue
+                  │              ▲                                          │
+         blocked  │              │ ci red: worker pushes fix, back to DRAFT │ frees a slot
+                  ▼              │                                          │
+               BLOCKED ─────────▶ (resume, warm/cold)                      ▼
+                  ▲                                                    refill BACKLOG
+                  └─ human answers @<login> (agent:wK)
 ```
 
 - **BACKLOG** — ordered, not yet dispatched.
@@ -99,6 +108,27 @@ do not count.
 
 ## 4. The orchestrator loop (run every wakeup)
 
+**Phase 0 — Triage & cluster (run ONCE at startup; refresh when the backlog changes).** This is
+where folding and cluster assignment are decided, before any dispatch:
+
+1. List the work: `gh issue list --state open` (or the injected `[ISSUE_NUMBERS]`).
+2. For each issue, note the **files/area it will most likely touch** (from its text + a quick
+   look at the cited code). Group issues that touch the **same file(s) or subsystem** into a
+   named **cluster** (e.g. "workflows", "stack+snapshot"). Issues in different clusters are
+   independent and merge in any order; issues in the same cluster must be **serialized** at the
+   ready/merge stage (§6).
+3. **Fold** issues into one worker/PR only when they are tightly coupled AND a reviewer can
+   reasonably take them in a single scope — e.g. the same mechanical change across several files,
+   or a fix plus its directly-entailed test/doc update. Folding is encouraged here, not avoided:
+   it cuts review and rebase overhead when the shared concern is obvious. When unsure whether a
+   reviewer would want them together, keep them separate. Record each fold (which issues → which
+   worker) and annotate every folded issue.
+4. Write the resulting **ordered backlog + cluster map + fold decisions** to the ledger (§8) so a
+   crash can rebuild them. This map is what the loop's "cluster-priority order" (steps 4, 7)
+   refers to.
+
+**The loop (every wakeup):**
+
 1. **Reconcile** — `gh pr list --state open` + read ledger. Reconstruct each token's state
    (cheap, idempotent — survives crashes). Stamp `now=$(date +%s)`.
 2. **Collect worker reports** — for any finished background worker, record
@@ -114,7 +144,7 @@ do not count.
    `merged_at`, **close the issue** with an acceptance-point summary, free the ready slot,
    then run the **rebase+refill cascade** (§6).
 6. **Escalations** — for BLOCKED tokens, scan the issue/PR thread for a human reply
-   addressing `claude-agent:issue-N` (§7). If found, resume.
+   addressing `agent:wK` (§7). If found, resume.
 7. **Refill** — while `building+draft < max_draft` and backlog non-empty: pick the next
    issue (cluster-spread; hot clusters one-at-a-time), dispatch a worker (§ template).
 8. **Metrics + ledger** — recompute (§ below), write ledger (§8).
@@ -134,7 +164,8 @@ classify:
 
 - **all-green** (0 failed, 0 pending; `skipping` is fine — e.g. fuzz is skipped on PRs) → stamp
   `ci_green_at`; promote if slot-free (§4 step 4).
-- **pending** → do nothing yet; ensure a CI_POLL wakeup is set (`270s`) and re-check next loop.
+- **pending** → do nothing yet; ensure a CI_POLL wakeup is set (interval adapted to CI duration,
+  §9) and re-check next loop.
 - **red** (`FAILURE`/`CANCELLED`/`TIMED_OUT`) → **classify before acting** (§4b): a _transient_
   failure (rate-limit / network) is re-run, NOT fixed; a _real_ failure wakes the subagent.
   Don't promote either way.
@@ -163,7 +194,8 @@ wastes quota and masks real bugs.
 Authenticated limit is 5000 req/hr (core) + a separate GraphQL pool — caused by **you** polling
 too hard, not by any PR. Check headroom proactively:
 `gh api rate_limit --jq '{core: .resources.core.remaining, reset_in_s: (.resources.core.reset - now | floor)}'`.
-**Remedy = slow down:** widen the CI-poll interval (270s → 600s+), batch `gh` calls (one
+**Remedy = slow down:** widen the CI-poll interval (push toward the §9 upper bound, ~600s+),
+batch `gh` calls (one
 `gh pr view --json statusCheckRollup` per PR per loop), and trust the ledger instead of
 re-listing each loop. If `core_remaining` is near 0, **stop polling until `reset_in_s` elapses**
 (ScheduleWakeup for `reset_in_s + 30`). Never spin on a 403/429.
@@ -272,12 +304,20 @@ browser session cookie, not the `gh` token). Instead:
 - **Invariant:** `max_draft = max_in_flight − max_ready`, and total open PRs ≤ `max_in_flight`,
   at every width.
 
-### 5b. Pilot mode
+### 5b. Pilot mode vs. steady-state
 
-For a first run on a fresh repo/session, run **PILOT MODE**: seed `max_in_flight` at the
-injected `N` (default **3**, `max_ready = 1`), take that many issues through end-to-end
-(BACKLOG→…→MERGED), then proceed with the steady-state loop. Set `N=1` to force a single-issue
-dry run. Hold the adaptive ratchet flat for the pilot — prove the pipeline before widening it.
+**Steady-state** is just the normal operating mode: the §4 loop running every wakeup with the
+adaptive ratchet (§5a) live — `max_in_flight` and `max_ready` free to move with the metrics.
+That's the default and where the batch spends ~all its time.
+
+**Pilot mode** is an _optional_ confidence gate for the very first run on an unfamiliar
+repo/CI, where the only difference is: **hold the ratchet flat** (don't auto-widen) until the
+first worker has gone fully BACKLOG→MERGED once. It exists because the first end-to-end pass is
+what surfaces repo-specific surprises (a flaky gate, a slow CI tier, a missing permission) — and
+you'd rather learn that at width 1–3 than mid-widening. Once one PR has merged clean, pilot mode
+is over: **release the ratchet and you're in steady-state.** Skip pilot mode entirely (start
+straight in steady-state) on a repo you've already run this on. Set `N=1` to make the pilot a
+strict single-issue dry run.
 
 **Thin backlog is fine, not a failure.** If fewer issues exist than `max_in_flight`, the train
 just runs narrower — dispatch what's there, and the loop ends cleanly via the normal §9 STOP
@@ -365,7 +405,7 @@ choice, conflicting acceptance criteria, a missing decision, an unexpected block
 
 - Post a comment on the **issue**, opening with its identity and a clear BLOCKED marker, then
   numbered questions:
-  `🤖 claude-agent:issue-N — BLOCKED, need clarification:` + the questions + what it tried.
+  `🤖 @<login> (agent:wK) — BLOCKED, need clarification:` + the questions + what it tried.
 - If a draft PR already exists, post the **same** questions on the PR, cross-linking the issue
   comment (so the question is visible wherever a human looks).
 - Report `STATE: BLOCKED` + the verbatim questions to the orchestrator and **STOP**. Do not
@@ -379,13 +419,13 @@ choice, conflicting acceptance criteria, a missing decision, an unexpected block
 **Human side (the signal):**
 
 - The human answers by replying in the issue **or** PR thread, **addressing the agent
-  identity** — a comment beginning `@claude-agent:issue-N` (or `claude-agent:issue-N:`) with
-  the answers. Addressing the identity _is_ the resume signal.
+  identity** — a comment containing the worker's `agent:wK` token (e.g. replying
+  `@<login> (agent:wK): <answers>`). Addressing the `agent:wK` token _is_ the resume signal.
 
 **Orchestrator side (detect + resume):**
 
 - The STUCK_RECHECK timer scans BLOCKED issues' threads for a reply addressing
-  `claude-agent:issue-N`. On finding one, resume:
+  `agent:wK`. On finding one, resume:
   - **Warm resume** (preferred if the worker's agentId is still live & recent): SendMessage to
     that agentId with the answer + "continue to draft from your existing branch/PR."
   - **Cold resume** (after a crash/long gap): dispatch a _fresh_ worker with the original
@@ -405,8 +445,8 @@ worker then either skips a pickable issue or double-dispatches a live one. Fix =
 unambiguous **terminal sign-out** as the worker's last public act, plus orchestrator
 verification that the issue will actually close.
 
-**Worker sign-out (the worker's FINAL action before it stops, posted on the issue under its
-identity):** `🤖 claude-agent:issue-N — signing out, over and out.` followed by its terminal
+**Worker sign-out (the worker's FINAL action before it stops, posted on every issue it covers
+under its identity):** `🤖 @<login> (agent:wK) — signing out, over and out.` followed by its terminal
 state, exactly one of:
 
 - **DONE/DRAFT** — "PR #X opened (draft); body uses `Closes #N` so the issue auto-closes on
@@ -439,7 +479,7 @@ Keep those two; don't add a third hand-closing comment when auto-close is wired.
     body to add `Closes #N` (preferred), or on merge **manually close** the issue with a
     one-line _proposed-closure_ comment citing the merged PR. Never leave a resolved issue
     silently open — that's the state that makes a supervisor think work is still in flight.
-- **Pickup rule:** an issue is redispatchable iff it is OPEN **and** (no live worker owns it)
+- **Pickup rule:** an issue is redispatchable if it is OPEN **and** (no live worker owns it)
   **and** (its latest sign-out is ABANDONED, or there is a claim comment but NO sign-out and
   the worker is not live = crashed). Never redispatch an issue whose sign-out is DONE/DRAFT or
   BLOCKED. **DONE-NO-CLOSE** is not auto-redispatchable — it's a _human/orchestrator decision_
@@ -465,26 +505,45 @@ record: `dispatched_at, claimed_at, draft_at, ci_green_at, ready_at, merged_at`.
 (in-flight count), `rebase_count`, `blocked_count`. Use these to drive the dial (§5):
 high `review_latency` ⇒ don't add build parallelism; high `rebase_count` ⇒ ratchet down.
 
-**Ledger** lives at the project's session-memory file (here `.remember/remember.md`) and is
-the crash spine — a fresh session reconstructs in-flight state from it + the issue/PR
-annotations. It MUST hold: roles/identity, the current `max_in_flight`/`max_ready` + ratchet
-log, the skip list, the
-conflict clusters, the ordered backlog, the per-issue STATUS table (state + the 6 epoch
-stamps + PR#/branch/worktree/cluster), blocked questions, and "next action on resume."
+**Ledger.** The crash spine is **any durable plain file outside the worktree** — there is no
+plugin dependency. Use whatever the environment offers, in this order: (1) a session-memory
+file if one exists (e.g. `.remember/remember.md` when that tooling is present); (2) otherwise a
+plain gitignored file at the repo root such as `.resolve-open-issues-ledger.md`. The only
+requirements are that it **survives a session crash** and is **not inside a worktree** (worktrees
+get removed). It does not need to be committed.
+
+Crucially, the ledger is a **convenience cache, not the source of truth** — the authoritative
+state lives in the **public GitHub artifacts** (issue claims/sign-outs, open PRs, CI status). A
+fresh session can rebuild the whole picture from `gh pr list`/`gh issue list` + the thread
+annotations even if the ledger file is lost; the ledger just makes each wakeup cheaper. It
+SHOULD hold: roles/identity, the current `max_in_flight`/`max_ready` + ratchet log, the skip
+list, the conflict clusters, the ordered backlog, the per-worker STATUS table (state + the 6
+epoch stamps + worker `wK`/issues/PR#/branch/cluster), blocked questions, and "next action on
+resume."
 
 ---
 
 ## 9. Timers (ScheduleWakeup cadence)
 
-- **CI_POLL** — while any PR has running checks: `270s` (stays inside the 5-min prompt-cache
-  TTL; polling a ~15–30 min CI run every 270s is the sweet spot).
+- **CI_POLL** — while any PR has running checks, **adapt the interval to the observed CI
+  duration**, don't hard-code it. Learn the typical run length from the `ci_time` metric (§8,
+  wall-clock `ci_green_at − draft_at`) and aim to wake ~3–5 times across a run:
+  - rough rule: `poll ≈ clamp(observed_ci_time / 4, 30s, 600s)`.
+  - a short pipeline (~2-min unit-only run) → poll near the **30s floor** (well under 120s);
+  - a long one (~20-min integration/deploy) → poll ~300–600s.
+  - On the **first** PR you have no `ci_time` yet — start at ~120s, then recalibrate from the
+    first measured run. If you can read an in-progress ETA (`gh run view` timing), bias toward
+    "wake shortly after expected completion" rather than polling blindly.
+  - Tighten when a PR is _expected_ green imminently (front of the train); relax when nothing is
+    close. Respect the API budget (§4b‑1) — back off if `rate_limit` headroom drops.
 - **PROMOTE/MERGE_WATCH** — folded into each wake's loop (§4 steps 4–5).
 - **STUCK_RECHECK** — for BLOCKED tokens: piggyback on CI_POLL; if only blocked work
   remains, `1200s`.
 - **IDLE_FALLBACK** — nothing actionable but work outstanding: `1200s–1800s`.
 - **STOP** — backlog empty AND nothing in flight: don't reschedule; emit final status table.
 
-Don't pick 300s (worst of both — pays the cache miss without amortizing it).
+The goal is to **catch green promptly without burning API quota or context on no-op wakes** —
+measure the CI, then poll to match it, rather than holding any single fixed number.
 
 ---
 
