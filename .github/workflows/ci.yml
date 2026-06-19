@@ -53,6 +53,7 @@ jobs:
               - 'cdk.json'
               - 'jest.config.js'
               - '.github/workflows/ci.yml'
+              - '.github/actions/setup/**'
               # docs/config so the unit job's lint/format checks run on them too
               - '**/*.md'
               - '.markdownlint-cli2.jsonc'
@@ -67,14 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: '24.17.0'
-          cache: 'npm'
-      - run: npm ci
+      - uses: ./.github/actions/setup
       - name: Lint (eslint)
         run: npm run lint
       - name: Lint (markdown)
@@ -112,14 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: '24.17.0'
-          cache: 'npm'
-      - run: npm ci
+      - uses: ./.github/actions/setup
       # Restore Stryker's incremental result cache so only mutants in changed
       # files are re-tested. The key uses github.run_id (unique every run) so
       # the cache ALWAYS saves in the post-job step — actions/cache skips the
@@ -155,14 +142,7 @@ jobs:
     # Headroom over the 120s (-max_total_time) fuzz run plus install/build.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: '24.17.0'
-          cache: 'npm'
-      - run: npm ci
+      - uses: ./.github/actions/setup
       # Persist the fuzzing corpus across runs so discovered inputs accumulate
       # and later runs start from prior coverage (rolling key, like mutation).
       - name: Restore fuzz corpus
@@ -214,17 +194,7 @@ jobs:
     # RDS/etc. hang in "creating". An explicit `docker run --network host`
     # step is the configuration that actually works (verified end-to-end).
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: '24.17.0'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
+      - uses: ./.github/actions/setup
 
       - name: Start MiniStack
         run: |
