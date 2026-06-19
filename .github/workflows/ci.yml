@@ -175,6 +175,15 @@ jobs:
   integration:
     name: Integration (MiniStack)
     needs: unit
+    # SECURITY: this job mounts the host Docker socket (--network host +
+    # /var/run/docker.sock) and runs `npm ci` + `cdk deploy` against
+    # PR-controlled code. On a bare `pull_request` event a fork PR would get
+    # code execution on a socket-mounted runner (container-escape risk, rated
+    # Critical in the threat model). Fork PRs can't read secrets, but they DO
+    # run untrusted code, so gate this job to non-fork events only: push,
+    # schedule, workflow_dispatch, and same-repo PRs. (GitHub-recommended
+    # head-repo comparison for trusted-vs-fork.)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
 
     # NOTE: MiniStack is NOT run as a `services:` container.
