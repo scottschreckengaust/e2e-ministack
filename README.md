@@ -61,16 +61,17 @@ export AWS_ENDPOINT_URL=http://localhost:4566 AWS_ENDPOINT_URL_S3=http://localho
   AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 \
   CDK_DEFAULT_ACCOUNT=000000000000 CDK_DEFAULT_REGION=us-east-1
 
-# 3️⃣ Build, deploy, test
+# 3️⃣ Build, fast unit checks, deploy, integration test
 npm ci
 npm run build
+npm run test:unit          # synth-only — no emulator needed
 npm run bootstrap
 npm run deploy
-npm test
+npm run test:integration
 ```
 
 ```console
-PASS test/integration.test.ts
+PASS test/integration/integration.test.ts
   ✓ invokes the deployed Lambda and gets the doubled value
   ✓ round-trips an object through the deployed S3 bucket
 ```
@@ -82,7 +83,9 @@ PASS test/integration.test.ts
 | `npm run build` | `tsc` compile |
 | `npm run bootstrap` | `cdk bootstrap` the `CDKToolkit` stack into MiniStack |
 | `npm run deploy` | `cdk deploy --require-approval never` |
-| `npm test` | Jest integration tests against deployed resources |
+| `npm run test:unit` | Fast: Lambda logic + CDK assertions/snapshot (no emulator) |
+| `npm run test:integration` | Jest + AWS SDK against deployed MiniStack resources |
+| `npm run test:e2e` | Placeholder for a real-account stage (skipped) |
 | `npm run destroy` | `cdk destroy --force` |
 
 Reset MiniStack state between runs (cheaper than restarting): `curl -X POST http://localhost:4566/_ministack/reset`
@@ -93,9 +96,19 @@ Reset MiniStack state between runs (cheaper than restarting): `curl -X POST http
 bin/app.ts                 # CDK entrypoint (fixed account/region)
 lib/ministack-stack.ts     # the stack: S3 bucket + Lambda
 lambda/index.js            # function under test (doubles event.n)
-test/integration.test.ts   # Jest + AWS SDK v3, points at AWS_ENDPOINT_URL
-.github/workflows/         # CI: same bootstrap → deploy → test loop
+test/unit/                 # Lambda logic + CDK assertions/snapshot (no emulator)
+test/integration/          # Jest + AWS SDK v3, points at AWS_ENDPOINT_URL
+test/e2e/                  # placeholder for a real-account stage
+.github/workflows/         # CI: unit → bootstrap → deploy → integration loop
 ```
+
+### 🧪 Test pyramid
+
+| Tier | Needs | Speed | Here |
+| --- | --- | --- | --- |
+| **Unit** | nothing (pure synth) | ms | Lambda logic + CDK fine-grained assertions + full-template snapshot |
+| **Integration** | MiniStack (local emulator) | seconds | AWS SDK against deployed resources |
+| **E2E** | a real AWS account | minutes | placeholder (skipped) — real deploy + smoke/CSPM |
 
 ## ⚠️ Gotchas worth knowing
 

@@ -28,14 +28,20 @@ npm ci                 # install (use `npm install` when changing deps)
 npm run build          # tsc compile
 npm run bootstrap      # cdk bootstrap aws://000000000000/us-east-1
 npm run deploy         # cdk deploy --require-approval never
-npm test               # jest integration tests against deployed resources
+npm run test:unit      # fast: Lambda logic + CDK assertions/snapshot (no emulator)
+npm test               # alias for test:unit
+npm run test:integration  # jest AWS-SDK tests against deployed MiniStack resources
+npm run test:e2e       # placeholder for a real-account stage (currently skipped)
 npm run destroy        # cdk destroy --force
 
 # Reset MiniStack state between runs (faster than restarting the container):
 curl -X POST http://localhost:4566/_ministack/reset
 
-# Run a single test:
-npx jest -t "invokes the deployed Lambda"
+# Run a single test (set the tier so jest looks in the right dir):
+JEST_TIER=integration npx jest -t "invokes the deployed Lambda"
+
+# Update the CDK snapshot after an intended template change:
+npm run test:unit -- -u
 ```
 
 CI runs this same sequence — see `.github/workflows/aws-integration-tests.yml`.
@@ -44,8 +50,11 @@ CI runs this same sequence — see `.github/workflows/aws-integration-tests.yml`
 
 - `bin/app.ts` — CDK entrypoint; instantiates the stack with a fixed account/region (`000000000000`/`us-east-1`) so the bootstrap environment matches locally and in CI.
 - `lib/ministack-stack.ts` — the stack: S3 bucket `cdk-demo-bucket` + Lambda `cdk-doubler`. **Resource names are hard-coded** so tests address them directly without reading CloudFormation outputs.
-- `lambda/index.js` — the function under test (doubles `event.n`, returns `process.version`).
-- `test/integration.test.ts` — Jest + AWS SDK v3 clients pointed at `AWS_ENDPOINT_URL`. Assumes `cdk deploy` already ran (the workflow deploys before testing).
+- `lambda/index.js` — the function under test (doubles `event.n`, returns `process.version`). `lambda/index.d.ts` is a hand-written type contract (committed) so the unit test can import it with types without `allowJs`.
+- **Test pyramid** (`jest.config.js` picks the tier dir via `JEST_TIER`):
+  - `test/unit/` — `lambda.test.ts` (pure handler logic) + `stack.test.ts` (CDK `Template` fine-grained assertions **and** a full-template snapshot). Synth-only; no emulator/Docker. The snapshot baseline lives in `test/unit/__snapshots__/` and must be updated (`-u`) after any intended template change.
+  - `test/integration/` — Jest + AWS SDK v3 clients pointed at `AWS_ENDPOINT_URL`, against deployed MiniStack resources. Assumes `cdk deploy` already ran.
+  - `test/e2e/` — placeholder (`describe.skip`) for a future real-account deployment stage.
 
 ## Why these flags / non-obvious constraints
 

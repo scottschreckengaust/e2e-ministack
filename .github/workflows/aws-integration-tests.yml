@@ -65,6 +65,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Fast unit tier (Lambda logic + CDK assertions/snapshot) — synth-only,
+      # runs before the expensive MiniStack deploy as a pre-flight gate.
+      - name: Unit tests
+        run: npm run test:unit
+
       # cdk-nag (AwsSolutions) runs during synth and fails on any unsuppressed
       # finding. This gate needs no AWS endpoint, so it runs before bootstrap
       # to fail fast on security regressions.
@@ -108,7 +113,7 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: test
           AWS_SECRET_ACCESS_KEY: test
-        run: npm test
+        run: npm run test:integration
 
       - name: MiniStack logs on failure
         if: failure()
