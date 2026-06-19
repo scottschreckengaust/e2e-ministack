@@ -19,7 +19,7 @@ Deploy a real CDK stack and run integration tests against it entirely on your la
 
 ## ✨ What you get
 
-- 🏗️ A minimal **CDK stack** (TypeScript): an S3 bucket + a Node.js 24 Lambda.
+- 🏗️ A minimal **CDK stack** (TypeScript): two S3 buckets + a Node.js 24 Lambda. The data bucket (`cdk-demo-bucket`) is what tests read/write; the second bucket (`cdk-demo-log-bucket`) just receives its server access logs to satisfy the access-logging security rules (cdk-nag `AwsSolutions-S1` / checkov `CKV_AWS_18`).
 - 🧪 **Jest integration tests** that hit the _deployed_ resources through the AWS SDK v3 — not mocks.
 - 🐳 **MiniStack** standing in for AWS locally: `bootstrap` → `deploy` → `test` → `destroy`, on port `4566`.
 - 🤖 A **GitHub Actions workflow** that runs the exact same loop on every push.
@@ -34,11 +34,13 @@ flowchart LR
     end
     subgraph ms["🐳 MiniStack :4566"]
         CFN["CloudFormation"]
-        S3["S3 bucket<br/>cdk-demo-bucket"]
+        S3["S3 data bucket<br/>cdk-demo-bucket"]
+        LOG["S3 access-log bucket<br/>cdk-demo-log-bucket"]
         LAM["Lambda<br/>cdk-doubler"]
     end
     CDK -- "bootstrap + deploy" --> CFN
-    CFN -- provisions --> S3 & LAM
+    CFN -- provisions --> S3 & LOG & LAM
+    S3 -. "server access logs" .-> LOG
     JEST -- "invoke / put / get" --> LAM & S3
     LAM -. "runs in a sibling<br/>Docker container" .-> dev
 ```
@@ -99,7 +101,7 @@ Reset MiniStack state between runs (cheaper than restarting): `curl -X POST http
 
 ```text
 bin/app.ts                 # CDK entrypoint (fixed account/region)
-lib/ministack-stack.ts     # the stack: S3 bucket + Lambda
+lib/ministack-stack.ts     # the stack: two S3 buckets (data + access-log) + Lambda
 lambda/index.js            # function under test (doubles event.n)
 test/unit/                 # Lambda logic + CDK assertions/snapshot (no emulator)
 test/integration/          # Jest + AWS SDK v3, points at AWS_ENDPOINT_URL
