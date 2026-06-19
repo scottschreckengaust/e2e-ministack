@@ -14,4 +14,17 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   // MiniStack deploys/invocations can take a few seconds; unit is fast.
   testTimeout: tier === 'unit' ? 15000 : 60000,
+  // Emit a JUnit report per tier so CI can upload it as an artifact even on
+  // failure (and surface it in test-report UIs).
+  reporters: [
+    'default',
+    [
+      'jest-junit',
+      {
+        outputDirectory: 'reports/junit',
+        outputName: `${tier}.xml`,
+        suiteName: `${tier} tests`,
+      },
+    ],
+  ],
 };

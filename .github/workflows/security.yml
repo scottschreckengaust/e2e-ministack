@@ -30,20 +30,46 @@ jobs:
           # Pin the analyzer bundle so the CodeQL engine/queries are reproducible
           # (otherwise the action auto-updates to the latest bundle).
           tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.25.6/codeql-bundle.tar.gz
+      # CodeQL uploads its own SARIF to the Security tab natively.
       - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
 
   semgrep:
     name: Semgrep SAST
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - name: Run Semgrep
-        # --error makes findings fail the job. Version pinned for reproducibility.
+      - name: Run Semgrep (always writes SARIF; enforce after upload)
         run: |
           pipx install semgrep==1.167.0 || pip install semgrep==1.167.0
-          semgrep scan --config=auto --error --exclude=node_modules --exclude=cdk.out
+          # --error sets a non-zero exit on findings; capture it so the report
+          # still uploads, then enforce in a later step.
+          set +e
+          semgrep scan --config=auto --error --sarif --output semgrep.sarif \
+            --exclude=node_modules --exclude=cdk.out
+          echo "exit=$?" > semgrep.outcome
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: warn
+      - name: Enforce Semgrep result
+        if: always()
+        run: |
+          source semgrep.outcome
+          test "$exit" = "0"
 
   # ── Dependency / supply-chain vulnerabilities ───────────────────────────
   npm-audit:
@@ -57,17 +83,35 @@ jobs:
         with:
           node-version: '24.17.0'
       - run: npm ci
-      - run: npm audit --audit-level=high
+      - name: npm audit (JSON report; enforce after upload)
+        run: |
+          set +e
+          npm audit --audit-level=high --json > npm-audit.json
+          echo "exit=$?" > npm-audit.outcome
+          npm audit --audit-level=high # human-readable in the log
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-audit-json
+          path: npm-audit.json
+          if-no-files-found: warn
+      - name: Enforce audit result
+        if: always()
+        run: |
+          source npm-audit.outcome
+          test "$exit" = "0"
 
   osv-scanner:
     name: OSV Scanner
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      # Install the official binary and run the same command verified locally,
-      # rather than depend on the action's interface.
       - name: Install OSV-Scanner
         # Pinned to v2.4.0 AND verified by SHA-256 so a re-tagged/tampered
         # release is rejected (content pin, not just a tag pin).
@@ -76,21 +120,63 @@ jobs:
             https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
           echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
-      - name: Scan lockfile
-        run: ./osv-scanner scan --lockfile=package-lock.json
+      - name: Scan lockfile (SARIF; enforce after upload)
+        run: |
+          set +e
+          ./osv-scanner scan --lockfile=package-lock.json --format sarif > osv.sarif
+          echo "exit=$?" > osv.outcome
+          ./osv-scanner scan --lockfile=package-lock.json # human-readable
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: osv-sarif
+          path: osv.sarif
+          if-no-files-found: warn
+      - name: Enforce OSV result
+        if: always()
+        run: |
+          source osv.outcome
+          test "$exit" = "0"
 
   grype:
     name: Grype FS scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+      # The anchore action emits SARIF and (with fail-build) sets the outcome;
+      # capture its output path and always upload.
+      - id: grype
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
           path: '.'
           fail-build: true
           severity-cutoff: high
+          output-format: sarif
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: grype
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: grype-sarif
+          path: ${{ steps.grype.outputs.sarif }}
+          if-no-files-found: warn
 
   # ── Secrets ─────────────────────────────────────────────────────────────
   gitleaks:
@@ -101,14 +187,34 @@ jobs:
         with:
           fetch-depth: 0 # full history so all commits are scanned
           persist-credentials: false
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+      - name: Run gitleaks (SARIF; enforce after upload)
+        run: |
+          set +e
+          gitleaks detect --no-banner --redact \
+            --report-format sarif --report-path gitleaks.sarif
+          echo "exit=$?" > gitleaks.outcome
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+          if-no-files-found: warn
+      - name: Enforce gitleaks result
+        if: always()
+        run: |
+          source gitleaks.outcome
+          test "$exit" = "0"
 
   # ── Infrastructure-as-code (synthesized CloudFormation) ─────────────────
   iac:
     name: IaC scan (cfn-lint + checkov)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -120,18 +226,47 @@ jobs:
       - name: Synthesize CloudFormation
         run: npm run synth
       - name: Install scanners
-        # Versions pinned for reproducibility.
         run: |
           pipx install cfn-lint==1.51.5 || pip install cfn-lint==1.51.5
           pipx install checkov==3.3.0 || pip install checkov==3.3.0
-      - name: cfn-lint
-        # Fail on errors only — the two W warnings (legacy AccessControl prop,
-        # used by CDK's own access logging; and a redundant dependency hint)
-        # are expected and not actionable.
-        run: cfn-lint cdk.out/*.template.json --non-zero-exit-code error
-      - name: checkov
-        # Hard-fail on any check; CKV_AWS_117 is skipped via resource metadata.
-        run: checkov -d cdk.out --framework cloudformation --compact
+      - name: cfn-lint (text report; errors-only enforce after upload)
+        # cfn-lint is a linter (not a vuln scanner) and its SARIF formatter
+        # needs unbundled deps, so keep it as text. Only the two expected W
+        # warnings here; fail on errors only.
+        run: |
+          set +e
+          cfn-lint cdk.out/*.template.json > cfn-lint.txt 2>&1
+          cat cfn-lint.txt
+          cfn-lint cdk.out/*.template.json --non-zero-exit-code error
+          echo "exit=$?" > cfn-lint.outcome
+      - name: checkov (SARIF; enforce after upload)
+        run: |
+          set +e
+          checkov -d cdk.out --framework cloudformation -o sarif --output-file-path . --compact
+          echo "exit=$?" > checkov.outcome
+          checkov -d cdk.out --framework cloudformation --compact # human-readable
+      - name: Upload checkov SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          sarif_file: results_sarif.sarif
+          category: checkov
+      - name: Upload IaC reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iac-reports
+          path: |
+            cfn-lint.txt
+            results_sarif.sarif
+          if-no-files-found: warn
+      - name: Enforce IaC results
+        if: always()
+        run: |
+          source cfn-lint.outcome; cfn=$exit
+          source checkov.outcome; ckv=$exit
+          echo "cfn-lint exit=$cfn  checkov exit=$ckv"
+          test "$cfn" = "0" && test "$ckv" = "0"
 
   # ── Threat model (design-time artifact) ─────────────────────────────────
   threat-model:

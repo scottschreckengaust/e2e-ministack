@@ -9,3 +9,10 @@ package-lock.json
 test/**/__snapshots__/
 # Hand-authored threat model (large generated-style JSON; not Prettier's job)
 threat-model.tc.json
+# CI-generated scan reports / artifacts
+*.sarif
+*.outcome
+cfn-lint.txt
+npm-audit.json
+reports/
+.fuzz-corpus/

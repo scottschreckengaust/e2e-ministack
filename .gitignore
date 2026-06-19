@@ -27,6 +27,12 @@ reports/
 .fuzz-corpus/
 crash-*
 
+# CI scan reports / outcome files (generated, uploaded as artifacts in CI)
+*.sarif
+*.outcome
+cfn-lint.txt
+npm-audit.json
+
 # Logs / OS
 *.log
 .DS_Store

@@ -70,10 +70,25 @@ jobs:
       - name: Build
         run: npm run build
       - name: Unit tests (logic + CDK assertions/snapshot)
+        # Writes reports/junit/unit.xml; upload it even on failure.
         run: npm run test:unit
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: junit-unit
+          path: reports/junit/unit.xml
+          if-no-files-found: warn
       # cdk-nag (AwsSolutions) runs inside synth; fails on any finding.
       - name: CDK synth (cdk-nag security gate)
         run: npm run synth
+      - name: Upload synthesized templates
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cdk-out
+          path: cdk.out/
+          if-no-files-found: warn
 
   # Mutation testing of the Lambda logic. Fails under the break threshold (80%).
   mutation:
@@ -105,6 +120,13 @@ jobs:
             stryker-${{ hashFiles('stryker.config.mjs') }}-
       - name: Mutation tests
         run: npm run test:mutation
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report
+          path: reports/mutation/
+          if-no-files-found: warn
 
   # Coverage-guided fuzzing (jazzer.js). Exploratory and time-boxed, so it runs
   # on schedule / manual dispatch — NOT on every push. Needs GLIBC >= 2.38
@@ -229,9 +251,25 @@ jobs:
           AWS_SECRET_ACCESS_KEY: test
         run: npm run test:integration
 
+      - name: Upload integration test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: junit-integration
+          path: reports/junit/integration.xml
+          if-no-files-found: warn
+
       - name: MiniStack logs on failure
         if: failure()
-        run: docker logs ministack || true
+        run: docker logs ministack > ministack.log 2>&1 || true
+
+      - name: Upload MiniStack logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ministack-logs
+          path: ministack.log
+          if-no-files-found: ignore
 
       - name: Stop MiniStack
         if: always()
