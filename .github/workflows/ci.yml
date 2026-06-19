@@ -154,7 +154,11 @@ jobs:
           restore-keys: |
             fuzz-corpus-
       - name: Run fuzzer (time-boxed)
-        run: npx jazzer fuzz/handler.fuzz .fuzz-corpus --sync=false -- -max_total_time=120
+        # Ensure the corpus dir exists — libFuzzer refuses to start without it,
+        # and the cache restore is a no-op on the first (cold) run.
+        run: |
+          mkdir -p .fuzz-corpus
+          npx jazzer fuzz/handler.fuzz .fuzz-corpus --sync=false -- -max_total_time=120
       - name: Upload crash inputs on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
