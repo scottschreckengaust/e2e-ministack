@@ -167,10 +167,12 @@ jobs:
           chmod +x osv-scanner
       - name: Scan lockfile (SARIF; enforce after upload)
         run: |
+          # OSV-Scanner v2 form: `scan source --lockfile=…`. The bare
+          # `scan --lockfile=` is deprecated and slated for removal.
           set +e
-          ./osv-scanner scan --lockfile=package-lock.json --format sarif > osv.sarif
+          ./osv-scanner scan source --lockfile=package-lock.json --format sarif > osv.sarif
           echo "exit=$?" > osv.outcome
-          ./osv-scanner scan --lockfile=package-lock.json # human-readable
+          ./osv-scanner scan source --lockfile=package-lock.json # human-readable
       - name: Upload SARIF to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
