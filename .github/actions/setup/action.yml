@@ -1,0 +1,35 @@
+name: Setup (Node + npm ci)
+description: >-
+  Repo setup preamble factored out of the workflows (issue #27): installs the
+  pinned Node version with npm cache and runs `npm ci`. The Node version is
+  pinned ONCE here (the `node-version` input default) so a bump is a single edit
+  instead of one per job. External actions inside this composite stay SHA-pinned.
+
+  NOTE: this composite does NOT check out the repo. A local composite action
+  cannot be resolved until `actions/checkout` has already placed it on the
+  runner, so every calling job must run `actions/checkout`
+  (`persist-credentials: false`, with its own `fetch-depth`) BEFORE
+  `uses: ./.github/actions/setup`.
+
+inputs:
+  node-version:
+    description: Node.js version to install (single source of truth for the pin).
+    required: false
+    default: '24.17.0'
+  npm-ci:
+    description: >-
+      Whether to run `npm ci`. Set to 'false' for jobs that need Node but not
+      the installed dependency tree (e.g. the threat-model JSON check).
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: 'npm'
+    - if: inputs.npm-ci == 'true'
+      shell: bash
+      run: npm ci

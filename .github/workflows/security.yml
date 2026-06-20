@@ -55,6 +55,7 @@ jobs:
               - 'tsconfig.json'
               - 'cdk.json'
               - '.github/workflows/security.yml'
+              - '.github/actions/setup/**'
 
   # ── Static analysis of the TypeScript / CDK source ──────────────────────
   codeql:
@@ -125,11 +126,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: '24.17.0'
-          cache: 'npm'
-      - run: npm ci
+      - uses: ./.github/actions/setup
       - name: npm audit (JSON report; enforce after upload)
         run: |
           set +e
@@ -333,11 +330,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: '24.17.0'
-          cache: 'npm'
-      - run: npm ci
+      - uses: ./.github/actions/setup
       - name: Synthesize CloudFormation
         run: npm run synth
       - name: Install scanners
@@ -392,10 +385,11 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      # Node-only job (no dependency install): the validation below just runs
+      # `node -e` over the committed JSON, so skip `npm ci`.
+      - uses: ./.github/actions/setup
         with:
-          node-version: '24.17.0'
-          cache: 'npm'
+          npm-ci: 'false'
       # threat-composer is a design-time authoring tool (no CI generator that
       # works without a real Bedrock account), so the gate is simply: the
       # committed model parses and carries the expected sections. Edit it in
