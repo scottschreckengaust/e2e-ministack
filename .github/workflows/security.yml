@@ -123,6 +123,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - name: npm audit (JSON report; enforce after upload)
         run: |
@@ -324,6 +327,9 @@ jobs:
       contents: read
       security-events: write
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Synthesize CloudFormation
         run: npm run synth
@@ -376,6 +382,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       # Node-only job (no dependency install): the validation below just runs
       # `node -e` over the committed JSON, so skip `npm ci`.
       - uses: ./.github/actions/setup

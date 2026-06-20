@@ -68,6 +68,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Lint (eslint)
         run: npm run lint
@@ -106,6 +109,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       # Restore Stryker's incremental result cache so only mutants in changed
       # files are re-tested. The key uses github.run_id (unique every run) so
@@ -142,6 +148,9 @@ jobs:
     # Headroom over the 120s (-max_total_time) fuzz run plus install/build.
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       # Persist the fuzzing corpus across runs so discovered inputs accumulate
       # and later runs start from prior coverage (rolling key, like mutation).
@@ -194,6 +203,9 @@ jobs:
     # RDS/etc. hang in "creating". An explicit `docker run --network host`
     # step is the configuration that actually works (verified end-to-end).
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
 
       - name: Start MiniStack
