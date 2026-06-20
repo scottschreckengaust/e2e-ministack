@@ -118,15 +118,19 @@ jobs:
       # the cache ALWAYS saves in the post-job step — actions/cache skips the
       # save when the exact key already hit, so a per-commit/SHA key can fail
       # to persist. restore-keys prefix-matches the most recent prior cache.
-      # The stryker config hash is in the key so a scope change (the `mutate`
-      # glob) busts the cache.
+      # The key prefix hashes the stryker config (scope/`mutate` glob), the jest
+      # config, and the lockfile, so any toolchain or runner-config change forces
+      # a clean run rather than reusing verdicts produced under different tooling.
+      # (Incremental re-validates per mutant, so a stale cache only ever costs a
+      # redundant re-test — never a false pass — but a clean prefix is cheaper to
+      # reason about than relying on that safety net.)
       - name: Restore mutation cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: reports/mutation/incremental.json
-          key: stryker-${{ hashFiles('stryker.config.mjs') }}-${{ github.run_id }}
+          key: stryker-${{ hashFiles('stryker.config.mjs', 'jest.config.js', 'package-lock.json') }}-${{ github.run_id }}
           restore-keys: |
-            stryker-${{ hashFiles('stryker.config.mjs') }}-
+            stryker-${{ hashFiles('stryker.config.mjs', 'jest.config.js', 'package-lock.json') }}-
       - name: Mutation tests
         run: npm run test:mutation
       - name: Upload mutation report
@@ -167,6 +171,12 @@ jobs:
         run: |
           mkdir -p .fuzz-corpus
           npx jazzer fuzz/handler.fuzz .fuzz-corpus --sync=false -- -max_total_time=120
+      # Fold any crash-reproducing inputs into the corpus so the post-job cache
+      # save persists them — next run replays them first (regression guard).
+      # Runs even on failure (a crash both fails the run and produces crash-*).
+      - name: Seed corpus with crash inputs
+        if: always()
+        run: cp -f crash-* .fuzz-corpus/ 2>/dev/null || true
       - name: Upload crash inputs on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -193,6 +203,18 @@ jobs:
     # wait, bootstrap, deploy, tests); 30m gives headroom without burning the
     # 6h default if MiniStack/Lambda hangs.
     timeout-minutes: 30
+
+    # Stable AWS toolchain env shared by every step that talks to MiniStack
+    # (region, fake creds, the generic endpoint). The step-specific deltas stay
+    # inline below: bootstrap/deploy add AWS_ENDPOINT_URL_S3 (S3 virtual-host
+    # addressing can't be inferred from the generic endpoint) and the
+    # CDK_DEFAULT_* pair; the test step deliberately omits both (per CLAUDE.md).
+    env:
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
 
     # NOTE: MiniStack is NOT run as a `services:` container.
     # Lambda / ECS / RDS / ElastiCache work by having MiniStack spawn *sibling*
@@ -240,34 +262,21 @@ jobs:
       # addressing can't be inferred from the generic endpoint.
       - name: CDK bootstrap
         env:
-          AWS_ENDPOINT_URL: http://localhost:4566
           AWS_ENDPOINT_URL_S3: http://localhost:4566
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
           CDK_DEFAULT_ACCOUNT: '000000000000'
           CDK_DEFAULT_REGION: us-east-1
         run: npm run bootstrap
 
       - name: CDK deploy
         env:
-          AWS_ENDPOINT_URL: http://localhost:4566
           AWS_ENDPOINT_URL_S3: http://localhost:4566
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
           CDK_DEFAULT_ACCOUNT: '000000000000'
           CDK_DEFAULT_REGION: us-east-1
         run: npm run deploy
 
       - name: Run integration tests
-        env:
-          AWS_ENDPOINT_URL: http://localhost:4566
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
+        # Inherits the job-level AWS env; deliberately no AWS_ENDPOINT_URL_S3 /
+        # CDK_DEFAULT_* here (only cdk needs those).
         run: npm run test:integration
 
       - name: Upload integration test report
@@ -278,9 +287,21 @@ jobs:
           path: reports/junit/integration.xml
           if-no-files-found: warn
 
-      - name: MiniStack logs on failure
+      - name: MiniStack diagnostics on failure
         if: failure()
-        run: docker logs ministack > ministack.log 2>&1 || true
+        # Capture container state AND logs into the uploaded artifact (not just
+        # stdout). `docker ps -a` surfaces a fast `docker run` failure where the
+        # container exited before `docker logs` had anything — e.g. a bad
+        # image/flag — which the readiness poll's inline log dump would miss.
+        # Write unconditionally (|| true) so the artifact always exists on
+        # failure even if the container never started.
+        run: |
+          {
+            echo "===== docker ps -a ====="
+            docker ps -a || true
+            echo "===== docker logs ministack ====="
+            docker logs ministack 2>&1 || true
+          } > ministack.log 2>&1 || true
 
       - name: Upload MiniStack logs on failure
         if: failure()
