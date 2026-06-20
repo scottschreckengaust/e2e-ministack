@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
+import { AwsSolutionsChecks } from 'cdk-nag';
 import { MiniStackStack } from '../../lib/ministack-stack';
 import { MINISTACK_ENV } from '../../lib/env';
 
@@ -165,23 +166,35 @@ describe('MiniStackStack — fine-grained assertions', () => {
   });
 });
 
-describe('MiniStackStack — snapshot', () => {
-  it('matches the synthesized CloudFormation snapshot', () => {
-    // Regression tripwire: any change to the synthesized template must be
-    // reviewed and the snapshot updated with `npm run test:unit -- -u`.
+describe('MiniStackStack — cdk-nag (AwsSolutions) fast-tier gate', () => {
+  it('synthesizes with zero unsuppressed AwsSolutions findings', () => {
+    // issue #25: bin/app.ts attaches the AwsSolutions pack via the cdk-nag v3
+    // policy-validation API (Validations.of(app).addPlugins(...)), but that
+    // gate only fires inside the CDK CLI's `cdk synth` — an in-process
+    // `app.synth()` does NOT enforce it. So the unit tier (its own `new
+    // cdk.App()` with no plugin) never exercised cdk-nag; a nag regression
+    // would only surface in CI synth, not the fast tier.
     //
-    // Mask the Lambda asset's content hash (Code.S3Key) — it's the SHA-256 of
-    // the zipped `lambda/` dir, so it flips on any lambda/index.js edit even
-    // when the template is otherwise unchanged. Pinning it would make this
-    // infra snapshot fail for code-only changes and train reviewers to
-    // rubber-stamp `-u`. The S3Bucket alongside it is the stable CDK bootstrap
-    // bucket, so it stays asserted.
-    expect(synth().toJSON()).toMatchSnapshot({
-      Resources: {
-        Doubler90AA16BC: {
-          Properties: { Code: { S3Key: expect.any(String) } },
-        },
-      },
+    // We drive the SAME pack class used in bin/app.ts directly via its
+    // documented testing entry point `validateScope(stack)` (cdk-nag v3 removed
+    // the v2 Aspects `visit` API, and `Annotations.fromStack` no longer sees
+    // nag findings). A clean stack reports `success: true` with no violations;
+    // injecting an unhardened resource flips `success` to false (verified
+    // manually with a bare Bucket → AwsSolutions-S1/S10). This makes a nag
+    // regression fail fast in unit, not only in CI synth.
+    const app = new cdk.App();
+    const stack = new MiniStackStack(app, 'NagTestStack', {
+      env: MINISTACK_ENV,
     });
+    app.synth();
+
+    const report = new AwsSolutionsChecks(stack, {
+      verbose: true,
+    }).validateScope(stack);
+    const findings = report.violations.map(
+      (v) => `${v.ruleName}: ${v.description}`,
+    );
+    expect(findings).toEqual([]);
+    expect(report.success).toBe(true);
   });
 });

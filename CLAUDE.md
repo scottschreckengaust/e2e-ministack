@@ -28,7 +28,7 @@ npm ci                 # install (use `npm install` when changing deps)
 npm run build          # tsc compile
 npm run bootstrap      # cdk bootstrap aws://000000000000/us-east-1
 npm run deploy         # cdk deploy --require-approval never
-npm run test:unit      # fast: Lambda logic + CDK assertions/snapshot (no emulator)
+npm run test:unit      # fast: Lambda logic + CDK fine-grained assertions + cdk-nag (no emulator)
 npm test               # alias for test:unit
 npm run test:integration  # jest AWS-SDK tests against deployed MiniStack resources
 npm run test:e2e       # placeholder for a real-account stage (currently skipped)
@@ -41,9 +41,6 @@ curl -X POST http://localhost:4566/_ministack/reset
 
 # Run a single test (set the tier so jest looks in the right dir):
 JEST_TIER=integration npx jest -t "invokes the deployed Lambda"
-
-# Update the CDK snapshot after an intended template change:
-npm run test:unit -- -u
 ```
 
 CI runs this same sequence — see `.github/workflows/ci.yml`.
@@ -54,10 +51,10 @@ CI runs this same sequence — see `.github/workflows/ci.yml`.
 - `lib/ministack-stack.ts` — the stack: two S3 buckets (data bucket `cdk-demo-bucket` + access-log bucket `cdk-demo-log-bucket`) + Lambda `cdk-doubler`. The **log bucket** exists solely to receive the data bucket's S3 server access logs — it satisfies the access-logging security rules (cdk-nag `AwsSolutions-S1` / checkov `CKV_AWS_18`) and logs to itself to avoid an infinite chain of log buckets; only the data bucket is exercised by tests. **Resource names are hard-coded** so tests address them directly without reading CloudFormation outputs (`test/unit/stack.test.ts` asserts exactly two buckets).
 - `lambda/index.js` — the function under test (doubles `event.n`, returns `process.version`). `lambda/index.d.ts` is a hand-written type contract (committed) so the unit test can import it with types without `allowJs`.
 - **Test pyramid** (`jest.config.js` picks the tier dir via `JEST_TIER`):
-  - `test/unit/` — `lambda.test.ts` (pure handler logic) + `stack.test.ts` (CDK `Template` fine-grained assertions **and** a full-template snapshot). Synth-only; no emulator/Docker. The snapshot baseline lives in `test/unit/__snapshots__/` and must be updated (`-u`) after any intended template change.
+  - `test/unit/` — `lambda.test.ts` (pure handler logic) + `stack.test.ts` (CDK `Template` fine-grained assertions **plus** a fast-tier cdk-nag `AwsSolutions` assertion). Synth-only; no emulator/Docker. The fine-grained assertions encode security/structural intent ("blocks public access", "denies insecure transport", DLQ/CMK, etc.); the cdk-nag assertion drives the same `AwsSolutionsChecks` pack `bin/app.ts` registers — via the pack's documented `validateScope(stack)` testing entry point — and asserts zero unsuppressed findings, so a nag regression fails in the fast tier rather than only in CI `cdk synth`. **The full-template snapshot was removed (issue #25):** it overlapped the fine-grained assertions, couldn't guard the cdk-nag posture, and its incremental signal was dominated by Lambda asset-hash churn (constant `-u` re-baselining that trains reviewers to rubber-stamp). Note cdk-nag v3 removed the v2 Aspects `visit` API and `Annotations.fromStack` no longer surfaces nag findings, and an in-process `app.synth()` does not enforce the v3 policy-validation plugin — hence `validateScope`.
   - `test/integration/` — Jest + AWS SDK v3 clients pointed at `AWS_ENDPOINT_URL`, against deployed MiniStack resources. Assumes `cdk deploy` already ran.
   - `test/e2e/` — placeholder (`describe.skip`) for a future real-account deployment stage.
-- **Mutation testing** — `npm run test:mutation` (Stryker) mutates `lambda/index.js` against the unit tier; CI gate breaks under 80% (currently 100%). Scoped to the Lambda logic only — the CDK stack is declarative config Stryker can't tie to synth output (mutants show as "no coverage"), so it's covered by cdk-nag/checkov/assertions/snapshot instead. `incremental: true` caches per-mutant verdicts; CI restores/saves that cache via `actions/cache`.
+- **Mutation testing** — `npm run test:mutation` (Stryker) mutates `lambda/index.js` against the unit tier; CI gate breaks under 80% (currently 100%). Scoped to the Lambda logic only — the CDK stack is declarative config Stryker can't tie to synth output (mutants show as "no coverage"), so it's covered by cdk-nag/checkov/fine-grained assertions instead. `incremental: true` caches per-mutant verdicts; CI restores/saves that cache via `actions/cache`.
 - **Fuzzing** — `fuzz/handler.fuzz.js` is a jazzer.js (libFuzzer) target asserting the handler never throws and never returns a non-finite `doubled`. fast-check property tests live in the unit tier (always-on gate); jazzer is a separate, time-boxed `fuzz` job that runs on schedule/`workflow_dispatch` only (fuzzing is exploratory, not a fast gate) and needs **GLIBC >= 2.38** (fine on `ubuntu-latest`; won't run on older hosts). The corpus is cached across runs; crash inputs upload as an artifact.
   - **The fast-check seed is pinned** (`test/setup.fast-check.ts`, wired via Jest `setupFilesAfterEnv`). Without it `@fast-check/jest` seeds each run with `Date.now()^Math.random()`, so the same commit explores different inputs every run — which made the property gate (and Stryker's initial dry run, which _is_ the unit tier) flaky: identical code passed on one CI trigger and failed on another. Pinning makes every run reproducible; unbounded random exploration still happens in the scheduled jazzer job. Known bug classes are locked by explicit `it.each` cases, not luck. **Don't unpin to "find more bugs" — add a fuzz iteration or an example case instead.**
 
