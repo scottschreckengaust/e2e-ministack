@@ -411,15 +411,24 @@ after a crash.
 When a worker hits an ambiguity it cannot resolve within its issue's scope (a design
 choice, conflicting acceptance criteria, a missing decision, an unexpected blocker):
 
-**Worker side (escalate, then stop):**
+**Worker side (escalate with a durable hand-off, then stop):**
 
+- **Push the branch and open a draft `[BLOCKED]` PR** — so the work is pickup-ready by this
+  orchestrator's human _or any other machine/user/agent/automation_, not just resumable by the
+  one worker. Commit whatever partial work exists (a failing test pinning the problem, a
+  half-fix, notes); if you blocked before anything was committable (e.g. the governance gate
+  tripped at triage), make an **empty commit** (`git commit --allow-empty`) so a PR can exist.
+  The draft PR body carries the numbered questions + options/tradeoffs/recommended-default, what
+  was tried, the current partial state, and a "how to take over" line; it uses **`Relates to #N`**
+  (NEVER `Closes` — it must not auto-close while unresolved) and a `blocked`/`help wanted` label
+  if the repo has one.
 - Post a comment on the **issue**, opening with its identity and a clear BLOCKED marker, then
-  numbered questions:
+  numbered questions, cross-linking the draft PR:
   `🤖 @<login> (agent:wK) — BLOCKED, need clarification:` + the questions + what it tried.
-- If a draft PR already exists, post the **same** questions on the PR, cross-linking the issue
-  comment (so the question is visible wherever a human looks).
-- Report `STATE: BLOCKED` + the verbatim questions to the orchestrator and **STOP**. Do not
-  guess outside scope.
+- Post the **same** questions on the PR (so the question is visible wherever a human or external
+  actor looks).
+- Report `STATE: BLOCKED` + the PR URL + the verbatim questions to the orchestrator and **STOP**.
+  Do not guess outside scope.
 
 **Orchestrator side (park + free slot):**
 
@@ -463,8 +472,10 @@ state, exactly one of:
 - **DONE/DRAFT** — "PR #X opened (draft); body uses `Closes #N` so the issue auto-closes on
   merge. No longer actively working — now in the orchestrator's review pipeline." (Parked, do
   NOT redispatch.)
-- **BLOCKED** — "blocked on the questions above (§7); not working until answered." (Parked
-  awaiting human; do NOT redispatch — it resumes via §7.)
+- **BLOCKED** — "blocked on the questions above (§7); draft `[BLOCKED]` PR #X opened (branch
+  pushed, open for pickup); not working until answered." (Parked awaiting human; this
+  orchestrator does NOT redispatch — it resumes via §7 — but the draft PR lets any external
+  actor take the work over.)
 - **DONE-NO-CLOSE** — the work is finished but lands on a PR that does **not** close this issue
   (a _related_ issue touched by another issue's PR, or a partial contribution): "work complete;
   contributed via PR #X which does NOT close this issue. **Over and out** — orchestrator,

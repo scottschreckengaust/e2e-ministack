@@ -70,9 +70,12 @@ mode on a repo you've run before; set `N=1` for a strict single-issue dry run. (
 - **Sequencing for the human:** on each promotion post a "🔀 Merge guidance (for the reviewer)"
   comment **on the PR** (independent vs must-follow-#X, cluster, merge order), mirrored to the
   issue. Merge order is driven by clusters, NOT PR-number recency — say so.
-- **Stuck protocol:** a blocked worker posts numbered questions on the issue+PR under
-  `@<login> (agent:wK)` and stops; a human answers by addressing the `agent:wK` token; the
-  orchestrator detects the reply and warm/cold-resumes (SKILL §7).
+- **Stuck protocol:** a blocked worker pushes its branch + opens a **draft `[BLOCKED]` PR**
+  (`Relates to`, never `Closes`) documenting the decision/options + a "how to take over" note,
+  posts numbered questions on the issue+PR under `@<login> (agent:wK)`, and stops. A human (or
+  any other agent/automation) answers by addressing the `agent:wK` token or by picking up the
+  pushed branch; the orchestrator detects the reply and warm/cold-resumes (SKILL §7). The draft
+  PR is the durable hand-off artifact — don't mistake a `[BLOCKED]` draft for a stray/abandoned PR.
 - **Durability:** maintain the crash-recoverable ledger every loop (any durable file outside a
   worktree — a session-memory file if present, else a gitignored `.resolve-open-issues-ledger.md`
   at the repo root; SKILL §8). It's a cache — the public issue/PR threads are the real source of

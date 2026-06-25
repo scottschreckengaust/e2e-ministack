@@ -168,12 +168,31 @@ gets exactly one such line — never leave one unmentioned. · **Reproduced root
 deferrals + why). End the body with:
 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
 
-## If BLOCKED (ambiguity you cannot resolve within scope)
+## If BLOCKED (ambiguity/conflict you cannot resolve within scope)
 
-1. `gh issue comment {{N}} --body "🤖 @{{GH_LOGIN}} (agent:{{WK}}) — BLOCKED, need clarification: <numbered questions> · Tried: <what you tried>"`
-2. If a draft PR exists, post the SAME questions on it (cross-link the issue comment).
-3. Report `STATE: BLOCKED` + the verbatim questions and **STOP**. Do NOT guess outside scope.
-   (A human will answer by addressing `agent:{{WK}}`; the orchestrator resumes you.)
+When blocked, **leave a durable, pickup-ready artifact** — a pushed branch AND a draft PR — so
+this orchestrator's human, _or any other machine / user / agent / automation_, can take a stab
+without re-deriving your context. A blocked worker that only comments strands the work; a blocked
+worker that leaves a branch + draft PR hands off cleanly. Do all of:
+
+1. **Capture whatever you have, then push.** Stage any partial work (a failing test that pins the
+   problem, a half-fix, analysis notes) and commit it. **If you blocked before producing anything
+   committable** (e.g. the governance gate tripped at triage, before code), make an **empty commit**
+   so a PR can still exist:
+   `git commit --allow-empty -m "wip(#{{N}}): BLOCKED — <one-line blocker>"`. Then `git push -u origin fix/issue-{{N}}-{{SLUG}}`.
+2. **Open (or update) a DRAFT PR documenting the blocker** so it's discoverable:
+   `gh pr create --draft --base main --title "[BLOCKED] {{PR_TITLE}}"`. The body MUST carry:
+   **the numbered questions/decision**, options + tradeoffs + your recommended default, **what you
+   tried**, the **current partial state** (what's done, what's left), and a **"How to take over"**
+   line (push to this branch, or reply addressing `@{{GH_LOGIN}} (agent:{{WK}})`). For every issue
+   use a **`Relates to #N`** line (NEVER `Closes` — it must NOT auto-close while still unresolved).
+   If a `blocked` / `help wanted` label exists in the repo, apply it (`gh pr edit --add-label`); skip if absent.
+3. **Post the SAME numbered questions on every issue** in {{ISSUES}}, cross-linking the draft PR
+   (so the issue thread and PR thread both carry the full decision — see the escalation rule:
+   the complete question goes on the thread, not only in-session).
+4. Report `STATE: BLOCKED` + the PR URL + the verbatim questions and **STOP**. Do NOT guess
+   outside scope. (This orchestrator resumes you when a human addresses `agent:{{WK}}`; independently,
+   the draft PR lets any external actor pick the work up from the branch.)
 
 ## Terminal sign-out (your FINAL public action before you stop — REQUIRED)
 
@@ -182,7 +201,8 @@ you cover** so the supervisor never mistakes a finished/crashed worker for an ac
 
 - Done (fully-resolved issue): post on each such issue — `gh issue comment THAT_NUM --body "🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out, over and out. PR #N opened (draft); its body lists 'Closes #THIS' so this issue auto-closes on merge. No longer actively working — now in the orchestrator's review pipeline."` (Truthful only because the PR body carries that issue's `Closes` line — verify before posting.)
 - DONE-NO-CLOSE (partially-addressed issue that stays open): sign out — `🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out. PR #N addresses part of this (linked 'Relates to'); separate concerns remain, so this issue stays OPEN for follow-up. Over and out — orchestrator, reassign/close as you see fit.`
-- Blocked: sign out noting you're blocked on the posted questions (§ If BLOCKED) and not working until answered.
+- Blocked: sign out noting you're blocked on the posted questions (§ If BLOCKED), pointing at the
+  draft `[BLOCKED]` PR #N you opened (branch pushed, open for pickup), and not working until answered.
 - Abandoned: `... — could not complete: <reason>. No viable PR. Issue is FREE FOR PICKUP.`
   Do NOT post a separate "closing" comment — the per-issue `Closes #X` lines in the PR body
   handle closure; the sign-out + the orchestrator's acceptance summary are the only comments needed.
