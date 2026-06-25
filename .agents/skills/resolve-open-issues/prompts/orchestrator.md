@@ -50,8 +50,9 @@ mode on a repo you've run before; set `N=1` for a strict single-issue dry run. (
 
 ## Authoritative config
 
-- **Pipeline caps:** `max_ready` starts at 1 (merge-train front) + draft funnel of
-  `max_in_flight − max_ready`; total open PRs ≤ the injected `--max-in-flight` (default 3,
+- **Pipeline caps:** `max_ready` starts at 1 (merge-train front) + draft funnel
+  `max_draft = max_in_flight − ready_count` (live ready count, not the cap — SKILL §2/§3);
+  total open PRs ≤ the injected `--max-in-flight` (default 3,
   ceiling 1000). Both caps adapt (SKILL §5a). (Dial: SKILL §5.)
 - **Worker contract:** each issue gets ONE background worker (`prompts/subagent-issue.md`) that
   goes root-cause → worktree → TDD → local gates → **draft PR** → report, then **STOPS**.
@@ -76,6 +77,9 @@ mode on a repo you've run before; set `N=1` for a strict single-issue dry run. (
   any other agent/automation) answers by addressing the `agent:wK` token or by picking up the
   pushed branch; the orchestrator detects the reply and warm/cold-resumes (SKILL §7). The draft
   PR is the durable hand-off artifact — don't mistake a `[BLOCKED]` draft for a stray/abandoned PR.
+  **A license/governance-policy conflict is a first-class block** (the worker prompt's "Adopting a
+  NEW tool" gate): the reply you're waiting for is a _decision_ (use alternative X / drop the issue
+  / override with reason), not a clarification — resume the worker with it the same way.
 - **Durability:** maintain the crash-recoverable ledger every loop (any durable file outside a
   worktree — a session-memory file if present, else a gitignored `.resolve-open-issues-ledger.md`
   at the repo root; SKILL §8). It's a cache — the public issue/PR threads are the real source of
@@ -136,9 +140,9 @@ comfortable and CI is clean, down on rate-limits or piling rebases/CI-failures.
   `Closes #N` to the PR body, or manually close on merge with a one-line proposed-closure comment.
 - **Sign-out disambiguates exit.** Each worker's final public act (on every issue it covers) is
   `🤖 @<login> (agent:wK) — signing out, over and out.` + terminal state (DONE/DRAFT, BLOCKED,
-  DONE-NO-CLOSE, or ABANDONED→free for pickup). **Pickup rule:** redispatch an issue if OPEN + no live worker
-  - (sign-out=ABANDONED, or a claim comment with NO sign-out and worker not live = crashed).
-    Never redispatch DONE/DRAFT or BLOCKED.
+  DONE-NO-CLOSE, or ABANDONED→free for pickup). **Pickup rule:** redispatch an issue if OPEN + no
+  live worker + (sign-out=ABANDONED, or a claim comment with NO sign-out and worker not live =
+  crashed). Never redispatch DONE/DRAFT or BLOCKED.
 
 ## Never
 

@@ -94,7 +94,7 @@ Then signal state IMMEDIATELY (comment on **every** issue in {{ISSUES}}):
 **The repo's own config is the source of truth for which gates exist and their thresholds — do
 not hard-code a gate list here, it goes stale as the repo evolves.** Run, in order:
 
-1. **`pre-commit run --files {{FILES}}`** (if `.pre-commit-config.yaml` is present) — this is the
+1. **`pre-commit run --files {{ALLOWED_FILES}}`** (if `.pre-commit-config.yaml` is present) — this is the
    repo's declared fast-gate set; whatever it runs is authoritative. If pre-commit isn't
    installed, say so in the report and fall back to the package's own scripts.
 2. **The repo's defined test/build scripts** for what you touched — read `package.json`
@@ -117,10 +117,12 @@ draft that's green locally is green in CI and never lowers the bar.
 
 ## Pre-push self-review (run-local, BEFORE you commit/push)
 
-Once your gates are green but **before** committing and pushing, dispatch ONE focused
-**review subagent** over your own staged diff (`git diff --staged`) — a fresh pair of eyes
-catches what the author misses. Give it the issue scope and the allowed-files list, and have
-it check for, at minimum:
+Once your gates are green but **before** committing and pushing, review your own staged diff
+(`git diff --staged`). Prefer a **fresh pair of eyes**: dispatch ONE focused **review subagent**
+with the issue scope + the allowed-files list. **If you cannot dispatch a sub-subagent** (you are
+yourself a background subagent and nested dispatch may be unavailable in this harness), do the
+review **yourself** as a distinct, deliberate pass over `git diff --staged` — don't skip it. Either
+way, check for, at minimum:
 
 - **Scope creep** — any change outside {{ALLOWED_FILES}} / unrelated to {{ISSUES}}.
 - **Governance/policy violations** — a newly-introduced tool/dep/action that conflicts with the
@@ -178,8 +180,12 @@ worker that leaves a branch + draft PR hands off cleanly. Do all of:
 1. **Capture whatever you have, then push.** Stage any partial work (a failing test that pins the
    problem, a half-fix, analysis notes) and commit it. **If you blocked before producing anything
    committable** (e.g. the governance gate tripped at triage, before code), make an **empty commit**
-   so a PR can still exist:
-   `git commit --allow-empty -m "wip(#{{N}}): BLOCKED — <one-line blocker>"`. Then `git push -u origin fix/issue-{{N}}-{{SLUG}}`.
+   so a PR can still exist. Use `--no-verify` for this one content-free commit: it carries nothing
+   for the hooks to lint, and at triage time the Node/mise PATH may not be set up yet (quirk b), so
+   the pre-commit hook could otherwise fail and block the hand-off:
+   `git commit --allow-empty --no-verify -m "wip(#{{N}}): BLOCKED — <one-line blocker>"`. Then
+   `git push -u origin fix/issue-{{N}}-{{SLUG}}`. (`--no-verify` is ONLY for this empty
+   blocked-handoff commit — real content commits still run all gates.)
 2. **Open (or update) a DRAFT PR documenting the blocker** so it's discoverable:
    `gh pr create --draft --base main --title "[BLOCKED] {{PR_TITLE}}"`. The body MUST carry:
    **the numbered questions/decision**, options + tradeoffs + your recommended default, **what you
@@ -211,8 +217,7 @@ you cover** so the supervisor never mistakes a finished/crashed worker for an ac
 
 No `gh pr ready`. No CI polling at all — you've signed out; the orchestrator owns CI and will
 wake you if a check goes red (§ resume). No manually closing the issue (let the `Closes #X` lines
-
-- merge do it). No editing out-of-scope files. No removing the worktree.
+do it on merge). No editing out-of-scope files. No removing the worktree.
 
 ## Report back (your final message = structured data for the orchestrator, EXACTLY)
 
