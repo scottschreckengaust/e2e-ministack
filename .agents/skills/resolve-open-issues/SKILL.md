@@ -48,7 +48,8 @@ The operating defaults. The concurrency dial (§5) changes them deliberately; ab
 use these.
 
 - **Pipeline caps (merge-train):** start with **1** PR in _ready-for-review_ (`max_ready = 1`,
-  the train front), plus a _draft funnel_ of `max_in_flight − max_ready`. **`max_in_flight` is
+  the train front), plus a _draft funnel_ `max_draft = max_in_flight − ready_count` (the live
+  count of ready PRs, recomputed each loop — see §3). **`max_in_flight` is
   injected at launch** (`--max-in-flight`, default **3**, ceiling **1000**); both `max_ready`
   and `max_in_flight` adapt via the ratchet (§5a) — `max_ready` may grow beyond 1 when the
   train runs smoothly (speed matters). Total open PRs never exceed `max_in_flight`.
@@ -99,10 +100,12 @@ BACKLOG ─────▶ BUILDING ─────▶ DRAFT ──────�
 - **MERGED** — approved & merged; frees a ready slot, advances `main`, triggers the
   rebase+refill cascade (§6), then the issue is closed.
 
-Slot accounting: `building+draft ≤ max_draft` gates new dispatches; `ready ≤ max_ready` gates
-promotions; `in_flight ≤ max_in_flight` is the global ceiling. All three derive from the
-injected `--max-in-flight` (§2, §5a): `max_draft = max_in_flight − max_ready`. BLOCKED tokens
-do not count.
+Slot accounting: `in_flight ≤ max_in_flight` is the single global ceiling; `ready ≤ max_ready`
+gates promotions; new dispatches are gated by `building+draft ≤ max_draft`, where
+**`max_draft = max_in_flight − ready_count`** (the _current_ number of ready PRs, NOT the
+`max_ready` cap). Computing the funnel from live `ready_count` means empty ready slots stay
+usable by drafts, so raising `max_ready` adds throughput rather than cannibalizing the build
+funnel (§5/§5a). BLOCKED tokens do not count toward any of these.
 
 ---
 
@@ -149,9 +152,9 @@ where folding and cluster assignment are decided, before any dispatch:
 6. **Escalations** — for BLOCKED tokens, scan the issue/PR thread for a human reply
    addressing `agent:wK` (§7). If found, resume.
 7. **Refill** — while `building+draft < max_draft` and backlog non-empty: pick the next
-   issue (cluster-spread; hot clusters one-at-a-time), dispatch a worker (§ template).
-8. **Metrics + ledger** — recompute (§ below), write ledger (§8).
-9. **Reschedule** — pick the next wake (§ timers) via `ScheduleWakeup`, or stop if backlog
+   issue (cluster-spread; hot clusters one-at-a-time), dispatch a worker (§11 worker template).
+8. **Metrics + ledger** — recompute (§8), write ledger (§8).
+9. **Reschedule** — pick the next wake (§9 timers) via `ScheduleWakeup`, or stop if backlog
    empty AND nothing in flight (then emit the final per-PR status table).
 
 ---
@@ -241,7 +244,7 @@ never blind-retry a red check.
 Concretely:
 
 - **Widen the DRAFT funnel** — the real throughput dial is the number of _outstanding_ PRs
-  (drafts building/awaiting CI), `max_draft = max_in_flight − max_ready`. Workers build many
+  (drafts building/awaiting CI), `max_draft = max_in_flight − ready_count`. Workers build many
   issues' PRs in parallel as drafts.
 - **Keep a small "Ready for Review" front** — start with exactly ONE (`max_ready = 1`): the
   _front of the train_, rebased onto the latest `main` and all-green. `max_ready` may grow
@@ -311,8 +314,9 @@ browser session cookie, not the `gh` token). Instead:
     spread across **disjoint** clusters (a wider front is safe only when fronts don't conflict).
     Shrink back to 1 the moment rebase thrash reappears. This is the "speed when smooth" lever.
   - **Log every change** in the ledger (`knob: old→new` + trigger) so a silent runaway can't hide.
-- **Invariant:** `max_draft = max_in_flight − max_ready`, and total open PRs ≤ `max_in_flight`,
-  at every width.
+- **Invariant:** total open PRs ≤ `max_in_flight` at every width; the dispatch funnel
+  `max_draft = max_in_flight − ready_count` is computed from the _live_ ready count (§3), so an
+  empty ready slot is always usable by a draft and growing `max_ready` never starves the funnel.
 
 ### 5b. Pilot mode vs. steady-state
 
@@ -347,9 +351,10 @@ orchestrator's recurring loop. Its merge-closer responsibilities, every wakeup:
 
 1. **Review/approve — know what your repo actually requires.** Check
    `gh api repos/{o}/{r}/branches/main/protection` once and cache it:
-   - **No branch protection / no required reviews** (this repo today — returns `Branch not
-protected`): no approval is needed to merge. The orchestrator merges the green front PR
-     directly. There is nothing to "approve."
+   - **No branch protection / no required reviews** (the probe returns `Branch not protected`):
+     no approval is needed to merge. The orchestrator merges the green front PR directly. There
+     is nothing to "approve." (Whether a given repo is protected is a repo fact — record it in
+     the orchestrator prompt / the repo's own docs, not here; this skill stays repo-agnostic.)
    - **Reviews required:** ⚠️ **a PR cannot be approved by its own author.** Every PR here is
      authored by your `gh` login, so **you cannot self-approve via the API** — GitHub rejects
      `gh pr review --approve` on your own PR (`422 Unprocessable`). Do not pretend to; surface
@@ -409,17 +414,34 @@ after a crash.
 ## 7. Stuck → escalate → resume protocol
 
 When a worker hits an ambiguity it cannot resolve within its issue's scope (a design
-choice, conflicting acceptance criteria, a missing decision, an unexpected blocker):
+choice, conflicting acceptance criteria, a missing decision, an unexpected blocker — **or a
+license/governance-policy conflict**, e.g. the issue asks for a tool the project's policy
+forbids; see the worker prompt's "Adopting a NEW tool" gate):
 
-**Worker side (escalate, then stop):**
+A **governance-policy block is a first-class BLOCKED cause**, but its resume "answer" is a
+_decision_, not a clarification: the worker has already posted the conflict + a compliant
+alternative, so the human's reply is typically "use alternative X" / "drop this issue" /
+"override the policy here, with reason" — the orchestrator resumes the worker with that
+decision exactly as it would a clarification.
 
+**Worker side (escalate with a durable hand-off, then stop):**
+
+- **Push the branch and open a draft `[BLOCKED]` PR** — so the work is pickup-ready by this
+  orchestrator's human _or any other machine/user/agent/automation_, not just resumable by the
+  one worker. Commit whatever partial work exists (a failing test pinning the problem, a
+  half-fix, notes); if you blocked before anything was committable (e.g. the governance gate
+  tripped at triage), make an **empty commit** (`git commit --allow-empty`) so a PR can exist.
+  The draft PR body carries the numbered questions + options/tradeoffs/recommended-default, what
+  was tried, the current partial state, and a "how to take over" line; it uses **`Relates to #N`**
+  (NEVER `Closes` — it must not auto-close while unresolved) and a `blocked`/`help wanted` label
+  if the repo has one.
 - Post a comment on the **issue**, opening with its identity and a clear BLOCKED marker, then
-  numbered questions:
+  numbered questions, cross-linking the draft PR:
   `🤖 @<login> (agent:wK) — BLOCKED, need clarification:` + the questions + what it tried.
-- If a draft PR already exists, post the **same** questions on the PR, cross-linking the issue
-  comment (so the question is visible wherever a human looks).
-- Report `STATE: BLOCKED` + the verbatim questions to the orchestrator and **STOP**. Do not
-  guess outside scope.
+- Post the **same** questions on the PR (so the question is visible wherever a human or external
+  actor looks).
+- Report `STATE: BLOCKED` + the PR URL + the verbatim questions to the orchestrator and **STOP**.
+  Do not guess outside scope.
 
 **Orchestrator side (park + free slot):**
 
@@ -463,8 +485,10 @@ state, exactly one of:
 - **DONE/DRAFT** — "PR #X opened (draft); body uses `Closes #N` so the issue auto-closes on
   merge. No longer actively working — now in the orchestrator's review pipeline." (Parked, do
   NOT redispatch.)
-- **BLOCKED** — "blocked on the questions above (§7); not working until answered." (Parked
-  awaiting human; do NOT redispatch — it resumes via §7.)
+- **BLOCKED** — "blocked on the questions above (§7); draft `[BLOCKED]` PR #X opened (branch
+  pushed, open for pickup); not working until answered." (Parked awaiting human; this
+  orchestrator does NOT redispatch — it resumes via §7 — but the draft PR lets any external
+  actor take the work over.)
 - **DONE-NO-CLOSE** — the work is finished but lands on a PR that does **not** close this issue
   (a _related_ issue touched by another issue's PR, or a partial contribution): "work complete;
   contributed via PR #X which does NOT close this issue. **Over and out** — orchestrator,

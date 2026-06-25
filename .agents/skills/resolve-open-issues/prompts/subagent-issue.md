@@ -46,6 +46,25 @@ Touch ONLY: {{ALLOWED_FILES}}. Do NOT edit anything else (note unrelated problem
 body; don't fix them). Deferred/out-of-scope (separate issues — note in PR body, don't
 implement): {{DEFERRALS_WITH_REASONS}}.
 
+### Adopting a NEW tool/dependency/action is a governance decision — gate it
+
+If your fix introduces a **new** third-party tool, dependency, or GitHub Action (not bumping
+one already present), it is a **policy decision, not routine implementation** — even when the
+issue explicitly asks for that tool by name. Before adding it:
+
+1. **Check it against the project's stated license/governance policy** — grep CLAUDE.md and
+   `docs/` for license stances (this repo treats **AGPL/copyleft as a near-dealbreaker** and
+   avoids single-vendor lock-in; that's why k6 and Renovate were both ruled out). Confirm the
+   candidate's actual license.
+2. **If it conflicts** (copyleft license, vendor lock-in the project avoids, or anything
+   contradicting a documented decision in CLAUDE.md / a tracked issue): **do NOT adopt it.**
+   Treat it as **BLOCKED** (§ If BLOCKED) — post the conflict + a compliant alternative and
+   stop. Picking the tool the issue named when it violates policy is a silent in-scope change
+   that creates config-vs-policy drift; surfacing the conflict is the correct move, not
+   proceeding. (Real precedent: a worker adopted AGPL-licensed Renovate for an "add update
+   automation" issue; it had to be ripped out later.)
+3. **If it's clean**, note the license + why it satisfies policy in the PR body's "fix" section.
+
 ## Verification (TDD where executable; reasoned where not)
 
 {{VERIFICATION_PLAN}}
@@ -75,7 +94,7 @@ Then signal state IMMEDIATELY (comment on **every** issue in {{ISSUES}}):
 **The repo's own config is the source of truth for which gates exist and their thresholds — do
 not hard-code a gate list here, it goes stale as the repo evolves.** Run, in order:
 
-1. **`pre-commit run --files {{FILES}}`** (if `.pre-commit-config.yaml` is present) — this is the
+1. **`pre-commit run --files {{ALLOWED_FILES}}`** (if `.pre-commit-config.yaml` is present) — this is the
    repo's declared fast-gate set; whatever it runs is authoritative. If pre-commit isn't
    installed, say so in the report and fall back to the package's own scripts.
 2. **The repo's defined test/build scripts** for what you touched — read `package.json`
@@ -95,6 +114,26 @@ let enhancements erode quality.
 Report which gates you ran and their results (§ Report back). The goal: match exactly what the
 repo's pre-commit + CI would enforce, plus hold every gate at its current high-water mark, so a
 draft that's green locally is green in CI and never lowers the bar.
+
+## Pre-push self-review (run-local, BEFORE you commit/push)
+
+Once your gates are green but **before** committing and pushing, review your own staged diff
+(`git diff --staged`). Prefer a **fresh pair of eyes**: dispatch ONE focused **review subagent**
+with the issue scope + the allowed-files list. **If you cannot dispatch a sub-subagent** (you are
+yourself a background subagent and nested dispatch may be unavailable in this harness), do the
+review **yourself** as a distinct, deliberate pass over `git diff --staged` — don't skip it. Either
+way, check for, at minimum:
+
+- **Scope creep** — any change outside {{ALLOWED_FILES}} / unrelated to {{ISSUES}}.
+- **Governance/policy violations** — a newly-introduced tool/dep/action that conflicts with the
+  license policy (see "Adopting a NEW tool" above); anything contradicting CLAUDE.md or docs.
+- **Correctness + leftovers** — obvious bugs, debug prints, commented-out code, a `Closes #N`
+  that should be `Relates to #N` (or vice-versa), a snapshot/lockfile that moved unintentionally.
+- **Doc drift** — a code/config change that makes an existing doc statement false.
+
+If the review surfaces a real problem **fix it and re-run the gates** before pushing; if it
+surfaces a policy conflict you can't resolve in scope, go to § If BLOCKED. Only push a diff the
+review passed. Summarize the review verdict in your report's GATES line (e.g. `self-review=pass`).
 
 ## Commit (PATH-in-same-invocation — see quirk b) + push
 
@@ -131,12 +170,35 @@ gets exactly one such line — never leave one unmentioned. · **Reproduced root
 deferrals + why). End the body with:
 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
 
-## If BLOCKED (ambiguity you cannot resolve within scope)
+## If BLOCKED (ambiguity/conflict you cannot resolve within scope)
 
-1. `gh issue comment {{N}} --body "🤖 @{{GH_LOGIN}} (agent:{{WK}}) — BLOCKED, need clarification: <numbered questions> · Tried: <what you tried>"`
-2. If a draft PR exists, post the SAME questions on it (cross-link the issue comment).
-3. Report `STATE: BLOCKED` + the verbatim questions and **STOP**. Do NOT guess outside scope.
-   (A human will answer by addressing `agent:{{WK}}`; the orchestrator resumes you.)
+When blocked, **leave a durable, pickup-ready artifact** — a pushed branch AND a draft PR — so
+this orchestrator's human, _or any other machine / user / agent / automation_, can take a stab
+without re-deriving your context. A blocked worker that only comments strands the work; a blocked
+worker that leaves a branch + draft PR hands off cleanly. Do all of:
+
+1. **Capture whatever you have, then push.** Stage any partial work (a failing test that pins the
+   problem, a half-fix, analysis notes) and commit it. **If you blocked before producing anything
+   committable** (e.g. the governance gate tripped at triage, before code), make an **empty commit**
+   so a PR can still exist. Use `--no-verify` for this one content-free commit: it carries nothing
+   for the hooks to lint, and at triage time the Node/mise PATH may not be set up yet (quirk b), so
+   the pre-commit hook could otherwise fail and block the hand-off:
+   `git commit --allow-empty --no-verify -m "wip(#{{N}}): BLOCKED — <one-line blocker>"`. Then
+   `git push -u origin fix/issue-{{N}}-{{SLUG}}`. (`--no-verify` is ONLY for this empty
+   blocked-handoff commit — real content commits still run all gates.)
+2. **Open (or update) a DRAFT PR documenting the blocker** so it's discoverable:
+   `gh pr create --draft --base main --title "[BLOCKED] {{PR_TITLE}}"`. The body MUST carry:
+   **the numbered questions/decision**, options + tradeoffs + your recommended default, **what you
+   tried**, the **current partial state** (what's done, what's left), and a **"How to take over"**
+   line (push to this branch, or reply addressing `@{{GH_LOGIN}} (agent:{{WK}})`). For every issue
+   use a **`Relates to #N`** line (NEVER `Closes` — it must NOT auto-close while still unresolved).
+   If a `blocked` / `help wanted` label exists in the repo, apply it (`gh pr edit --add-label`); skip if absent.
+3. **Post the SAME numbered questions on every issue** in {{ISSUES}}, cross-linking the draft PR
+   (so the issue thread and PR thread both carry the full decision — see the escalation rule:
+   the complete question goes on the thread, not only in-session).
+4. Report `STATE: BLOCKED` + the PR URL + the verbatim questions and **STOP**. Do NOT guess
+   outside scope. (This orchestrator resumes you when a human addresses `agent:{{WK}}`; independently,
+   the draft PR lets any external actor pick the work up from the branch.)
 
 ## Terminal sign-out (your FINAL public action before you stop — REQUIRED)
 
@@ -145,7 +207,8 @@ you cover** so the supervisor never mistakes a finished/crashed worker for an ac
 
 - Done (fully-resolved issue): post on each such issue — `gh issue comment THAT_NUM --body "🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out, over and out. PR #N opened (draft); its body lists 'Closes #THIS' so this issue auto-closes on merge. No longer actively working — now in the orchestrator's review pipeline."` (Truthful only because the PR body carries that issue's `Closes` line — verify before posting.)
 - DONE-NO-CLOSE (partially-addressed issue that stays open): sign out — `🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out. PR #N addresses part of this (linked 'Relates to'); separate concerns remain, so this issue stays OPEN for follow-up. Over and out — orchestrator, reassign/close as you see fit.`
-- Blocked: sign out noting you're blocked on the posted questions (§ If BLOCKED) and not working until answered.
+- Blocked: sign out noting you're blocked on the posted questions (§ If BLOCKED), pointing at the
+  draft `[BLOCKED]` PR #N you opened (branch pushed, open for pickup), and not working until answered.
 - Abandoned: `... — could not complete: <reason>. No viable PR. Issue is FREE FOR PICKUP.`
   Do NOT post a separate "closing" comment — the per-issue `Closes #X` lines in the PR body
   handle closure; the sign-out + the orchestrator's acceptance summary are the only comments needed.
@@ -154,8 +217,7 @@ you cover** so the supervisor never mistakes a finished/crashed worker for an ac
 
 No `gh pr ready`. No CI polling at all — you've signed out; the orchestrator owns CI and will
 wake you if a check goes red (§ resume). No manually closing the issue (let the `Closes #X` lines
-
-- merge do it). No editing out-of-scope files. No removing the worktree.
+do it on merge). No editing out-of-scope files. No removing the worktree.
 
 ## Report back (your final message = structured data for the orchestrator, EXACTLY)
 
