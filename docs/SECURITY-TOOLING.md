@@ -28,64 +28,66 @@ when the job fails; SARIF-capable gates also upload to the Security tab.
 | Threat model          | security.yml | `threat-model.tc.json` parses/sections  | hard-fail      |
 | actionlint + zizmor   | security.yml | workflow correctness + security         | hard-fail      |
 
-## License policy — DENY-list (and why, not allow-list)
+## License policy — ALLOW-list (and why, not deny-list)
 
-The PR-time `dependency-review` gate enforces a **deny-list** of disallowed
-licenses (`deny-licenses`), not an allow-list. This was a deliberate, verified
-choice:
+The PR-time `dependency-review` gate enforces an **allow-list** of permitted
+licenses (`allow-licenses`), not a deny-list. This reverses an earlier
+deny-list decision for two reasons:
 
-- `actions/dependency-review-action` **does not fail closed on undetectable
-  licenses** in either mode — per its docs, _"if we can't detect the license for
-  a dependency we will inform you, but the action won't fail."_ So an
-  allow-list's headline advantage (block-the-unknown) **does not materialise**
-  here; unknowns pass in both modes.
-- A **deny-list directly expresses the governance goal** — keep
-  copyleft / network-copyleft / source-available-non-FOSS dependencies out (the
-  same line that rejected k6/AGPL in #73 and removed Renovate/AGPL). The denied
-  set is small and stable.
-- An **allow-list would be high-friction**: every new permissive SPDX id a
-  dependency ships (`0BSD`, `BlueOak-1.0.0`, `Python-2.0`, `Unlicense`, …) would
-  false-positive until the list is widened.
+- **`deny-licenses` is deprecated and slated for removal**
+  ([upstream issue 997](https://github.com/actions/dependency-review-action/issues/997)).
+  The maintainers' rationale is the completeness problem: _"a license deny list
+  is a bad idea… it's easy to miss commercial licenses like Elastic."_ A
+  blocklist gives false security — you are always one new copyleft/commercial
+  variant behind.
+- **An allow-list fails CLOSED on unexpected _detected_ licenses.** Anything
+  detected and not on the list fails the PR, so copyleft/commercial
+  introductions are blocked by omission — no enumerate-every-bad-id treadmill.
+  This is the right posture for the repo's FOSS-only governance line (the same
+  one that rejected k6/AGPL in #73 and removed Renovate/AGPL).
+
+The allow-list is the **exhaustive set of permissive licenses actually present
+in the tree** (verified with `license-checker`), so it does not false-positive
+on the current dependencies. Refresh it when a new permissive dependency is
+introduced — the PR adding that dependency will flag it here, which is the
+intended review point.
 
 ### License-family taxonomy (the rationale, by family)
 
-| Family                      | Examples                                         | Verdict            |
-| --------------------------- | ------------------------------------------------ | ------------------ |
-| Permissive                  | MIT, Apache-2.0, BSD-2/3, ISC, 0BSD              | ✅ allow           |
-| Weak / file-level copyleft  | LGPL-\*, MPL-2.0, EPL-1.0/2.0                    | ❌ deny¹           |
-| Strong copyleft             | GPL-2.0, GPL-3.0                                 | ❌ deny            |
-| Network copyleft            | AGPL-3.0                                         | ❌ deny (#73 line) |
-| Source-available / non-FOSS | SSPL-1.0, BUSL-1.1, Elastic-2.0, Commons-Clause² | ❌ deny            |
+| Family                      | Examples                                        | Verdict                   |
+| --------------------------- | ----------------------------------------------- | ------------------------- |
+| Permissive                  | MIT, Apache-2.0, BSD-2/3, ISC, 0BSD, BlueOak    | ✅ allow-listed           |
+| Weak / file-level copyleft  | LGPL-\*, MPL-2.0, EPL-1.0/2.0                   | ❌ not allowed            |
+| Strong copyleft             | GPL-2.0, GPL-3.0                                | ❌ not allowed            |
+| Network copyleft            | AGPL-3.0                                        | ❌ not allowed (#73 line) |
+| Source-available / non-FOSS | SSPL-1.0, BUSL-1.1, Elastic-2.0, Commons-Clause | ❌ not allowed            |
 
-¹ **LGPL/MPL/EPL are absent from the current tree** (verified with
-`license-checker`), so denying them is free today and keeps the gate
-fail-closed against a future introduction. Loosen only if a needed dependency
-forces it.
+Everything below "permissive" is blocked simply by **not being on the
+allow-list** — there is no list of bad ids to maintain.
 
-² **Commons-Clause is NOT in `deny-licenses`.** It is a rider, not a valid
-SPDX identifier, and `dependency-review-action` rejects the entire list if it
-appears (`Invalid license(s) in deny-licenses: Commons-Clause`). Riders are
-delegated to Trivy's license scan (see "Known limitations").
+### Enforced `allow-licenses`
 
-### Enforced `deny-licenses`
-
-See `security.yml` → `dependency-review` job. Includes the deprecated bare
-`GPL-2.0`/`GPL-3.0` ids alongside the SPDX `-only`/`-or-later` forms because
-some tools still emit the bare ids.
+See `security.yml` → `dependency-review` job:
+`MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0,
+Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
 
 ### Known limitations (documented, not hidden)
 
-- **Undetected/unlicensed dependencies pass `dependency-review` silently** (see
-  above). **Trivy's license scan is the intended full-tree backstop** for the
-  `UNKNOWN` case (separate follow-up, tracked under #77).
-- **Dual licenses such as `(MIT OR GPL-3.0-or-later)` stay GREEN** — the SPDX
-  `OR` expression is satisfied by the permissive side, so a `GPL-*` deny does
-  not (and should not) flag them. `case@1.6.3` in the current tree is exactly
-  this case; it is not a violation.
-- **Riders such as `Commons-Clause`** (e.g. `MIT AND Commons-Clause`) cannot go
-  in `deny-licenses` at all — they are not valid SPDX ids and the action
-  rejects the whole list if one appears. Trivy's license scan is the
-  authoritative catch for riders.
+- **Undetected/unlicensed dependencies pass `dependency-review` silently** —
+  per the action's docs, _"if we can't detect the license… the action won't
+  fail."_ This is true in both allow- and deny-list modes. **Trivy's license
+  scan is the intended full-tree backstop** for the `UNKNOWN` case (separate
+  follow-up, tracked under #77).
+- **Dual licenses such as `(MIT OR GPL-3.0-or-later)`, `(MIT OR CC0-1.0)`,
+  `(BSD-2-Clause OR MIT OR Apache-2.0)` stay GREEN** — the SPDX `OR` expression
+  is satisfied by an allowed member. `case@1.6.3` (`MIT OR GPL-3.0-or-later`)
+  in the current tree is exactly this case; its GPL side is moot and it is not
+  a violation.
+- **Riders such as `Commons-Clause`** (e.g. `MIT AND Commons-Clause`) are not
+  valid standalone SPDX ids; an `AND`-rider expression is allowed only if every
+  member is allow-listed, so a Commons-Clause rider would fail (Commons-Clause
+  is not on the list). Trivy's license scan remains the authoritative catch for
+  riders the SPDX expression doesn't surface.
 
 ### Severity threshold
 
