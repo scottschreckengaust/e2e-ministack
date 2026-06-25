@@ -238,9 +238,10 @@ jobs:
           # LGPL/MPL/EPL are absent from the current tree, so denying them is
           # free and keeps the gate fail-closed on a future introduction.
           # NB: dual licenses like `(MIT OR GPL-3.0-or-later)` stay GREEN — the
-          # OR is satisfied by the permissive side. Commons-Clause is a rider
-          # that SPDX-expression matching catches only best-effort; Trivy's
-          # license scan is the authoritative catch for riders.
+          # OR is satisfied by the permissive side.
+          # Commons-Clause is deliberately NOT listed: it is a rider, not a
+          # valid SPDX id, and the action rejects the whole list if it appears.
+          # Riders are Trivy's license scan's job (the authoritative catch).
           deny-licenses: >-
             GPL-2.0, GPL-2.0-only, GPL-2.0-or-later,
             GPL-3.0, GPL-3.0-only, GPL-3.0-or-later,
@@ -249,7 +250,7 @@ jobs:
             LGPL-3.0-only, LGPL-3.0-or-later,
             MPL-2.0, EPL-1.0, EPL-2.0,
             AGPL-3.0-only, AGPL-3.0-or-later,
-            SSPL-1.0, BUSL-1.1, Elastic-2.0, Commons-Clause
+            SSPL-1.0, BUSL-1.1, Elastic-2.0
 
   grype:
     name: Grype FS scan

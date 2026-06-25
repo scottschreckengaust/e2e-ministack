@@ -49,18 +49,23 @@ choice:
 
 ### License-family taxonomy (the rationale, by family)
 
-| Family                      | Examples                                        | Verdict            |
-| --------------------------- | ----------------------------------------------- | ------------------ |
-| Permissive                  | MIT, Apache-2.0, BSD-2/3, ISC, 0BSD             | ✅ allow           |
-| Weak / file-level copyleft  | LGPL-\*, MPL-2.0, EPL-1.0/2.0                   | ❌ deny¹           |
-| Strong copyleft             | GPL-2.0, GPL-3.0                                | ❌ deny            |
-| Network copyleft            | AGPL-3.0                                        | ❌ deny (#73 line) |
-| Source-available / non-FOSS | SSPL-1.0, BUSL-1.1, Elastic-2.0, Commons-Clause | ❌ deny            |
+| Family                      | Examples                                         | Verdict            |
+| --------------------------- | ------------------------------------------------ | ------------------ |
+| Permissive                  | MIT, Apache-2.0, BSD-2/3, ISC, 0BSD              | ✅ allow           |
+| Weak / file-level copyleft  | LGPL-\*, MPL-2.0, EPL-1.0/2.0                    | ❌ deny¹           |
+| Strong copyleft             | GPL-2.0, GPL-3.0                                 | ❌ deny            |
+| Network copyleft            | AGPL-3.0                                         | ❌ deny (#73 line) |
+| Source-available / non-FOSS | SSPL-1.0, BUSL-1.1, Elastic-2.0, Commons-Clause² | ❌ deny            |
 
 ¹ **LGPL/MPL/EPL are absent from the current tree** (verified with
 `license-checker`), so denying them is free today and keeps the gate
 fail-closed against a future introduction. Loosen only if a needed dependency
 forces it.
+
+² **Commons-Clause is NOT in `deny-licenses`.** It is a rider, not a valid
+SPDX identifier, and `dependency-review-action` rejects the entire list if it
+appears (`Invalid license(s) in deny-licenses: Commons-Clause`). Riders are
+delegated to Trivy's license scan (see "Known limitations").
 
 ### Enforced `deny-licenses`
 
@@ -77,9 +82,10 @@ some tools still emit the bare ids.
   `OR` expression is satisfied by the permissive side, so a `GPL-*` deny does
   not (and should not) flag them. `case@1.6.3` in the current tree is exactly
   this case; it is not a violation.
-- **Riders such as `Commons-Clause`** (e.g. `MIT AND Commons-Clause`) are only
-  best-effort under SPDX-expression matching; Trivy's license scan is the
-  authoritative catch.
+- **Riders such as `Commons-Clause`** (e.g. `MIT AND Commons-Clause`) cannot go
+  in `deny-licenses` at all — they are not valid SPDX ids and the action
+  rejects the whole list if one appears. Trivy's license scan is the
+  authoritative catch for riders.
 
 ### Severity threshold
 
