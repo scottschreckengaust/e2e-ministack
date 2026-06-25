@@ -46,6 +46,25 @@ Touch ONLY: {{ALLOWED_FILES}}. Do NOT edit anything else (note unrelated problem
 body; don't fix them). Deferred/out-of-scope (separate issues — note in PR body, don't
 implement): {{DEFERRALS_WITH_REASONS}}.
 
+### Adopting a NEW tool/dependency/action is a governance decision — gate it
+
+If your fix introduces a **new** third-party tool, dependency, or GitHub Action (not bumping
+one already present), it is a **policy decision, not routine implementation** — even when the
+issue explicitly asks for that tool by name. Before adding it:
+
+1. **Check it against the project's stated license/governance policy** — grep CLAUDE.md and
+   `docs/` for license stances (this repo treats **AGPL/copyleft as a near-dealbreaker** and
+   avoids single-vendor lock-in; that's why k6 and Renovate were both ruled out). Confirm the
+   candidate's actual license.
+2. **If it conflicts** (copyleft license, vendor lock-in the project avoids, or anything
+   contradicting a documented decision in CLAUDE.md / a tracked issue): **do NOT adopt it.**
+   Treat it as **BLOCKED** (§ If BLOCKED) — post the conflict + a compliant alternative and
+   stop. Picking the tool the issue named when it violates policy is a silent in-scope change
+   that creates config-vs-policy drift; surfacing the conflict is the correct move, not
+   proceeding. (Real precedent: a worker adopted AGPL-licensed Renovate for an "add update
+   automation" issue; it had to be ripped out later.)
+3. **If it's clean**, note the license + why it satisfies policy in the PR body's "fix" section.
+
 ## Verification (TDD where executable; reasoned where not)
 
 {{VERIFICATION_PLAN}}
@@ -95,6 +114,24 @@ let enhancements erode quality.
 Report which gates you ran and their results (§ Report back). The goal: match exactly what the
 repo's pre-commit + CI would enforce, plus hold every gate at its current high-water mark, so a
 draft that's green locally is green in CI and never lowers the bar.
+
+## Pre-push self-review (run-local, BEFORE you commit/push)
+
+Once your gates are green but **before** committing and pushing, dispatch ONE focused
+**review subagent** over your own staged diff (`git diff --staged`) — a fresh pair of eyes
+catches what the author misses. Give it the issue scope and the allowed-files list, and have
+it check for, at minimum:
+
+- **Scope creep** — any change outside {{ALLOWED_FILES}} / unrelated to {{ISSUES}}.
+- **Governance/policy violations** — a newly-introduced tool/dep/action that conflicts with the
+  license policy (see "Adopting a NEW tool" above); anything contradicting CLAUDE.md or docs.
+- **Correctness + leftovers** — obvious bugs, debug prints, commented-out code, a `Closes #N`
+  that should be `Relates to #N` (or vice-versa), a snapshot/lockfile that moved unintentionally.
+- **Doc drift** — a code/config change that makes an existing doc statement false.
+
+If the review surfaces a real problem **fix it and re-run the gates** before pushing; if it
+surfaces a policy conflict you can't resolve in scope, go to § If BLOCKED. Only push a diff the
+review passed. Summarize the review verdict in your report's GATES line (e.g. `self-review=pass`).
 
 ## Commit (PATH-in-same-invocation — see quirk b) + push
 
