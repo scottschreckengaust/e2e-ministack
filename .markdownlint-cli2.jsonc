@@ -14,5 +14,9 @@
     "MD041": false,
   },
   "globs": ["**/*.md"],
-  "ignores": ["node_modules", ".remember", ".threat-composer"],
+  // CHANGELOG.md is generated + force-pushed by release-please (issue #91); its
+  // format (section spacing, bullet style) is the generator's, not ours, and is
+  // regenerated each release — so it's excluded like other machine-owned files
+  // (package-lock.json, jest snapshots). See .prettierignore.
+  "ignores": ["node_modules", ".remember", ".threat-composer", "CHANGELOG.md"],
 }
