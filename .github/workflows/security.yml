@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
       # Pin the Python used to install Semgrep so the hash-pinned requirements
       # file (resolved against 3.12) installs reproducibly.
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
       - name: Run Semgrep (always writes SARIF; enforce after upload)
@@ -223,12 +223,21 @@ jobs:
     # PR-only: the action needs the PR's base↔head dependency diff. It is a
     # no-op (and errors) on push/schedule/dispatch, so gate it to pull_request.
     if: github.event_name == 'pull_request'
+    # pull-requests: write is required by comment-summary-in-pr (below), which
+    # posts the full vuln+license review as a single (overwritten) PR comment.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
+          # Post the full vuln + license review summary as a PR comment on
+          # every run (not just failures) so the complete output is visible
+          # without digging into job logs. Each run overwrites the prior one.
+          comment-summary-in-pr: always
           # Align with the existing `npm audit --audit-level=high` posture.
           # To triage everything during a rollout, temporarily lower this to
           # `low` (emit-all), then ratchet back to `high`.
@@ -424,7 +433,7 @@ jobs:
       - uses: ./.github/actions/setup
       # Pin the Python used to install the scanners so the hash-pinned
       # requirements file (resolved against 3.12) installs reproducibly.
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
       - name: Synthesize CloudFormation
