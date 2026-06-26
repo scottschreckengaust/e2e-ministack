@@ -376,7 +376,11 @@ orchestrator's recurring loop. Its merge-closer responsibilities, every wakeup:
    directly once green: `gh pr merge <pr> --squash`. Never merge a PR with red/pending checks.
 3. **Close / reconcile the issue.** On merge, confirm the auto-close fired (§7b); for
    DONE-NO-CLOSE related issues, take the disposition the worker handed you (close as
-   resolved-elsewhere, relabel, or re-scope).
+   resolved-elsewhere, relabel, or re-scope). **Assignee backstop:** also confirm the covered
+   issue(s) show the worker as GH assignee (the worker reports `ASSIGNED:`); if absent — e.g. a
+   pre-template-fill dispatch skipped Step 0a — `gh issue edit <N> --add-assignee @me` before
+   merge/close so the board reflects ownership. (This catches a dispatch that didn't fill the
+   template; see §10.)
 4. **Advance + refill.** Run the rebase+refill cascade (§6): promote the next draft to the
    front, dispatch a new worker to keep the funnel at width. Then `ScheduleWakeup` again.
 
@@ -626,6 +630,14 @@ measure the CI, then poll to match it, rather than holding any single fixed numb
   the `existing_users`/`contributors_only`/`collaborators_only` access gate, carrying no
   count, and admins/writers bypass them anyway. So the open-PR cap is **not machine-readable**:
   pass it in as `--max-in-flight` (§5a), never try to fetch or HTML-scrape it.
+- **Paraphrasing the worker prompt drops the newest step.** If the orchestrator dispatches by
+  reconstructing `prompts/subagent-issue.md` from memory instead of **reading the file and
+  filling its `{{PLACEHOLDERS}}`**, the most recently merged instruction is exactly what the
+  paraphrase loses — a batch once ran without self-assigning (Step 0a) for precisely this
+  reason, and nothing failed loudly. Fix is three-layered: dispatch by literal template-fill
+  (orchestrator.md), the worker self-verifies its assignment and reports `ASSIGNED:`
+  (subagent-issue.md), and the merge-closer asserts+repairs the issue assignee (§5c). Always
+  re-read the template each batch so merged changes propagate.
 
 ---
 
