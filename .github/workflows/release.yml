@@ -6,6 +6,15 @@ name: Release
 # CHANGELOG.md, and bumps the version. Merging that PR cuts the tagged GitHub
 # Release. No release happens until the maintainer merges the release PR, so
 # this is safe to run unattended (issue #91).
+#
+# Tag placement: the release PR branches off `main`; merging it lands the
+# release commit on `main` and release-please tags THAT commit on the default
+# branch — tags are never created on a disconnected branch.
+#
+# Requires the repo setting Settings -> Actions -> General -> "Allow GitHub
+# Actions to create and approve pull requests" to be ENABLED, else the
+# create-release-PR step fails ("GitHub Actions is not permitted to create or
+# approve pull requests").
 on:
   push:
     branches:
@@ -31,7 +40,7 @@ jobs:
       contents: write # create release-PR commits, tags, and the GitHub Release
       pull-requests: write # open/update the release PR
     steps:
-      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
