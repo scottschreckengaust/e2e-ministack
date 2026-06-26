@@ -107,6 +107,12 @@ owners=$(gh issue view <N> --json assignees --jq '[.assignees[].login]|join(",")
 If you SKIP or LOSE any issue in {{ISSUES}}, abort the whole unit of work (don't build a partial
 bundle) and report it — the orchestrator decides what to redispatch.
 
+**Self-verify before building (REQUIRED).** This step is non-negotiable even if the dispatch
+prompt above somehow omitted it: confirm `gh issue view <N> --json assignees` shows **you** as an
+assignee for every issue in {{ISSUES}} before you touch the worktree, and report the result as
+`ASSIGNED: yes/no` in § Report back. A missing self-assign is a defect to surface, not skip —
+if you cannot assign (and aren't merely losing a race), treat it as BLOCKED.
+
 ### Step 0b — claim comment + worktree build (only after you SOLELY own every issue)
 
 ```bash
@@ -260,6 +266,7 @@ WORKER: {{WK}}
 ISSUES: {{ISSUES}}
 BRANCH: fix/issue-{{N}}-{{SLUG}}
 WORKTREE: .claude/worktrees/fix-issue-{{N}}-{{SLUG}} (relative to repo root — never an absolute path)
+ASSIGNED: <yes/no — are you the GH assignee on every issue in {{ISSUES}}? (Step 0a self-verify)>
 PR_URL: <url>
 PR_NUMBER: <n>
 STATE: DRAFT | BLOCKED

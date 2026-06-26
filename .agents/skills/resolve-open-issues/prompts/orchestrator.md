@@ -58,6 +58,15 @@ mode on a repo you've run before; set `N=1` for a strict single-issue dry run. (
   goes root-cause → worktree → TDD → local gates → **draft PR** → report, then **STOPS**.
   Workers never mark ready, never poll CI in a loop, never close issues, never touch
   out-of-scope files, never remove their worktree.
+- **Dispatch by FILLING the template — never paraphrase it.** Read
+  `prompts/subagent-issue.md` and substitute its literal `{{PLACEHOLDERS}}`; dispatch **that**
+  text. Do **NOT** reconstruct/summarize the worker prompt from memory — **re-read the file
+  every batch** so steps merged since you last looked (e.g. the §Step 0a self-assign) propagate
+  automatically. (A from-memory paraphrase silently drops the newest step — exactly how a batch
+  once ran without self-assigning; see SKILL §10.) **Pre-dispatch checklist (per worker):**
+  template re-read this batch? · `{{PLACEHOLDERS}}` all filled (`ISSUES`, `N`, `SLUG`,
+  `ALLOWED_FILES`, `COMMIT_*`, `COAUTHOR_TRAILER`)? · Step 0a self-assign present? ·
+  scope/allowed-files set?
 - **Promotion is orchestrator-only and green-gated:** promote draft→ready **only** when CI is
   all-green AND `ready_count < max_ready` AND no other PR from the same hot cluster is already
   ready. Put a timer on CI (don't promote on elapsed time). On CI-red, wake the worker to fix.
