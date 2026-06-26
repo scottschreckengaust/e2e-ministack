@@ -35,6 +35,7 @@ crash-*
 *.outcome
 cfn-lint.txt
 npm-audit.json
+sbom.cdx.json
 # CI-downloaded scanner binaries
 /gitleaks
 /osv-scanner

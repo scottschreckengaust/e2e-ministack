@@ -1,0 +1,130 @@
+# Security Tooling
+
+Canonical reference for the repo's security/supply-chain gates: what each gate
+does, the **license policy** and its rationale, and the **intentional**
+local (pre-commit) ↔ remote (CI) coverage gap. Registered as a source-of-truth
+doc for the drift audit (#76); CLAUDE.md points here rather than duplicating it.
+
+## Gate inventory
+
+Two workflows. `ci.yml` (changes → unit → integration) builds, lint/unit-tests
+with the cdk-nag synth gate, then deploys/tests against MiniStack. `security.yml`
+runs the scanners below (also on a weekly cron). Every gate follows the
+**produce → always-upload → enforce** pattern so its report artifact exists even
+when the job fails; SARIF-capable gates also upload to the Security tab.
+
+| Gate                  | Workflow     | Scope                                   | Failure policy |
+| --------------------- | ------------ | --------------------------------------- | -------------- |
+| CodeQL (JS/TS)        | security.yml | SAST over source                        | hard-fail      |
+| Semgrep               | security.yml | SAST over source                        | hard-fail      |
+| npm audit             | security.yml | npm advisories (`--audit-level=high`)   | hard-fail      |
+| OSV-Scanner           | security.yml | lockfile advisories                     | hard-fail      |
+| Grype (FS)            | security.yml | filesystem vuln scan                    | hard-fail      |
+| Grype (MiniStack img) | security.yml | third-party emulator image by digest    | report-only    |
+| **dependency-review** | security.yml | PR dep-diff: vulns + **license policy** | hard-fail (PR) |
+| **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree              | informational  |
+| Gitleaks              | security.yml | secrets (full history)                  | hard-fail      |
+| checkov + cfn-lint    | security.yml | synthesized CloudFormation              | hard-fail      |
+| Threat model          | security.yml | `threat-model.tc.json` parses/sections  | hard-fail      |
+| actionlint + zizmor   | security.yml | workflow correctness + security         | hard-fail      |
+
+## License policy — ALLOW-list (and why, not deny-list)
+
+The PR-time `dependency-review` gate enforces an **allow-list** of permitted
+licenses (`allow-licenses`), not a deny-list. This reverses an earlier
+deny-list decision for two reasons:
+
+- **`deny-licenses` is deprecated and slated for removal**
+  ([upstream issue 997](https://github.com/actions/dependency-review-action/issues/997)).
+  The maintainers' rationale is the completeness problem: _"a license deny list
+  is a bad idea… it's easy to miss commercial licenses like Elastic."_ A
+  blocklist gives false security — you are always one new copyleft/commercial
+  variant behind.
+- **An allow-list fails CLOSED on unexpected _detected_ licenses.** Anything
+  detected and not on the list fails the PR, so copyleft/commercial
+  introductions are blocked by omission — no enumerate-every-bad-id treadmill.
+  This is the right posture for the repo's FOSS-only governance line (the same
+  one that rejected k6/AGPL in #73 and removed Renovate/AGPL).
+
+The allow-list is the **exhaustive set of permissive licenses actually present
+in the tree** (verified with `license-checker`), so it does not false-positive
+on the current dependencies. Refresh it when a new permissive dependency is
+introduced — the PR adding that dependency will flag it here, which is the
+intended review point.
+
+### License-family taxonomy (the rationale, by family)
+
+| Family                      | Examples                                        | Verdict                   |
+| --------------------------- | ----------------------------------------------- | ------------------------- |
+| Permissive                  | MIT, Apache-2.0, BSD-2/3, ISC, 0BSD, BlueOak    | ✅ allow-listed           |
+| Weak / file-level copyleft  | LGPL-\*, MPL-2.0, EPL-1.0/2.0                   | ❌ not allowed            |
+| Strong copyleft             | GPL-2.0, GPL-3.0                                | ❌ not allowed            |
+| Network copyleft            | AGPL-3.0                                        | ❌ not allowed (#73 line) |
+| Source-available / non-FOSS | SSPL-1.0, BUSL-1.1, Elastic-2.0, Commons-Clause | ❌ not allowed            |
+
+Everything below "permissive" is blocked simply by **not being on the
+allow-list** — there is no list of bad ids to maintain.
+
+### Enforced `allow-licenses`
+
+See `security.yml` → `dependency-review` job:
+`MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0,
+Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
+
+### Known limitations (documented, not hidden)
+
+- **Undetected/unlicensed dependencies pass `dependency-review` silently** —
+  per the action's docs, _"if we can't detect the license… the action won't
+  fail."_ This is true in both allow- and deny-list modes. **Trivy's license
+  scan is the intended full-tree backstop** for the `UNKNOWN` case (separate
+  follow-up, tracked under #77).
+- **Dual licenses such as `(MIT OR GPL-3.0-or-later)`, `(MIT OR CC0-1.0)`,
+  `(BSD-2-Clause OR MIT OR Apache-2.0)` stay GREEN** — the SPDX `OR` expression
+  is satisfied by an allowed member. `case@1.6.3` (`MIT OR GPL-3.0-or-later`)
+  in the current tree is exactly this case; its GPL side is moot and it is not
+  a violation.
+- **Riders such as `Commons-Clause`** (e.g. `MIT AND Commons-Clause`) are not
+  valid standalone SPDX ids; an `AND`-rider expression is allowed only if every
+  member is allow-listed, so a Commons-Clause rider would fail (Commons-Clause
+  is not on the list). Trivy's license scan remains the authoritative catch for
+  riders the SPDX expression doesn't surface.
+
+### Severity threshold
+
+`dependency-review` uses `fail-on-severity: high`, aligned with
+`npm audit --audit-level=high`. The action default is `low`. To triage the full
+backlog during a rollout, temporarily lower it to `low` (emit-all), then ratchet
+back to `high`.
+
+## SBOM
+
+Syft generates a **CycloneDX** SBOM (`sbom.cdx.json`), uploaded as a workflow
+artifact. It is **informational** (no enforce step). Artifact-only for now;
+attaching to releases is deferred until a release process exists. The SBOM can
+also feed Grype/Trivy for consistent component coverage.
+
+## Intentional local ↔ remote (pre-commit) gap
+
+Per CLAUDE.md, pre-commit is a **fast convenience tier**, not a mirror of CI —
+the slow/heavy gates stay CI-only **by design**. So a clean `git push` does not
+fully predict green CI. This gap is **known and deliberate**, not accidental:
+
+**Run in pre-commit AND CI:** hygiene hooks, gitleaks, actionlint, eslint, tsc,
+markdownlint, prettier.
+
+**Intentionally CI-only** (too slow / needs network / needs synth or the
+emulator): CodeQL, Grype, zizmor, the full cdk-nag synth gate, checkov,
+cfn-lint, npm audit, OSV-Scanner, dependency-review (needs the PR dep-diff),
+SBOM, and the MiniStack E2E deploy/integration tier.
+
+Closing the _cheap, high-signal_ subset of this gap (a Semgrep pre-commit hook
+matching CI, OSV-Scanner locally) is tracked separately — Semgrep parity under
+**#79**, the rest under **#77**'s parent scope.
+
+## Pinning
+
+All scanner tools are pinned (action SHA / binary checksum / pinned version) per
+[PINNING.md](PINNING.md). The two actions added for the supply-chain work
+(`dependency-review-action` v5.0.0, `sbom-action` v0.24.0) are SHA-pinned like
+every other `uses:` and are registered as future targets of the #78 pin-sync
+updater.

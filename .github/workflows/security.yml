@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
       # Pin the Python used to install Semgrep so the hash-pinned requirements
       # file (resolved against 3.12) installs reproducibly.
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
       - name: Run Semgrep (always writes SARIF; enforce after upload)
@@ -200,6 +200,63 @@ jobs:
           source osv.outcome
           test "$exit" = "0"
 
+  # PR-time dependency-diff gate (#77). Unlike the always-on scanners above,
+  # this only runs on pull_request: it diffs the PR's dependency changes
+  # against the GitHub Advisory DB and a license policy, blocking the PR
+  # before a vulnerable or copyleft/non-FOSS dependency is ever merged.
+  #
+  # License policy = ALLOW-list. `deny-licenses` is deprecated and slated for
+  # removal (upstream issue 997): a blocklist gives false security — it's easy
+  # to miss a commercial/copyleft license you didn't enumerate (e.g. Elastic).
+  # An allow-list fails CLOSED on any *detected* license not on the list, which
+  # is the right posture for the repo's FOSS-only governance line (the same one
+  # that rejected k6/AGPL in #73 and removed Renovate/AGPL). The list below is
+  # the exhaustive set of permissive licenses actually present in the tree
+  # (verified with `license-checker`); refresh it when a new permissive dep is
+  # introduced. Trivy's license scan (separate job) is the full-tree backstop
+  # for the *undetected*-license gap, which neither list mode fails closed on.
+  # See docs/SECURITY-TOOLING.md.
+  dependency-review:
+    name: Dependency review (PR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # PR-only: the action needs the PR's base↔head dependency diff. It is a
+    # no-op (and errors) on push/schedule/dispatch, so gate it to pull_request.
+    if: github.event_name == 'pull_request'
+    # pull-requests: write is required by comment-summary-in-pr (below), which
+    # posts the full vuln+license review as a single (overwritten) PR comment.
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # Post the full vuln + license review summary as a PR comment on
+          # every run (not just failures) so the complete output is visible
+          # without digging into job logs. Each run overwrites the prior one.
+          comment-summary-in-pr: always
+          # Align with the existing `npm audit --audit-level=high` posture.
+          # To triage everything during a rollout, temporarily lower this to
+          # `low` (emit-all), then ratchet back to `high`.
+          fail-on-severity: high
+          # ALLOW-list: exhaustive set of permissive licenses present in the
+          # tree (verified with `license-checker`). Any *detected* license not
+          # here fails the PR — so copyleft/commercial introductions (GPL,
+          # AGPL, LGPL, MPL, EPL, SSPL, BUSL, Elastic, …) are blocked by
+          # omission, with no enumerate-every-bad-id maintenance.
+          # Dual licenses like `(MIT OR GPL-3.0-or-later)`, `(MIT OR CC0-1.0)`,
+          # `(BSD-2-Clause OR MIT OR Apache-2.0)` stay GREEN — the OR is
+          # satisfied by an allowed member. Refresh this list when a new
+          # permissive dep is introduced (the PR adding it will flag it here).
+          allow-licenses: >-
+            MIT, Apache-2.0, ISC,
+            BSD-2-Clause, BSD-3-Clause, 0BSD,
+            BlueOak-1.0.0, Python-2.0,
+            CC0-1.0, CC-BY-4.0, Unlicense
+
   grype:
     name: Grype FS scan
     runs-on: ubuntu-latest
@@ -285,6 +342,39 @@ jobs:
           path: ${{ steps.grype.outputs.sarif }}
           if-no-files-found: warn
 
+  # ── Software Bill of Materials ──────────────────────────────────────────
+  # Syft generates a CycloneDX SBOM of the dependency tree (#77). Unlike the
+  # vuln scanners this is INFORMATIONAL — there is no enforce step; it just
+  # produces and always-uploads the SBOM artifact (the "produce → upload"
+  # half of the repo pattern, minus enforce). CycloneDX is the chosen format;
+  # the SBOM is artifact-only for now (attach to releases later when a release
+  # process exists). It also feeds Grype/Trivy, which can consume an SBOM for
+  # consistent component coverage.
+  sbom:
+    name: SBOM (Syft / CycloneDX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: '.'
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          # We upload the artifact ourselves (below) with the repo's standard
+          # if: always() pattern, so disable the action's own release upload.
+          upload-artifact: false
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: warn
+
   # ── Secrets ─────────────────────────────────────────────────────────────
   gitleaks:
     name: Gitleaks
@@ -343,7 +433,7 @@ jobs:
       - uses: ./.github/actions/setup
       # Pin the Python used to install the scanners so the hash-pinned
       # requirements file (resolved against 3.12) installs reproducibly.
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
       - name: Synthesize CloudFormation
