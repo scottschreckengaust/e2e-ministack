@@ -134,6 +134,18 @@ patch), the MiniStack image (by digest), and scanner versions. See
 intentionally left floating. Please keep new dependencies and Actions pinned to
 match.
 
+## Releases & the changelog (automated)
+
+Commit messages follow **Conventional Commits** (`feat:`, `fix:`, `chore:`, …).
+You do **not** edit `CHANGELOG.md` by hand. On every push to `main`,
+[`release.yml`](.github/workflows/release.yml) runs
+[release-please](https://github.com/googleapis/release-please) (Apache-2.0,
+GitHub-maintained), which reads the conventional-commit history and keeps an
+open **release PR** up to date — computing the next SemVer bump and regenerating
+the changelog. Merging that release PR is what cuts a tagged GitHub Release; no
+release happens until a maintainer merges it. Config lives in
+`release-please-config.json` + `.release-please-manifest.json`.
+
 ## Questions
 
 Open an issue if anything is unclear or you hit a snag setting up — improving
