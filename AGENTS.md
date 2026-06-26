@@ -117,3 +117,4 @@ pre-commit install
 ## Repository conventions
 
 - `.remember/` is local session/memory tooling, not project code — ignore it when reasoning about the application.
+- **Docs drift audit** — the recurring "Repo Revisit" process re-checks the docs/governance prose against the actual code/config; see [docs/REPO-REVISIT.md](docs/REPO-REVISIT.md) (run it via the [`repo-revisit`](.agents/skills/repo-revisit/SKILL.md) skill).
