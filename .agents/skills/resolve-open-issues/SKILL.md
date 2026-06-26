@@ -379,7 +379,7 @@ orchestrator's recurring loop. Its merge-closer responsibilities, every wakeup:
    resolved-elsewhere, relabel, or re-scope). **Assignee backstop:** also confirm the covered
    issue(s) show the worker as GH assignee (the worker reports `ASSIGNED:`); if absent — e.g. a
    pre-template-fill dispatch skipped Step 0a — `gh issue edit <N> --add-assignee @me` before
-   promotion so the board reflects ownership. (This catches a dispatch that didn't fill the
+   merge/close so the board reflects ownership. (This catches a dispatch that didn't fill the
    template; see §10.)
 4. **Advance + refill.** Run the rebase+refill cascade (§6): promote the next draft to the
    front, dispatch a new worker to keep the funnel at width. Then `ScheduleWakeup` again.
