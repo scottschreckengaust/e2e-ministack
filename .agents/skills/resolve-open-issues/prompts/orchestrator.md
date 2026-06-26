@@ -96,6 +96,12 @@ mode on a repo you've run before; set `N=1` for a strict single-issue dry run. (
 
 ## Per-issue workflow (delegated to each worker; you supervise)
 
+> **Non-authoritative overview.** This is a map of what the worker does so you can supervise —
+> NOT the text you dispatch. The authoritative, dispatch-ready steps live in
+> `prompts/subagent-issue.md`; send that file with its `{{PLACEHOLDERS}}` filled (see the
+> "Dispatch by FILLING the template" rule above). Do not hand-copy these bullets into a worker
+> prompt — that reintroduces the paraphrase-drift this skill guards against (SKILL §10).
+
 0. **Claim** — worker comments on each issue it covers: `@<login> (agent:wK) working on it — issues #N[, #M …] — branch fix/issue-N-<slug>` (branch named for the primary/lowest issue).
 1. **Root cause first** — reproduce empirically (run code, don't theorize). Search adjacent open
    issues; fold or annotate shared-file/shared-cause dependencies.
