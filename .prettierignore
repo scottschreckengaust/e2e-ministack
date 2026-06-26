@@ -7,6 +7,9 @@ package-lock.json
 .remember/
 # Jest snapshots (generated; exact bytes matter)
 test/**/__snapshots__/
+# CHANGELOG is generated + force-pushed by release-please (issue #91); its format
+# is the generator's and is regenerated each release — Prettier must not fight it.
+CHANGELOG.md
 # Hand-authored threat model (large generated-style JSON; not Prettier's job)
 threat-model.tc.json
 # CI-generated scan reports / artifacts
