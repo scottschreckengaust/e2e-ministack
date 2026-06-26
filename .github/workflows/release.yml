@@ -1,0 +1,37 @@
+name: Release
+
+# Conventional-Commits → release automation. On every push to `main`,
+# release-please reads the commit history since the last release and keeps an
+# open "release PR" up to date: it computes the next SemVer bump, regenerates
+# CHANGELOG.md, and bumps the version. Merging that PR cuts the tagged GitHub
+# Release. No release happens until the maintainer merges the release PR, so
+# this is safe to run unattended (issue #91).
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # allow the maintainer to reconcile the release PR manually
+
+# Least privilege by default; the release job opts into the writes it needs.
+permissions:
+  contents: read
+
+# Only one release reconciliation in flight per ref; never cancel an
+# in-progress one (a half-applied release PR update is undesirable).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Maintain release PR + changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create release-PR commits, tags, and the GitHub Release
+      pull-requests: write # open/update the release PR
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
