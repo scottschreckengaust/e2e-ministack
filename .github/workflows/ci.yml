@@ -125,7 +125,7 @@ jobs:
       # redundant re-test — never a false pass — but a clean prefix is cheaper to
       # reason about than relying on that safety net.)
       - name: Restore mutation cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: reports/mutation/incremental.json
           key: stryker-${{ hashFiles('stryker.config.mjs', 'jest.config.js', 'package-lock.json') }}-${{ github.run_id }}
@@ -159,7 +159,7 @@ jobs:
       # Persist the fuzzing corpus across runs so discovered inputs accumulate
       # and later runs start from prior coverage (rolling key, like mutation).
       - name: Restore fuzz corpus
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: .fuzz-corpus
           key: fuzz-corpus-${{ github.run_id }}

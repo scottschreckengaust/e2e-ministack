@@ -1,8 +1,8 @@
 # Content-pinned (hash-verified) requirements for the IaC scanners (cfn-lint + checkov).
 # Consumed by .github/workflows/security.yml via `pip install --require-hashes`.
-# Top-level pins: cfn-lint==1.51.5, checkov==3.3.0.
+# Top-level pins: cfn-lint==1.52.0, checkov==3.3.2.
 # Regenerate after a version bump (Python 3.12, matches the workflow's setup-python):
-#   printf 'cfn-lint==1.51.5\ncheckov==3.3.0\n' | uv pip compile --universal \
+#   printf 'cfn-lint==1.52.0\ncheckov==3.3.2\n' | uv pip compile --universal \
 #     --generate-hashes --python-version 3.12 --output-file .github/scanner-requirements/iac.txt -
 aiodns==3.6.1 \
     --hash=sha256:46233ccad25f2037903828c5d05b64590eaa756e51d12b4a5616e2defcbc98c7 \
@@ -301,10 +301,9 @@ cffi==2.0.0 \
     --hash=sha256:fc7de24befaeae77ba923797c7c87834c73648a05a4bde34b3b7e5588973a453 \
     --hash=sha256:fe562eb1a64e67dd297ccc4f5addea2501664954f2692b69a76449ec7913ecbf
     # via pycares
-cfn-lint==1.51.5 \
-    --hash=sha256:018a00f1f9eeadc196afbdc0ac8c6221c29411747c8dcff2f431d48d4080c83b \
-    --hash=sha256:e17c11a1485a2586c5ddf48d0041f8fa3da3038612fd7dbc559ec87935f53452
-    # via -r iac.in
+cfn-lint==1.52.0 \
+    --hash=sha256:52c4ab457501b0ef770d68c34acec35cd423114a72940cfa83275a3197106596 \
+    --hash=sha256:d5b97c64d8bff3c8182218c567f6de68619bde7b1d3316ab2392554435c7cdaf
 charset-normalizer==3.4.7 \
     --hash=sha256:007d05ec7321d12a40227aae9e2bc6dca73f3cb21058999a1df9e193555a9dcc \
     --hash=sha256:03853ed82eeebbce3c2abfdbc98c96dc205f32a79627688ac9a27370ea61a49c \
@@ -438,10 +437,9 @@ charset-normalizer==3.4.7 \
     # via
     #   checkov
     #   requests
-checkov==3.3.0 \
-    --hash=sha256:1d241480d402bc1e4d5e0eaec5fef159f4c0cd4da73c4d8253cdb897cd0f2c7d \
-    --hash=sha256:e00952012d20cf274542db89a271c0dec3517cd568c6c59be2dbd98fe5328f57
-    # via -r iac.in
+checkov==3.3.2 \
+    --hash=sha256:38b135f16ee84eba5c873837a0c7584de09e1048bbac31c72c0c16a2b3634380 \
+    --hash=sha256:d05d69821fbe66603faf27db5b2646d99b02bfd11793469d89a5280429122687
 click==8.4.1 \
     --hash=sha256:482be17c6991b8c19c5429a1e995d9b0efdbb63172824c41f99965dc0ade8ec2 \
     --hash=sha256:918b5633eddf6b41c32d4f454bf0de810065c74e3f7dbf8ee5452f8be88d3e96

@@ -15,7 +15,7 @@ supply-chain safety. This file is the authoritative inventory.
 | MiniStack image               | `ci.yml`                             | digest (`@sha256:c5ce466…`)              |
 | CodeQL analyzer bundle        | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                  |
 | Semgrep                       | `security.yml`                       | `==1.167.0`                              |
-| cfn-lint / checkov            | `security.yml`                       | `==1.51.5` / `==3.3.0`                   |
+| cfn-lint / checkov            | `security.yml`                       | `==1.52.0` / `==3.3.2`                   |
 | OSV-Scanner                   | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**            |
 | actionlint                    | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies) |
 | gitleaks, pre-commit-hooks    | `.pre-commit-config.yaml`            | `rev:` tags                              |
