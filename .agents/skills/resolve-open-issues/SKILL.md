@@ -71,6 +71,15 @@ use these.
   issues (§ Folding). The greppable resume token is `agent:wK`. The worker states which
   issue(s) it covers in its claim (e.g. `@scottschreckengaust (agent:w3) — issues #11, #20`).
   The remote branch + draft PR are themselves state signals for other workers / supervisors.
+  A worker **self-assigns the issue (GitHub assignee) as its FIRST claim action, before building**
+  (worker prompt § Claim FIRST) — the **native** ownership signal, visible in the Assignees column
+  and the `assignee:<login>` filter, so a human watching the board sees who's busy at a glance. It is an
+  optimistic **check-and-set** (assignee is not an atomic lock): claim, then proceed **only if
+  sole assignee** (`assignees == [me]`) — never an alphabetical `sort|head` winner, which lets two
+  concurrent operators both "win" a same-instant collision. The assignee is account-level so it
+  **complements, doesn't replace**, the `agent:wK` comment (which carries the per-worker handle one
+  login can't show). It persists DRAFT→READY→MERGED; merge auto-close clears it. ABANDONED sign-out
+  removes it (§7b) so the issue is free for pickup.
 - **Escalation:** blocked workers post questions publicly under their identity and stop;
   humans answer by addressing that identity; the orchestrator resumes (§7).
 - **Durability:** keep a crash-recoverable ledger (§8). Refine this skill during the run.
@@ -495,8 +504,10 @@ state, exactly one of:
   reassign or close this issue as you see fit." The issue stays OPEN on purpose; the sign-out
   tells the orchestrator the worker is done so it can reassign the slot. (Not redispatchable for
   the _same_ work; the orchestrator decides the issue's disposition.)
-- **ABANDONED** — "could not complete: `<reason>`. No PR / PR not viable. **Issue is free for
-  pickup.**" (Explicitly redispatchable.)
+- **ABANDONED** — **first un-assign** (`gh issue edit <N> --remove-assignee @me` for every issue
+  covered) so the native Assignees board shows it pickable again, then "could not complete:
+  `<reason>`. No PR / PR not viable. **Issue is free for pickup.**" (Explicitly redispatchable.)
+  DONE / DRAFT / DONE-NO-CLOSE keep the assignee — merge auto-close clears it on the resolved ones.
 
 **Is a closing comment necessary?** For _closure mechanics_, **no** — when the PR's body
 carries a closing keyword (`Closes/Fixes/Resolves #N`), merging auto-closes the issue and

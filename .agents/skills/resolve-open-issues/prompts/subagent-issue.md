@@ -76,7 +76,38 @@ issue explicitly asks for that tool by name. Before adding it:
 - The **integration** tier needs a deployed MiniStack and does NOT run locally — do not attempt
   it; it runs in CI. Local sanity = `JEST_TIER=unit npx jest` (fast, no emulator).
 
-## Worktree + branch (from canonical root)
+## Claim FIRST (self-assign + comment), THEN build the worktree
+
+**Claim is your FIRST action — before `git worktree add` / `npm ci` / any building** — so a lost
+race costs one `gh` round-trip, never a wasted build. The GitHub **assignee** is the native
+ownership signal (visible in the Assignees column + `assignee:<login>` filter); it complements the
+`agent:{{WK}}` claim comment, which carries the worker-handle granularity the account-level
+assignee can't.
+
+### Step 0a — authoritative check-and-set self-assign (run for EVERY issue in {{ISSUES}})
+
+GitHub assignee is **not** an atomic lock (`--add-assignee` is additive and won't fail if someone
+else already holds it), so claim it optimistically and proceed **only if you are the SOLE
+assignee** — `assignees == [me]`. Do NOT pick an alphabetical `sort | head -1` winner: with two
+concurrent operators ("apple" and "banana" both self-assigning during the TOCTOU window), the
+lowest-login rule lets BOTH think they won and both proceed. Sole-assignee is the only safe
+read-back. For **each** issue `<N>` in {{ISSUES}}:
+
+```bash
+ME=$(gh api user --jq .login)
+cur=$(gh issue view <N> --json assignees --jq '.assignees[].login')
+[ -n "$cur" ] && { echo "SKIP #<N>: already $cur"; exit 0; }
+gh issue edit <N> --add-assignee @me
+# read-back: proceed ONLY if we are the SOLE assignee (assignees == [me])
+owners=$(gh issue view <N> --json assignees --jq '[.assignees[].login]|join(",")')
+[ "$owners" != "$ME" ] && { gh issue edit <N> --remove-assignee @me; echo "LOST #<N>: owners=$owners"; exit 0; }
+# else: we own it solely — proceed to the claim comment + worktree/build
+```
+
+If you SKIP or LOSE any issue in {{ISSUES}}, abort the whole unit of work (don't build a partial
+bundle) and report it — the orchestrator decides what to redispatch.
+
+### Step 0b — claim comment + worktree build (only after you SOLELY own every issue)
 
 ```bash
 cd {{REPO_ROOT}} && git fetch origin
@@ -209,9 +240,12 @@ you cover** so the supervisor never mistakes a finished/crashed worker for an ac
 - DONE-NO-CLOSE (partially-addressed issue that stays open): sign out — `🤖 @{{GH_LOGIN}} (agent:{{WK}}) — signing out. PR #N addresses part of this (linked 'Relates to'); separate concerns remain, so this issue stays OPEN for follow-up. Over and out — orchestrator, reassign/close as you see fit.`
 - Blocked: sign out noting you're blocked on the posted questions (§ If BLOCKED), pointing at the
   draft `[BLOCKED]` PR #N you opened (branch pushed, open for pickup), and not working until answered.
-- Abandoned: `... — could not complete: <reason>. No viable PR. Issue is FREE FOR PICKUP.`
+- Abandoned: **first un-assign yourself** so the issue is free for pickup —
+  `gh issue edit THAT_NUM --remove-assignee @me` (for every issue you covered) — then sign out:
+  `... — could not complete: <reason>. No viable PR. Issue is FREE FOR PICKUP.`
   Do NOT post a separate "closing" comment — the per-issue `Closes #X` lines in the PR body
-  handle closure; the sign-out + the orchestrator's acceptance summary are the only comments needed.
+  handle closure; the sign-out + the orchestrator's acceptance summary are the only comments
+  needed. (DONE / DRAFT / DONE-NO-CLOSE keep the assignee — merge auto-close clears it.)
 
 ## DO NOT
 
