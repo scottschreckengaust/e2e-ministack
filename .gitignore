@@ -1,8 +1,19 @@
 # Dependencies
 node_modules/
 
-# Claude Code isolated worktrees (created by EnterWorktree; never committed)
+# Local MCP auth — never commit a real GitHub personal access token. The
+# "github" MCP server in .mcp.json reads ${GITHUB_PERSONAL_ACCESS_TOKEN} from
+# the launch env; supply it from one of these gitignored, per-developer files
+# (or your shell), NOT from a committed file:
+#   - .env                       — copy from .env.example (shell / --env-file)
+#   - .claude/settings.local.json — Claude Code's local-only settings override
+.env
+.claude/settings.local.json
+
+# Isolated git worktrees — never committed. Claude Code's native tooling uses
+# .claude/worktrees/; the generic vendor-neutral location is .worktrees/.
 .claude/worktrees/
+.worktrees/
 
 # CDK
 cdk.out/
