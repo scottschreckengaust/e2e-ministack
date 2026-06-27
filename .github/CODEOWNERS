@@ -1,0 +1,4 @@
+# Code owners — see https://docs.github.com/articles/about-code-owners
+# Catch-all: the maintainer owns everything for now. Refine with path-specific
+# owners (workflows, lambda, docs) as the contributor base grows.
+* @scottschreckengaust
