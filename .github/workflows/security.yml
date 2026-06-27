@@ -19,44 +19,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decide which jobs are relevant for this event. On schedule/dispatch
-  # everything runs; on push/PR the IaC synth job gates on whether CDK/source
-  # paths changed. This mirrors ci.yml's `changes` job style and exists so the
-  # heavy `npm run synth` (cdk-nag) doesn't re-run on doc-only pushes — that
-  # synth already runs in ci.yml's `unit` gate, so duplicating it here on a
-  # doc-only change is pure waste (issue #15). The SAST/dependency/secret
-  # scanners are intentionally NOT gated: they should keep running on code,
-  # dependency, and workflow changes regardless.
-  changes:
-    name: Detect changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      iac: ${{ steps.filter.outputs.iac }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          persist-credentials: false
-      # Only run path detection on push/PR — on dispatch/schedule the event has
-      # no `before` SHA, so paths-filter prints a noisy fallback, and the iac
-      # job already force-runs on those events anyway.
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
-        id: filter
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
-        with:
-          # Anything that can change the synthesized CloudFormation template.
-          filters: |
-            iac:
-              - 'bin/**'
-              - 'lib/**'
-              - 'lambda/**'
-              - 'package.json'
-              - 'package-lock.json'
-              - 'tsconfig.json'
-              - 'cdk.json'
-              - '.github/workflows/security.yml'
-              - '.github/actions/setup/**'
-
   # ── Static analysis of the TypeScript / CDK source ──────────────────────
   codeql:
     name: CodeQL (JS/TS)
@@ -415,12 +377,13 @@ jobs:
   # ── Infrastructure-as-code (synthesized CloudFormation) ─────────────────
   iac:
     name: IaC scan (cfn-lint + checkov)
-    # Gate the heavy `npm run synth` to events that can change the template
-    # (issue #15): CDK/source path changes, or schedule/dispatch. On a doc-only
-    # push this is pure duplication of ci.yml's synth gate, so skip it natively
-    # — no cross-workflow artifact download, no added permissions.
-    needs: changes
-    if: needs.changes.outputs.iac == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Runs on EVERY event (no path-gate). checkov is a REQUIRED code-scanning
+    # tool in the `main` branch ruleset, which expects a checkov result for each
+    # PR's commits; a path-gate (previously issue #15) made checkov skip on
+    # non-CDK PRs, leaving the ruleset's code_scanning rule waiting forever and
+    # deadlocking the merge. Always running it produces the required result. The
+    # `npm run synth` here duplicates ci.yml's synth on doc-only changes — an
+    # accepted cost for an always-satisfiable required gate.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
