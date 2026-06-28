@@ -42,6 +42,17 @@ repos:
     hooks:
       - id: gitleaks
 
+  # ── Shell script lint ──────────────────────────────────────────────────
+  # Gates standalone *.sh files (e.g. the resolve-open-issues eval harness).
+  # actionlint (below) only shellchecks `run:` blocks inside workflow YAML, so
+  # this hook covers the standalone-script gap. Mirrored by the `shellcheck`
+  # job in ci.yml (CI is the enforcing source of truth). shellcheck-py vendors
+  # the shellcheck binary, so no separate install is needed.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
   # ── GitHub Actions workflow lint (fast) ────────────────────────────────
   # gitleaks and actionlint build from Go source on install (works as-is for
   # most). Workaround ONLY if your network can't reach proxy.golang.org (e.g.

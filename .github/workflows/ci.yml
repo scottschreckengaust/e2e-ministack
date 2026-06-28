@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      shell: ${{ steps.filter.outputs.shell }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -40,6 +41,10 @@ jobs:
         if: github.event_name == 'push' || github.event_name == 'pull_request'
         with:
           filters: |
+            shell:
+              - '**/*.sh'
+              - '**/*.bash'
+              - '.github/workflows/ci.yml'
             code:
               - 'bin/**'
               - 'lib/**'
@@ -314,3 +319,33 @@ jobs:
       - name: Stop MiniStack
         if: always()
         run: docker rm -f ministack || true
+
+  # Lint standalone shell scripts (e.g. the resolve-open-issues eval harness).
+  # actionlint already shellchecks `run:` blocks INSIDE workflow YAML, but it
+  # does not see standalone *.sh files — this job closes that gap so any shell
+  # script in the tree is gated. shellcheck ships preinstalled on ubuntu-latest
+  # (no install step needed). GPLv3 shellcheck is invoked as an external linter,
+  # not linked/redistributed, so it does not introduce a copyleft dependency
+  # (same posture as the shellcheck actionlint already bundles).
+  shellcheck:
+    name: ShellCheck (shell scripts)
+    needs: changes
+    if: needs.changes.outputs.shell == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Run shellcheck on tracked shell scripts
+        # Lint every tracked *.sh/*.bash file. Fails the job on any finding.
+        # `git ls-files` keeps it to versioned scripts (skips node_modules etc.).
+        run: |
+          mapfile -t scripts < <(git ls-files '*.sh' '*.bash')
+          if [ ${#scripts[@]} -eq 0 ]; then
+            echo "No shell scripts tracked — nothing to lint."
+            exit 0
+          fi
+          printf 'Linting %d shell script(s):\n' "${#scripts[@]}"
+          printf '  %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"
