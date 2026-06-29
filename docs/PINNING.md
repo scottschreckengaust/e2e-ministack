@@ -5,24 +5,25 @@ supply-chain safety. This file is the authoritative inventory.
 
 ## Pinned
 
-| What                          | Where                                | Pin form                                 |
-| ----------------------------- | ------------------------------------ | ---------------------------------------- |
-| GitHub Actions (all `uses:`)  | `.github/workflows/*.yml`            | commit SHA (`# vX` comment)              |
-| npm dependencies (transitive) | `package-lock.json` + `npm ci`       | exact, lockfile-resolved                 |
-| `aws-cdk`, `aws-cdk-lib`      | `package.json`                       | exact (`2.1128.0`, `2.260.0`)            |
-| Node.js                       | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                  |
-| npm (via Corepack)            | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                    |
-| MiniStack image               | `ci.yml`                             | digest (`@sha256:c5ce466…`)              |
-| CodeQL analyzer bundle        | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                  |
-| Semgrep                       | `security.yml`                       | `==1.167.0`                              |
-| cfn-lint / checkov            | `security.yml`                       | `==1.52.0` / `==3.3.2`                   |
-| OSV-Scanner                   | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**            |
-| actionlint                    | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies) |
-| gitleaks, pre-commit-hooks    | `.pre-commit-config.yaml`            | `rev:` tags                              |
-| threat-composer-ai (uvx)      | `.mcp.json`                          | git commit SHA                           |
-| Prettier, markdownlint-cli2   | `package.json` + lockfile            | exact, lockfile-resolved                 |
-| Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                 |
-| fast-check, jazzer.js (fuzz)  | `package.json` + lockfile            | exact, lockfile-resolved                 |
+| What                          | Where                                | Pin form                                                               |
+| ----------------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
+| GitHub Actions (all `uses:`)  | `.github/workflows/*.yml`            | commit SHA (`# vX` comment)                                            |
+| npm dependencies (transitive) | `package-lock.json` + `npm ci`       | exact, lockfile-resolved                                               |
+| `aws-cdk`, `aws-cdk-lib`      | `package.json`                       | exact (`2.1128.0`, `2.260.0`)                                          |
+| Node.js                       | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                                                |
+| npm (via Corepack)            | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                                                  |
+| MiniStack image               | `ci.yml`                             | digest (`@sha256:c5ce466…`)                                            |
+| CodeQL analyzer bundle        | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                                                |
+| Semgrep                       | `security.yml`                       | `==1.167.0`                                                            |
+| cfn-lint / checkov            | `security.yml`                       | `==1.52.0` / `==3.3.2`                                                 |
+| OSV-Scanner                   | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**                                          |
+| actionlint                    | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies)                               |
+| shellcheck                    | `ci.yml`, pre-commit                 | `v0.11.0` **+ SHA-256 verify** (CI) / `shellcheck-py v0.11.0.1` (hook) |
+| gitleaks, pre-commit-hooks    | `.pre-commit-config.yaml`            | `rev:` tags                                                            |
+| threat-composer-ai (uvx)      | `.mcp.json`                          | git commit SHA                                                         |
+| Prettier, markdownlint-cli2   | `package.json` + lockfile            | exact, lockfile-resolved                                               |
+| Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                                               |
+| fast-check, jazzer.js (fuzz)  | `package.json` + lockfile            | exact, lockfile-resolved                                               |
 
 > **Scope of "exact" above.** Only `aws-cdk` and `aws-cdk-lib` are pinned to a
 > bare exact version _string_ in `package.json`. The other direct runtime deps
@@ -94,7 +95,7 @@ scanner above is at its current latest release, and the CodeQL `v4` action tag
 peels to the already-pinned commit (so it is not behind). The only residual is
 **Semgrep**, which is intentionally _not_ bumped in isolation — its binary
 version is coupled to the pre-commit rev and the vendored ruleset (tracked in
-issue #79). The coupled pre-commit↔CI pairs (gitleaks, actionlint, OSV-Scanner)
-are already in lockstep at their latest. With no safe standalone bump left, #83
+issue #79). The coupled pre-commit↔CI pairs (gitleaks, actionlint, OSV-Scanner,
+shellcheck) are already in lockstep at their latest. With no safe standalone bump left, #83
 is effectively folded into the planned pin-sync work (#78) and the Semgrep
 triplet (#79); refresh those coupled groups together when they land.
