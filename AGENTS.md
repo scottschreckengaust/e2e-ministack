@@ -85,6 +85,7 @@ Two workflows. `ci.yml` (jobs: changes → unit → integration) lints, runs uni
 - **SAST/secrets** — Semgrep (`--config=auto --error`), Gitleaks (full history), CodeQL (JS/TS).
 - **zizmor** — audits the workflow files themselves. To keep it clean: pin every action to a **commit SHA** (not a tag), set top-level `permissions: contents: read`, and `persist-credentials: false` on every checkout.
 - **actionlint** — runs in `security.yml` alongside zizmor. Validates workflow _correctness_ (schema, shellcheck on `run:` blocks) — complements zizmor's _security_ audit. Both workflow-file linters live together there.
+- **shellcheck** — gates **standalone** `*.sh`/`*.bash` scripts (the `shellcheck` job in `ci.yml`, path-gated on shell changes; mirrored by a pre-commit hook). This is distinct from actionlint, which only shellchecks `run:` blocks _inside_ workflow YAML and never sees standalone scripts. CI pins **shellcheck `v0.11.0`** (tarball + SHA-256 verify, _not_ the floating `ubuntu-latest` copy) to match the pre-commit `shellcheck-py` pin, so the two flag identically — a coupled pre-commit↔CI pin tracked in [docs/PINNING.md](docs/PINNING.md). shellcheck (GPLv3) is invoked as an external linter — not linked or redistributed — so it adds no copyleft dependency.
 - **Threat model** — `threat-model.tc.json` is an [AWS threat-composer](https://github.com/awslabs/threat-composer) artifact (design-time, hand-authored). Edit it in the threat-composer web app or the AWS Toolkit VS Code extension (see [docs/THREAT-MODELING.md](docs/THREAT-MODELING.md)). CI only checks it parses and has the expected sections — threat-composer has no credential-free CI generator (its AI generator needs a real Bedrock account), so this is a human-maintained artifact, not an automated finding source.
 
 ### Not used here (would need a real AWS account)
@@ -100,7 +101,7 @@ pip install pre-commit   # or: brew install pre-commit
 pre-commit install
 ```
 
-- Hooks: standard hygiene (large files, merge conflicts, shebang/executable consistency, EOF/whitespace, `check-json`/`check-yaml`, private-key + AWS-credential detection), **gitleaks** (secrets), **actionlint** (workflows), and `local` **eslint** + **tsc** that reuse the repo's pinned `node_modules` (so the hook and CI run identical tooling).
+- Hooks: standard hygiene (large files, merge conflicts, shebang/executable consistency, EOF/whitespace, `check-json`/`check-yaml`, private-key + AWS-credential detection), **gitleaks** (secrets), **actionlint** (workflows), **shellcheck** (standalone `*.sh` scripts, via `shellcheck-py`), and `local` **eslint** + **tsc** + **markdownlint** + **prettier** that reuse the repo's pinned `node_modules` (so the hook and CI run identical tooling).
 - `tsconfig.json` is excluded from `check-json` (it's JSONC — has comments).
 - **`bin/app.ts` is mode `100755`** (executable) on purpose — it has a `#!/usr/bin/env node` shebang, so the shebang/executable hooks require it. Don't `chmod -x` it.
 - gitleaks/actionlint build from Go source on first install. This works out of the box for most. **Only** if your network can't reach `proxy.golang.org` (e.g. a TLS-intercepting corporate proxy) is a workaround needed: run `go env -w GOPROXY=direct` once (persists in Go's env config across shells), then reinstall the hooks.

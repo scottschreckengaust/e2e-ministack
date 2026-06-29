@@ -220,6 +220,10 @@ orchestrator parks BLOCKED tokens (freeing the slot) and resumes them when a hum
 - **`references/gotchas.md`** — repo/harness quirks that read as real failures but aren't (mise
   PATH, semgrep hook, worktree base, the no-API PR cap, paraphrase drift). Skim before the first
   dispatch.
+- **`references/evaluation.md`** — how to measure whether a change to this skill improved batch
+  behavior: reconstruct the §5 metrics for a batch of merged PRs from public artifacts (no
+  instrumentation) and diff before/after. Load only when evaluating a skill edit, not during a run;
+  the runnable harness is `scripts/eval-batch-metrics.sh` + `scripts/eval-compare.sh`.
 
 ## Prompts
 

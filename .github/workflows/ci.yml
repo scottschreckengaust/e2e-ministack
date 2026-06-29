@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      shell: ${{ steps.filter.outputs.shell }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -40,6 +41,10 @@ jobs:
         if: github.event_name == 'push' || github.event_name == 'pull_request'
         with:
           filters: |
+            shell:
+              - '**/*.sh'
+              - '**/*.bash'
+              - '.github/workflows/ci.yml'
             code:
               - 'bin/**'
               - 'lib/**'
@@ -314,3 +319,54 @@ jobs:
       - name: Stop MiniStack
         if: always()
         run: docker rm -f ministack || true
+
+  # Lint standalone shell scripts (e.g. the resolve-open-issues eval harness).
+  # actionlint already shellchecks `run:` blocks INSIDE workflow YAML, but it
+  # does not see standalone *.sh files — this job closes that gap so any shell
+  # script in the tree is gated.
+  #
+  # PINNED to shellcheck v0.11.0, matching the pre-commit `shellcheck-py` hook
+  # (rev v0.11.0.1 == binary 0.11.0) so CI and the local hook flag identically.
+  # We do NOT use the ubuntu-latest preinstalled shellcheck — it floats (0.9.0
+  # at time of writing) and would drift from the pinned hook, breaking the
+  # "everything pinnable is pinned" policy (AGENTS.md / docs/PINNING.md) and the
+  # coupled pre-commit↔CI pairing tracked there. Content-pinned: download the
+  # release tarball and verify its SHA-256 (same pattern as the actionlint and
+  # OSV-Scanner jobs) rather than trusting an unpinned package index.
+  # GPLv3 shellcheck is invoked as an external linter, not linked/redistributed,
+  # so it adds no copyleft dependency (same posture as actionlint's bundled copy).
+  shellcheck:
+    name: ShellCheck (shell scripts)
+    needs: changes
+    if: needs.changes.outputs.shell == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SHELLCHECK_VERSION: v0.11.0
+      # SHA-256 of shellcheck-v0.11.0.linux.x86_64.tar.xz (koalaman release).
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned shellcheck
+        run: |
+          tarball="shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -sSfL -o "$tarball" \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/${tarball}"
+          echo "${SHELLCHECK_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xJf "$tarball" "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          sudo install -m 0755 "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+      - name: Run shellcheck on tracked shell scripts
+        # Lint every tracked *.sh/*.bash file. Fails the job on any finding.
+        # `git ls-files` keeps it to versioned scripts (skips node_modules etc.).
+        run: |
+          mapfile -t scripts < <(git ls-files '*.sh' '*.bash')
+          if [ ${#scripts[@]} -eq 0 ]; then
+            echo "No shell scripts tracked — nothing to lint."
+            exit 0
+          fi
+          printf 'Linting %d shell script(s):\n' "${#scripts[@]}"
+          printf '  %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"
