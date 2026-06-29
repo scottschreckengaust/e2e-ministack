@@ -102,6 +102,39 @@ Here Docker reads `.env` directly via `--env-file .env` (so `GITHUB_READ_ONLY` /
 override file values). The `npx @modelcontextprotocol/server-github` variant is
 a further no-Docker alternative.
 
+## Cursor IDE
+
+Cursor reads [`.cursor/mcp.json`](../.cursor/mcp.json) — **not** repo-root
+`.mcp.json`. The server list mirrors Claude Code's, but Cursor uses its own
+[config interpolation](https://cursor.com/docs/mcp#config-interpolation):
+`${env:NAME}` (not Claude's `${NAME:-default}` shell form).
+
+**GitHub (remote HTTP).** The `github` server is type `http`; Cursor does **not**
+support `envFile` on remote servers — only on stdio. Export
+`GITHUB_PERSONAL_ACCESS_TOKEN` into the environment that launches Cursor (or use
+GitHub's OAuth flow from Cursor's MCP UI instead of a PAT in config):
+
+```bash
+cp .env.example .env
+# edit .env, then export before starting Cursor from the same shell:
+set -a; . ./.env; set +a
+cursor .
+```
+
+**threat-composer-ai (stdio).** Cursor can load extra vars from `.env` via
+`envFile` on stdio servers. Set `AWS_PROFILE` (and optionally `AWS_REGION`) in
+your shell or `.env` before use — there is no `${…:-us-east-1}` default in the
+Cursor file; rely on your AWS config's default region when unset.
+
+**Agent instructions.** Cursor has no `CURSOR.md` convention. It auto-loads
+[`AGENTS.md`](../AGENTS.md) (and `CLAUDE.md` for compatibility). Cursor-specific
+setup lives here and in `.cursor/mcp.json`, not a separate instructions file.
+
+**Safeguards (same as Claude):** committed config carries **no secrets** — only
+`${env:…}` references; real tokens stay in gitignored `.env` or your shell.
+[gitleaks](https://github.com/gitleaks/gitleaks) in pre-commit/CI catches
+accidental commits.
+
 ## Other editor/agent vendors
 
 `.mcp.json` is read by **Claude Code only**. There is no single cross-agent MCP
@@ -110,7 +143,7 @@ Gemini CLI (`.gemini/settings.json`), but VS Code/Copilot (`.vscode/mcp.json`)
 uses a different key (`servers`) and OpenAI Codex CLI uses TOML
 (`~/.codex/config.toml`, `[mcp_servers.<name>]`).
 
-Making this repo truly agent-agnostic therefore means keeping **one canonical
-server block** and generating/symlinking the per-vendor files from it — tracked
-as a follow-up to #72 (see the repo's open issues). Only the canonical Claude
-Code `.mcp.json` is maintained by hand here.
+A generator that keeps per-vendor files in sync from one canonical block is
+tracked separately ([#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111)).
+Until that lands, `.mcp.json` (Claude) and `.cursor/mcp.json` (Cursor) are
+maintained in parallel with the same servers but vendor-specific interpolation.
