@@ -10,6 +10,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.3.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.2.0...v0.3.0) (2026-06-29)
+
+
+### Features
+
+* **governance:** add CODEOWNERS with maintainer catch-all ([#102](https://github.com/scottschreckengaust/e2e-ministack/issues/102)) ([#103](https://github.com/scottschreckengaust/e2e-ministack/issues/103)) ([a76e0cf](https://github.com/scottschreckengaust/e2e-ministack/commit/a76e0cf53df45fc8a6f4af66e3ca5af12fa9a0ac))
+* **resolve-open-issues:** zero-dependency eval harness (baseline + before/after scorecard) ([#108](https://github.com/scottschreckengaust/e2e-ministack/issues/108)) ([28c8827](https://github.com/scottschreckengaust/e2e-ministack/commit/28c8827d99bf0ef546fa57e15fa7cbf7ab362de2))
+
 ## [0.2.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.1.0...v0.2.0) (2026-06-26)
 
 
