@@ -46,26 +46,34 @@ header that `.mcp.json` builds from the env var; if the var is unset the entry f
 back to an empty token (`${…:-}`) so the server merely fails to authenticate rather
 than breaking config parsing.
 
-### Headers `.mcp.json` sends to the `github` server
+### GitHub remote headers (Claude and Cursor)
+
+Both [`.mcp.json`](../.mcp.json) and [`.cursor/mcp.json`](../.cursor/mcp.json) send
+the same four headers to the `github` server. Only `Authorization` interpolation
+differs (`${GITHUB_PERSONAL_ACCESS_TOKEN:-}` vs `${env:GITHUB_PERSONAL_ACCESS_TOKEN}`).
 
 GitHub's remote server takes the `Authorization` header (the only secret) plus five
 optional `X-MCP-*` toggles ([authoritative list](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md#optional-headers)).
-This PoC sets four; all are passed through verbatim by Claude Code:
+This PoC sets four:
 
 | Header           | Value (PoC) | Effect                                                                                                                                      |
 | ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Authorization`  | from env    | `Bearer <PAT>` — the only secret; supplied via `${GITHUB_PERSONAL_ACCESS_TOKEN}` (see above).                                               |
+| `Authorization`  | from env    | `Bearer <PAT>` — the only secret; see token loaders below.                                                                                  |
 | `X-MCP-Toolsets` | `all`       | Toolset groups to expose. Narrow it (e.g. `repos,issues,pull_requests`) to shrink the surface area.                                         |
 | `X-MCP-Readonly` | `false`     | Read/write (per the #72 "all tools" decision). Flip to `true` to drop every write tool (verified ≈91→61 tools — no PR/issue/file mutation). |
 | `X-MCP-Insiders` | `true`      | GitHub's preview/experimental tools (verified ≈91→95 tools). Omit or set `false` for the stable set only.                                   |
 
-Two further `X-MCP-*` toggles are **not** set here but available:
+Two further `X-MCP-*` toggles are **not** set in either file but available:
 
 - `X-MCP-Tools` — enable specific _individual_ tools (CSV), a finer-grained alternative to `X-MCP-Toolsets`.
 - `X-MCP-Lockdown` — hide public-issue details authored by users without push access (a prompt-injection hardening; consider enabling if untrusted issues are in scope).
 
-(`MCP-Protocol-Version` is an MCP transport header the Claude Code client sets
-itself — do not add it to `.mcp.json`.)
+(`MCP-Protocol-Version` is an MCP transport header the client sets itself — do not
+add it to committed MCP JSON.)
+
+**Drift gate:** `scripts/check-mcp-parity.sh` (also `npm run check:mcp-parity`) fails
+CI if the two files diverge on server names, the threat-composer pin, `github.url`,
+or non-`Authorization` headers. Full multi-agent generation is still [#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111).
 
 > **Why remote (PoC decision).** The issue thread (#72) settled on the **remote
 > server with all toolsets** as the proof-of-concept: it is GitHub's recommended
@@ -78,8 +86,9 @@ itself — do not add it to `.mcp.json`.)
 
 The official [`github/github-mcp-server`](https://github.com/github/github-mcp-server)
 (MIT-licensed) can run as a **local Docker container** instead — a strict subset
-of the remote toolsets, but no third-party host in the path. Swap the `github`
-entry in `.mcp.json` for:
+of the remote toolsets, but no third-party host in the path.
+
+**Claude** — swap the `github` entry in `.mcp.json` for:
 
 ```json
 {
@@ -97,49 +106,94 @@ entry in `.mcp.json` for:
 }
 ```
 
-Here Docker reads `.env` directly via `--env-file .env` (so `GITHUB_READ_ONLY` /
-`GITHUB_TOOLSETS` in `.env` take effect, and shell vars passed to `docker`
-override file values). The `npx @modelcontextprotocol/server-github` variant is
-a further no-Docker alternative.
+**Cursor** — swap the `github` entry in `.cursor/mcp.json` for:
+
+```json
+{
+  "github": {
+    "command": "docker",
+    "args": [
+      "run",
+      "-i",
+      "--rm",
+      "--env-file",
+      "${workspaceFolder}/.env",
+      "ghcr.io/github/github-mcp-server"
+    ]
+  }
+}
+```
+
+Docker reads `.env` via `--env-file` (so `GITHUB_READ_ONLY` / `GITHUB_TOOLSETS`
+take effect; shell vars passed to `docker` override file values). The
+`npx @modelcontextprotocol/server-github` variant is a further no-Docker alternative.
 
 ## Cursor IDE
 
 Cursor reads [`.cursor/mcp.json`](../.cursor/mcp.json) — **not** repo-root
-`.mcp.json`. The server list mirrors Claude Code's, but Cursor uses its own
+`.mcp.json`. The server list and GitHub headers mirror Claude Code; Cursor uses
 [config interpolation](https://cursor.com/docs/mcp#config-interpolation):
 `${env:NAME}` (not Claude's `${NAME:-default}` shell form).
 
-**GitHub (remote HTTP).** The `github` server is type `http`; Cursor does **not**
-support `envFile` on remote servers — only on stdio. Export
-`GITHUB_PERSONAL_ACCESS_TOKEN` into the environment that launches Cursor (or use
-GitHub's OAuth flow from Cursor's MCP UI instead of a PAT in config):
+### Token loaders (pick one — never commit a real token)
+
+| Path                                                                        | GUI launch                      | CLI (`cursor` / `cursor-agent`) | Notes                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------- | ------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Shell export + `cursor .`                                                   | Only if started from that shell | Yes                             | `set -a; . ./.env; set +a` then `cursor .`                                                                                                                                                                   |
+| [`~/.cursor/mcp.json`](https://cursor.com/docs/mcp#configuration-locations) | **Yes**                         | **Yes**                         | Global user config; merges with project `.cursor/mcp.json`. Copy [docs/mcp-global-cursor.example.json](mcp-global-cursor.example.json) and set the token via `${env:…}` or a user-local literal (see below). |
+| Project `.env` + `envFile`                                                  | No (HTTP)                       | Partial                         | Works for **stdio** servers only (`threat-composer-ai`); remote `github` HTTP does **not** read `envFile`.                                                                                                   |
+| Cursor MCP UI OAuth                                                         | Yes                             | Yes                             | No PAT in config; GitHub-hosted OAuth flow.                                                                                                                                                                  |
 
 ```bash
 cp .env.example .env
-# edit .env, then export before starting Cursor from the same shell:
+# edit GITHUB_PERSONAL_ACCESS_TOKEN (and AWS_* if using threat-composer-ai)
 set -a; . ./.env; set +a
 cursor .
 ```
 
-> **Caveat:** `${env:…}` resolves against the environment Cursor was **launched
-> with**, not your shell rc — a Dock/GUI launch won't see vars from `~/.zshrc`,
-> so start Cursor via `cursor .` from a shell that has the token exported (or use
-> the OAuth flow above). There is no `~/.claude/settings.json`-style `env` block
-> for Cursor.
+> **GUI caveat:** `${env:…}` resolves against the environment **Cursor was launched
+> with**, not your shell rc — Dock/Spotlight won't see `~/.zshrc` exports. For GUI
+> launches use **`~/.cursor/mcp.json`**, OAuth, or start Cursor from a shell that
+> already exported the token.
 
-**threat-composer-ai (stdio).** Cursor can load extra vars from `.env` via
-`envFile` on stdio servers. Set `AWS_PROFILE` (and optionally `AWS_REGION`) in
-your shell or `.env` before use — there is no `${…:-us-east-1}` default in the
-Cursor file; rely on your AWS config's default region when unset.
+**`~/.cursor/mcp.json` (recommended for GUI).** User-local file (never in this
+repo). Two patterns:
+
+1. **Env interpolation (preferred)** — same shape as
+   [docs/mcp-global-cursor.example.json](mcp-global-cursor.example.json). Still needs
+   `GITHUB_PERSONAL_ACCESS_TOKEN` in the OS environment unless you use pattern (2).
+2. **Literal Bearer (user machine only)** — replace `${env:GITHUB_PERSONAL_ACCESS_TOKEN}`
+   with `ghp_…` in `~/.cursor/mcp.json` only. `chmod 600`; never commit. Works for
+   both GUI and CLI because Cursor reads the global file at startup.
+
+Project `.cursor/mcp.json` stays secret-free; global file supplies auth for all
+workspaces when the GUI launch path can't see your shell.
+
+**threat-composer-ai (stdio).** Cursor loads `.env` via `envFile` on stdio servers.
+Set `AWS_PROFILE` and optionally `AWS_REGION` in `.env` (see `.env.example`) — there
+is no `${…:-us-east-1}` default in the Cursor file.
+
+### Verify (PoC)
+
+After supplying a valid `GITHUB_PERSONAL_ACCESS_TOKEN`:
+
+1. `npm run check:mcp-parity` — committed Claude/Cursor configs match.
+2. Open this repo in Cursor; **Settings → MCP** (or Agent MCP list) — `github` and
+   `threat-composer-ai` should appear.
+3. Enable `github` — expect on the order of **~91 tools** with this PoC's headers
+   (≈95 with Insiders). A **401** means the token is missing, revoked, or not visible
+   to the Cursor process (common with GUI launch — use `~/.cursor/mcp.json` or OAuth).
+4. `threat-composer-ai` requires `uvx`, Bedrock-capable `AWS_PROFILE`, and explicit
+   approval in the MCP UI — optional; never runs in CI.
 
 **Agent instructions.** Cursor has no `CURSOR.md` convention. It auto-loads
 [`AGENTS.md`](../AGENTS.md) (and `CLAUDE.md` for compatibility). Cursor-specific
 setup lives here and in `.cursor/mcp.json`, not a separate instructions file.
 
 **Safeguards (same as Claude):** committed config carries **no secrets** — only
-`${env:…}` references; real tokens stay in gitignored `.env` or your shell.
-[gitleaks](https://github.com/gitleaks/gitleaks) in pre-commit/CI catches
-accidental commits.
+`${env:…}` references; real tokens stay in gitignored `.env`, user-global
+`~/.cursor/mcp.json`, or OAuth. [gitleaks](https://github.com/gitleaks/gitleaks) in
+pre-commit/CI catches accidental commits.
 
 ## Other editor/agent vendors
 
