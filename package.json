@@ -21,6 +21,7 @@
     "lint:md": "markdownlint-cli2",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:mcp-parity": "scripts/check-mcp-parity.sh",
     "test": "npm run test:unit",
     "test:unit": "JEST_TIER=unit jest",
     "test:integration": "JEST_TIER=integration jest --runInBand",

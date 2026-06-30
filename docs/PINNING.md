@@ -20,7 +20,7 @@ supply-chain safety. This file is the authoritative inventory.
 | actionlint                    | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies)                               |
 | shellcheck                    | `ci.yml`, pre-commit                 | `v0.11.0` **+ SHA-256 verify** (CI) / `shellcheck-py v0.11.0.1` (hook) |
 | gitleaks, pre-commit-hooks    | `.pre-commit-config.yaml`            | `rev:` tags                                                            |
-| threat-composer-ai (uvx)      | `.mcp.json`                          | git commit SHA                                                         |
+| threat-composer-ai (uvx)      | `.mcp.json`, `.cursor/mcp.json`      | git commit SHA (same pin in both; `npm run check:mcp-parity`)          |
 | Prettier, markdownlint-cli2   | `package.json` + lockfile            | exact, lockfile-resolved                                               |
 | Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                                               |
 | fast-check, jazzer.js (fuzz)  | `package.json` + lockfile            | exact, lockfile-resolved                                               |

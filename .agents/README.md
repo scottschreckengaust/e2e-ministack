@@ -46,8 +46,8 @@ under `*-workspace/` — those are gitignored local tooling).
 | **Skills**               | `.agents/skills/<name>/SKILL.md`                | Auto-discovered; model invokes when relevant or user types `/name`                            | On-demand workflows                                     |
 | **MCP servers**          | Per vendor (`.mcp.json`, `.cursor/mcp.json`, …) | Tool-specific MCP config                                                                      | External tool access (GitHub API, etc.)                 |
 
-There is **no `CURSOR.md`** convention — Cursor auto-loads `AGENTS.md`. Cursor-specific
-MCP setup belongs in `.cursor/mcp.json` when present (see issue #72 / #112).
+There is **no `CURSOR.md`** convention — Cursor auto-loads `AGENTS.md`. Cursor MCP
+setup lives in [`.cursor/mcp.json`](../.cursor/mcp.json) and [docs/MCP.md](../docs/MCP.md).
 
 **Skills are more portable than MCP:** one `.agents/skills/` tree serves multiple
 agents; MCP still needs per-vendor files or a sync generator (issue #111).

@@ -64,6 +64,9 @@ jobs:
               - '.markdownlint-cli2.jsonc'
               - '.prettierrc.json'
               - '.prettierignore'
+              - '.mcp.json'
+              - '.cursor/**'
+              - 'scripts/check-mcp-parity.sh'
 
   # Fast, synth-only tier. Gates the expensive integration job below.
   unit:
@@ -83,6 +86,8 @@ jobs:
         run: npm run lint:md
       - name: Format check (prettier)
         run: npm run format:check
+      - name: MCP config parity (.mcp.json vs .cursor/mcp.json)
+        run: npm run check:mcp-parity
       - name: Build
         run: npm run build
       - name: Unit tests (logic + CDK assertions/snapshot)

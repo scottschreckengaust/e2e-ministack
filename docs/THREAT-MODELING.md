@@ -74,8 +74,8 @@ threat-composer's only model _generator_ is the experimental
 account (LLM inference, billed per run; not emulated by MiniStack) and produces
 a _draft for human review_ — it does not replace the human authoring loop.
 
-This repo ships an MCP server config in [`.mcp.json`](../.mcp.json) so an MCP
-client (Claude Code, Claude Desktop, Cline, Kiro, …) can call it:
+This repo ships MCP configs in [`.mcp.json`](../.mcp.json) (Claude Code) and
+[`.cursor/mcp.json`](../.cursor/mcp.json) (Cursor) so an MCP client can call it:
 
 ```json
 {
@@ -84,7 +84,7 @@ client (Claude Code, Claude Desktop, Cline, Kiro, …) can call it:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai",
+        "git+https://github.com/awslabs/threat-composer.git@0d58a0d85e5413f6c4169245c667ac083f4efb39#subdirectory=packages/threat-composer-ai",
         "threat-composer-ai-mcp"
       ],
       "env": {
@@ -96,10 +96,14 @@ client (Claude Code, Claude Desktop, Cline, Kiro, …) can call it:
 }
 ```
 
+(Cursor uses `${env:AWS_*}` plus `envFile` — see [docs/MCP.md](MCP.md). The uvx pin
+is the same in both files; tracked in [docs/PINNING.md](PINNING.md).)
+
 Requirements: [`uv`](https://docs.astral.sh/uv/) on PATH (provides `uvx`), and
 AWS credentials with Bedrock access in the environment (`AWS_PROFILE` /
-`AWS_REGION` are passed through). In Claude Code, run `/mcp` to connect and
-approve the project server. Prefer the CLI for a one-shot run:
+`AWS_REGION` — set in `.env` for Cursor stdio, or launch env for Claude). In Claude
+Code, run `/mcp` to connect and approve the project server; in Cursor, use
+**Settings → MCP** and approve `threat-composer-ai`. Prefer the CLI for a one-shot run:
 
 ```bash
 uv tool install --from "git+https://github.com/awslabs/threat-composer.git#subdirectory=packages/threat-composer-ai" threat-composer-ai
