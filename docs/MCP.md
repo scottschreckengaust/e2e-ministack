@@ -121,6 +121,12 @@ set -a; . ./.env; set +a
 cursor .
 ```
 
+> **Caveat:** `${env:…}` resolves against the environment Cursor was **launched
+> with**, not your shell rc — a Dock/GUI launch won't see vars from `~/.zshrc`,
+> so start Cursor via `cursor .` from a shell that has the token exported (or use
+> the OAuth flow above). There is no `~/.claude/settings.json`-style `env` block
+> for Cursor.
+
 **threat-composer-ai (stdio).** Cursor can load extra vars from `.env` via
 `envFile` on stdio servers. Set `AWS_PROFILE` (and optionally `AWS_REGION`) in
 your shell or `.env` before use — there is no `${…:-us-east-1}` default in the
