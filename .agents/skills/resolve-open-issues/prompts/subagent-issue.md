@@ -141,34 +141,35 @@ sits below the repo's current score) and treat the current level as the bar, **b
 enhancement that drops a score toward a lower floor would still pass CI yet erode quality. Report
 which gates ran and their results.
 
-## If a security scanner flags your code: FIX it, do not suppress it
+## Prefer time-tested code over bespoke — and if a scanner flags you, FIX it, don't suppress it
 
-_(General principle — applies to any SAST/code-scanning gate: Semgrep, CodeQL, etc.)_ When a scanner
-reports a finding on code you wrote, the bar is a **real, proven fix — never a suppression
-(`nosemgrep`/inline-ignore/dismissal) or a prose "it's a false positive" comment.** A suppression
-clears the _gate_ but leaves the code-scanning _alert_ open, and asserting safety is the weak form:
-fixes must **stick and be actually done, not hacked**. Recipe:
+_(General principle — applies on any repo.)_ Two coupled rules for anything with adversarial
+exposure (parsing, path/URL handling, auth, crypto, escaping, deserialization):
 
-1. **Read the rule's real sanitizer set** — don't guess what clears it. Fetch the rule definition (for
-   Semgrep, the rule YAML in `semgrep/semgrep-rules`) and read its `pattern-sanitizers`. Recognized
-   shapes are specific: e.g. the path-traversal rule accepts `.replace(...)`, `.indexOf(...)`, or a
-   function whose **name matches `sanitize`** on the value entering the sink — while `path.basename()`
-   alone and a `resolve()`+`startsWith()` containment check do **not** clear it.
-2. **Write a genuine guard** that both prevents the attack AND matches a recognized sanitizer shape.
-   Validate host-agnostically where the OS matters (e.g. path names: check `path.win32.basename` AND
-   `path.posix.basename`, plus `:` for Windows drive/NTFS-ADS and `\0` for null-byte truncation — not
-   plain `path.basename`, whose separators are platform-dependent).
-3. **Prove it three ways before pushing:** (a) reproduce the scanner locally with the **pinned** version
-   the repo uses (read it from the repo's scanner config — e.g. `uvx semgrep==<pin>` or `pip install
---require-hashes -r <reqs>`) and confirm **0 findings**; (b) add **executable adversarial tests**
-   (payloads from the canonical source — e.g. OWASP for the vuln class) asserting the guard REJECTS the
-   attacks and ACCEPTS legitimate inputs; (c) confirm existing behavior still passes.
-4. **Be honest about scope** in code + tests: only defend the layer the sink actually sits at (a
-   filesystem-name guard need not — and should not pretend to — handle URL-percent-encoded forms if
-   nothing decodes them first). Document out-of-scope forms rather than asserting them as caught.
+- **Reuse over reinvent.** Do **not** hand-roll a solution a time-tested, externally-verified
+  implementation already provides. Reach first for the platform/standard-library primitive, then a
+  widely-used, actively-maintained, heavily-exercised library or an authoritative reference
+  implementation (OWASP / language-community canon). Bespoke security code lacks the years of
+  adversarial exercise a vetted one has — it is a liability. An adopted fixer library **is** a
+  dependency and a tool-adoption governance decision (§ Scope discipline): license-acceptable +
+  pinned, or escalate. Bespoke is justified **only** when no vetted primitive fits the sink's exact
+  semantics — and even then you build **on** vetted primitives and prove it (below).
+- **Fix, never suppress.** A suppression (`nosemgrep` / inline-ignore / alert-dismissal) clears the
+  _gate_ but leaves the code-scanning _alert_ open; a prose "false positive" note asserts safety
+  instead of enforcing it. The fix must **stick and be actually done, not hacked**: read the rule's
+  own sanitizer set (don't guess what clears it), reproduce the scanner locally at the repo's
+  **pinned** version → **0 findings**, and prove the guard with an **adversarial corpus from an
+  authoritative source** (OWASP/CWE) that it **rejects** attacks and **accepts** legit input —
+  scoped honestly to the layer the sink sits at. Suppression is a **last resort** for a genuinely
+  unfixable true-false-positive, and only with explicit maintainer sign-off (§ If BLOCKED) — never
+  self-approved.
 
-Suppression is a last resort for a genuinely unfixable true-false-positive, and only with explicit
-maintainer sign-off — escalate (§ If BLOCKED) rather than self-approving one.
+**This is not optional guidance — it is the repo's documented standard.** Read
+`docs/SECURITY-TOOLING.md` § "Remediating a scanner finding" (the source of truth: the ordered
+procedure + license coupling) and study the repo's own worked example —
+`fuzz/handler.regression.test.js` (`sanitizeCorpusName` + its OWASP-sourced adversarial test suite),
+the narrow case where bespoke was justified and proven. The skill's
+`references/remediating-scanner-findings.md` walks that exemplar and the reuse-vs-bespoke decision.
 
 ## Pre-push self-review (BEFORE you commit/push)
 
