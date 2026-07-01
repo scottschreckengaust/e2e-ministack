@@ -141,6 +141,35 @@ sits below the repo's current score) and treat the current level as the bar, **b
 enhancement that drops a score toward a lower floor would still pass CI yet erode quality. Report
 which gates ran and their results.
 
+## If a security scanner flags your code: FIX it, do not suppress it
+
+_(General principle — applies to any SAST/code-scanning gate: Semgrep, CodeQL, etc.)_ When a scanner
+reports a finding on code you wrote, the bar is a **real, proven fix — never a suppression
+(`nosemgrep`/inline-ignore/dismissal) or a prose "it's a false positive" comment.** A suppression
+clears the _gate_ but leaves the code-scanning _alert_ open, and asserting safety is the weak form:
+fixes must **stick and be actually done, not hacked**. Recipe:
+
+1. **Read the rule's real sanitizer set** — don't guess what clears it. Fetch the rule definition (for
+   Semgrep, the rule YAML in `semgrep/semgrep-rules`) and read its `pattern-sanitizers`. Recognized
+   shapes are specific: e.g. the path-traversal rule accepts `.replace(...)`, `.indexOf(...)`, or a
+   function whose **name matches `sanitize`** on the value entering the sink — while `path.basename()`
+   alone and a `resolve()`+`startsWith()` containment check do **not** clear it.
+2. **Write a genuine guard** that both prevents the attack AND matches a recognized sanitizer shape.
+   Validate host-agnostically where the OS matters (e.g. path names: check `path.win32.basename` AND
+   `path.posix.basename`, plus `:` for Windows drive/NTFS-ADS and `\0` for null-byte truncation — not
+   plain `path.basename`, whose separators are platform-dependent).
+3. **Prove it three ways before pushing:** (a) reproduce the scanner locally with the **pinned** version
+   the repo uses (read it from the repo's scanner config — e.g. `uvx semgrep==<pin>` or `pip install
+--require-hashes -r <reqs>`) and confirm **0 findings**; (b) add **executable adversarial tests**
+   (payloads from the canonical source — e.g. OWASP for the vuln class) asserting the guard REJECTS the
+   attacks and ACCEPTS legitimate inputs; (c) confirm existing behavior still passes.
+4. **Be honest about scope** in code + tests: only defend the layer the sink actually sits at (a
+   filesystem-name guard need not — and should not pretend to — handle URL-percent-encoded forms if
+   nothing decodes them first). Document out-of-scope forms rather than asserting them as caught.
+
+Suppression is a last resort for a genuinely unfixable true-false-positive, and only with explicit
+maintainer sign-off — escalate (§ If BLOCKED) rather than self-approving one.
+
 ## Pre-push self-review (BEFORE you commit/push)
 
 Once gates are green but before committing, review your own staged diff (`git diff --staged`). Prefer
