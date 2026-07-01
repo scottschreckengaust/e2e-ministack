@@ -31,17 +31,56 @@ const { handler } = require('../lambda/index.js');
 // The committed seed corpus. Each file is a raw byte input; a jazzer `crash-*`
 // reproducer can be dropped in here verbatim to pin it as a regression test.
 const CORPUS_DIR = path.join(__dirname, 'corpus');
-// CORPUS_DIR is a fixed, committed in-repo directory and its entries come from
-// readdirSync of that directory — there is no external/user input and no path
-// traversal is reachable. Semgrep's path-join-resolve-traversal rule treats the
-// readdir entry (a callback parameter) as a taint source and recognizes no
-// sanitizer for a trusted directory listing, so it is a false positive here.
-// Suppress that ONE rule on the specific sink line rather than add runtime path
-// validation to test-only code for a non-threat.
+
+/**
+ * Confine a corpus filename to CORPUS_DIR before it is joined onto a filesystem
+ * path. Every read below routes through this so no name can escape the corpus
+ * directory: any value that is not a single, plain path segment is rejected
+ * outright (see the inline notes for the exact surfaces — separators under both
+ * OS conventions, `.`/`..`, NUL byte, and `:`). In this test the names come from
+ * `readdirSync(CORPUS_DIR)` so they are already safe — but validating at the join
+ * site keeps the guarantee local and explicit rather than relying on the caller,
+ * and is the real sanitizer the path-traversal SAST rule looks for (a
+ * `sanitize`-named validator on the value entering `path.join`).
+ * @param {string} name a corpus filename to validate
+ * @returns {string} the same name, guaranteed to be a single safe path segment
+ */
+function sanitizeCorpusName(name) {
+  // Validate under BOTH OS conventions so the guard is correct regardless of the
+  // host: `path.basename`'s separator set is platform-dependent (`\` separates on
+  // Windows but not POSIX), so we check `path.win32.basename` AND
+  // `path.posix.basename` — a name must be a single plain segment under each. We
+  // also reject, explicitly:
+  //   • `.` / `..`            — directory-relative escapes
+  //   • a NUL byte (`\0`)     — classic null-byte truncation (OWASP), which can
+  //                             cut a path short past a suffix check
+  //   • a colon (`:`)         — Windows drive (`C:`) and NTFS alternate-data-stream
+  //                             (`name:stream`) selectors
+  // What survives is a single, plain path segment that cannot escape CORPUS_DIR.
+  // NOTE (scope): this guards a FILESYSTEM name. URL-percent-encoded forms
+  // (`%2e%2e%2f`, overlong UTF-8 `%c0%af`, …) are a decode-layer concern and do
+  // not apply here — nothing URL-decodes these names before the read — so a raw
+  // `%2e%2e%2f` is just an ordinary (harmless) filename to `fs`, not a bypass.
+  if (
+    typeof name !== 'string' ||
+    name === '' ||
+    name === '.' ||
+    name === '..' ||
+    name.includes('\0') ||
+    name.includes(':') ||
+    path.win32.basename(name) !== name ||
+    path.posix.basename(name) !== name
+  ) {
+    throw new Error(`unsafe corpus filename (path traversal): ${name}`);
+  }
+  return name;
+}
+
 const corpusFiles = fs
   .readdirSync(CORPUS_DIR)
-  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-  .filter((entry) => fs.statSync(path.join(CORPUS_DIR, entry)).isFile())
+  .filter((entry) =>
+    fs.statSync(path.join(CORPUS_DIR, sanitizeCorpusName(entry))).isFile(),
+  )
   .sort();
 
 /**
@@ -110,11 +149,73 @@ describe('cdk-doubler handler — corpus replay (regression)', () => {
   it.each(corpusFiles)(
     'replays corpus input %s without violating handler invariants',
     async (file) => {
-      // `file` is a committed-corpus entry from readdirSync (see the note at
-      // CORPUS_DIR) — trusted, not user input. Same Semgrep false positive.
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const data = fs.readFileSync(path.join(CORPUS_DIR, file));
+      // Route the name through the same containment check before the read, so
+      // the join can never escape CORPUS_DIR.
+      const data = fs.readFileSync(
+        path.join(CORPUS_DIR, sanitizeCorpusName(file)),
+      );
       await assertInvariants(data);
     },
   );
+});
+
+describe('sanitizeCorpusName — path-traversal containment', () => {
+  // Prove the guard actually blocks escapes rather than just satisfying the
+  // scanner: every value that is not a single, plain path segment is rejected,
+  // so a name can never resolve outside CORPUS_DIR. Corpus of attack surfaces
+  // drawn from OWASP "Path Traversal"
+  // (https://owasp.org/www-community/attacks/Path_Traversal), scoped to the
+  // forms that reach a filesystem name (no URL-decode layer sits in front here).
+  it.each([
+    // — POSIX relative traversal —
+    '../../etc/passwd',
+    '../../../../etc/shadow',
+    '..',
+    '.',
+    './x',
+    'sub/dir',
+    // — Windows backslash traversal (must be caught even on POSIX hosts) —
+    'a\\b',
+    '..\\..\\x',
+    '..\\..\\..\\Windows\\win.ini',
+    // — absolute paths (both OS) —
+    '/abs/path',
+    '/etc/passwd',
+    'C:\\Windows\\System32\\drivers\\etc\\hosts',
+    // — Windows drive / NTFS alternate-data-stream via colon —
+    'C:file',
+    'name:stream',
+    // — null-byte truncation (OWASP): would defeat a naive suffix check —
+    'secret.doc\0.pdf',
+    'a\0',
+    // — trailing/leading separator forms —
+    'dir/',
+    '/leading',
+  ])('rejects the traversal attempt %p', (evil) => {
+    expect(() => sanitizeCorpusName(evil)).toThrow(/path traversal/);
+  });
+
+  // Non-string / empty inputs must also be rejected, not coerced.
+  it.each([
+    ['', 'empty string'],
+    [undefined, 'undefined'],
+    [null, 'null'],
+  ])('rejects the non-name input (%s)', (evil) => {
+    expect(() => sanitizeCorpusName(evil)).toThrow(/path traversal/);
+  });
+
+  // Legitimate single-segment names — including a jazzer `crash-*` reproducer
+  // filename — pass unchanged. NB: a raw URL-encoded string like `%2e%2e%2f` is
+  // NOT a bypass here (nothing decodes it), so it is simply a valid filename;
+  // we deliberately don't assert it as "malicious" — that would misrepresent
+  // the guard's actual (filesystem-layer) responsibility.
+  it.each([
+    'crash-abc123',
+    'number-double',
+    'nested-object',
+    'a.b_c-1',
+    'file.bin',
+  ])('accepts the legitimate corpus name %p', (ok) => {
+    expect(sanitizeCorpusName(ok)).toBe(ok);
+  });
 });
