@@ -31,4 +31,38 @@ module.exports = {
       },
     ],
   ],
+  // Coverage (unit tier only). Collection is switched ON by the npm script
+  // (`test:unit` passes --coverage), deliberately NOT by `collectCoverage:
+  // true` here: Stryker runs jest programmatically through this same config
+  // for every mutant, and always-on coverage would both slow every mutant run
+  // and corrupt mutation semantics (a mutant could be "killed" by the
+  // coverageThreshold failure below instead of a real assertion). The
+  // integration tier can't collect coverage at all — the code under test runs
+  // inside MiniStack's Lambda container, where istanbul can't see it (#124).
+  // Both .ts and the tsc-compiled .js siblings must be listed for lib/bin:
+  // tsc compiles in place and Jest resolves `../../lib/env` to the compiled
+  // .js when it exists (default moduleFileExtensions puts js before ts), so
+  // .ts-only globs would silently collect nothing from lib/bin after a build
+  // (as in CI, where `npm run build` precedes `npm run test:unit`). With the
+  // .js globs istanbul instruments whichever file was executed and inline
+  // source maps (tsconfig `inlineSourceMap`) remap the report to the .ts
+  // sources either way.
+  collectCoverageFrom: [
+    'lambda/**/*.js',
+    'lib/**/*.{ts,js}',
+    'bin/**/*.{ts,js}',
+    // Type declarations (the hand-written lambda/index.d.ts contract) carry
+    // no executable code.
+    '!**/*.d.ts',
+  ],
+  // Under the gitignored reports/ tree, next to junit/ and mutation/.
+  coverageDirectory: 'reports/coverage',
+  // lcov is the interchange format phase 2 (#125) consumes; json-summary
+  // feeds the GITHUB_STEP_SUMMARY block in CI; text prints in the job log.
+  coverageReporters: ['text', 'lcov', 'json-summary'],
+  // Hard gate: 100% on the unit tier (maintainer decision, #122). Enforced in
+  // the tool (jest exits non-zero) per produce → always-upload → enforce.
+  coverageThreshold: {
+    global: { branches: 100, functions: 100, lines: 100, statements: 100 },
+  },
 };

@@ -23,7 +23,11 @@ export default {
   // Speed: cache verdicts and re-test only mutants in changed files.
   incremental: true,
   incrementalFile: 'reports/mutation/incremental.json',
-  reporters: ['html', 'clear-text', 'progress'],
+  // `json` emits reports/mutation/mutation.json in the cross-language
+  // mutation-testing-report-schema — the machine-readable report CI parses
+  // for the step summary (no JUnit reporter exists for Stryker, by design).
+  reporters: ['html', 'clear-text', 'progress', 'json'],
+  jsonReporter: { fileName: 'reports/mutation/mutation.json' },
   // CI gate: fail under 80%, warn under 90%.
   thresholds: { high: 90, low: 80, break: 80 },
   // jest-runner needs JEST_TIER=unit; set via env in the npm script.
