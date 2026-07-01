@@ -9,9 +9,12 @@ doc for the drift audit (#76); CLAUDE.md points here rather than duplicating it.
 
 Two workflows. `ci.yml` (changes → unit → integration) builds, lint/unit-tests
 with the cdk-nag synth gate, then deploys/tests against MiniStack. `security.yml`
-runs the scanners below (also on a weekly cron). Every gate follows the
-**produce → always-upload → enforce** pattern so its report artifact exists even
-when the job fails; SARIF-capable gates also upload to the Security tab.
+runs the scanners below (also on a weekly cron). A third, small scheduled
+workflow — `license-review-poller.yml` — resolves open `license-review` issues
+against ClearlyDefined weekly (see "Could not detect a license" below). Every
+gate follows the **produce → always-upload → enforce** pattern so its report
+artifact exists even when the job fails; SARIF-capable gates also upload to the
+Security tab.
 
 | Gate                  | Workflow     | Scope                                   | Failure policy |
 | --------------------- | ------------ | --------------------------------------- | -------------- |
@@ -95,11 +98,21 @@ Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
        recording the METADATA verdict from step 1 and the ClearlyDefined
        definition link
        (`https://clearlydefined.io/definitions/pypi/pypi/-/<name>/<version>`).
-       The issue closes when ClearlyDefined shows a declared license —
-       automating this create/poll/close loop is #127 Leg B. The warning
-       itself is self-expiring (dependency-review is PR-diff-scoped, so it
-       only reappears on a PR touching that package) and never fails the
-       gate, so no suppression is needed meanwhile.
+       **Steps 2–3 are automated (#127 Leg B):** a triage step in the
+       `dependency-review` job queues the harvest and files the issue at PR
+       time for each `unlicensed` pypi purl, and the weekly
+       `license-review-poller.yml` workflow then auto-closes the issue when
+       ClearlyDefined's declared license is satisfiable from `security.yml`'s
+       `allow-licenses` (the single source, extracted at runtime; SPDX
+       satisfiability in `.github/scripts/license-verdict.mjs` —
+       conservative: unparseable/`NOASSERTION` never passes), escalates
+       (`priority:high` + `area:security`) after 30 days unresolved, and on
+       an _unacceptable_ declared license escalates AND fails its run red —
+       the enforcement point for packages that merged while UNKNOWN, which
+       the PR-diff-scoped gate can never re-check. The warning itself is
+       self-expiring (dependency-review is PR-diff-scoped, so it only
+       reappears on a PR touching that package) and never fails the gate, so
+       no suppression is needed meanwhile.
 
     As a **last resort only** — e.g. a future config where unlicensed deps
     _do_ fail the gate and a release must ship before the harvest lands — the
