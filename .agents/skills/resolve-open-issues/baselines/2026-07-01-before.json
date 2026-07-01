@@ -1,0 +1,441 @@
+{
+  "repo": "scottschreckengaust/e2e-ministack",
+  "branch_prefix": "fix/issue-",
+  "summary": {
+    "repo_pr_count": 42,
+    "lead_min": {
+      "median": 4,
+      "max": 4715
+    },
+    "ci_min": {
+      "median": 2
+    },
+    "review_min": {
+      "median": 0
+    },
+    "first_try_green_pct": 100,
+    "autoclose_ok_pct": 92.85714285714286
+  },
+  "prs": [
+    {
+      "pr": 118,
+      "issues": [109],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 114,
+      "issues": [71],
+      "lead_min": 61,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 113,
+      "issues": [112],
+      "lead_min": 1070,
+      "ci_min": 1,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 103,
+      "issues": [102],
+      "lead_min": 201,
+      "ci_min": 1,
+      "review_min": null,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 95,
+      "issues": [],
+      "lead_min": 2,
+      "ci_min": 2,
+      "review_min": 1,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": false
+    },
+    {
+      "pr": 94,
+      "issues": [91],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 2,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 93,
+      "issues": [92],
+      "lead_min": 7,
+      "ci_min": 2,
+      "review_min": 7,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 90,
+      "issues": [],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 3,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": false
+    },
+    {
+      "pr": 89,
+      "issues": [76],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 3,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 88,
+      "issues": [72],
+      "lead_min": 4715,
+      "ci_min": 2,
+      "review_min": 127,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 87,
+      "issues": [70],
+      "lead_min": 2,
+      "ci_min": 2,
+      "review_min": 2,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 86,
+      "issues": [],
+      "lead_min": 2,
+      "ci_min": 2,
+      "review_min": 1,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": false
+    },
+    {
+      "pr": 85,
+      "issues": [62],
+      "lead_min": 2,
+      "ci_min": 2,
+      "review_min": 2,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 68,
+      "issues": [29],
+      "lead_min": 2,
+      "ci_min": 1,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 67,
+      "issues": [28],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 66,
+      "issues": [25],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 65,
+      "issues": [27],
+      "lead_min": 7,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 64,
+      "issues": [17],
+      "lead_min": 5,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 63,
+      "issues": [35],
+      "lead_min": 5,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 61,
+      "issues": [16],
+      "lead_min": 3,
+      "ci_min": 1,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 60,
+      "issues": [34],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 59,
+      "issues": [15],
+      "lead_min": 4,
+      "ci_min": 1,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 58,
+      "issues": [30],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 57,
+      "issues": [33],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 56,
+      "issues": [24],
+      "lead_min": 5,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 55,
+      "issues": [7],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 54,
+      "issues": [19],
+      "lead_min": 4,
+      "ci_min": 1,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 53,
+      "issues": [21, 31],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 52,
+      "issues": [6],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 51,
+      "issues": [32],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 50,
+      "issues": [18],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 49,
+      "issues": [26],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 48,
+      "issues": [22],
+      "lead_min": 3,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 47,
+      "issues": [10, 23],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 46,
+      "issues": [12, 13, 14],
+      "lead_min": 4,
+      "ci_min": 3,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 45,
+      "issues": [5],
+      "lead_min": 4,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 42,
+      "issues": [11],
+      "lead_min": 18,
+      "ci_min": 3,
+      "review_min": 14,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 41,
+      "issues": [20],
+      "lead_min": 17,
+      "ci_min": 2,
+      "review_min": 13,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 40,
+      "issues": [9],
+      "lead_min": 18,
+      "ci_min": 2,
+      "review_min": 15,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 39,
+      "issues": [4],
+      "lead_min": 17,
+      "ci_min": 2,
+      "review_min": 12,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 38,
+      "issues": [3],
+      "lead_min": 6,
+      "ci_min": 2,
+      "review_min": 0,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    },
+    {
+      "pr": 36,
+      "issues": [2],
+      "lead_min": 168,
+      "ci_min": 2,
+      "review_min": null,
+      "ci_runs": 30,
+      "ci_conclusion": "green",
+      "autoclose_ok": true
+    }
+  ]
+}

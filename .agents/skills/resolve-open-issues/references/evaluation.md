@@ -45,8 +45,8 @@ NEW tool), so the harness eats its own dog food.
 ## How to run an evaluation (the before/after protocol)
 
 1. **Baseline.** Before landing a skill change, score the most recent batch the _old_ skill
-   produced: `eval-batch-metrics.sh --json > before.json`. (For e2e-ministack the baseline pool is
-   the ~38 merged `fix/issue-*` PRs that exist today.)
+   produced: `eval-batch-metrics.sh --json > before.json`. (For e2e-ministack the current committed
+   baseline lives in [`baselines/`](#committed-baselines) below.)
 2. **Change the skill**, then run a fresh batch (ideally a comparable backlog — similar size and
    cluster mix; note any difference, **because** a harder backlog confounds the comparison).
 3. **After.** Score the new batch: `eval-batch-metrics.sh --json > after.json`.
@@ -56,6 +56,16 @@ NEW tool), so the harness eats its own dog food.
    tier speed, human availability). The metrics most attributable to a _skill_ change are
    **first-try-green %** (better worker prompts → fewer red→fix cycles) and **auto-close correct %**
    (the §7 verify/close discipline). Lead/review time are context, not verdict.
+
+## Committed baselines
+
+Baselines are committed under `baselines/` **because** a skill edit is only falsifiable against a
+snapshot taken _before_ the edit — regenerating "before" after the change would score PRs the new
+skill produced (issue #107).
+
+| File                                                                      | Slice                                                                                                                                                                     |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`baselines/2026-07-01-before.json`](../baselines/2026-07-01-before.json) | All 42 merged `fix/issue-*` PRs in e2e-ministack as of 2026-07-01 (through PR #118). Snapshots the **pre-#110** skill — the "before" for the portability refactor (#110). |
 
 ## Caveats the harness prints (don't over-read the number)
 
