@@ -31,8 +31,16 @@ const { handler } = require('../lambda/index.js');
 // The committed seed corpus. Each file is a raw byte input; a jazzer `crash-*`
 // reproducer can be dropped in here verbatim to pin it as a regression test.
 const CORPUS_DIR = path.join(__dirname, 'corpus');
+// CORPUS_DIR is a fixed, committed in-repo directory and its entries come from
+// readdirSync of that directory — there is no external/user input and no path
+// traversal is reachable. Semgrep's path-join-resolve-traversal rule treats the
+// readdir entry (a callback parameter) as a taint source and recognizes no
+// sanitizer for a trusted directory listing, so it is a false positive here.
+// Suppress that ONE rule on the specific sink line rather than add runtime path
+// validation to test-only code for a non-threat.
 const corpusFiles = fs
   .readdirSync(CORPUS_DIR)
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   .filter((entry) => fs.statSync(path.join(CORPUS_DIR, entry)).isFile())
   .sort();
 
@@ -102,6 +110,9 @@ describe('cdk-doubler handler — corpus replay (regression)', () => {
   it.each(corpusFiles)(
     'replays corpus input %s without violating handler invariants',
     async (file) => {
+      // `file` is a committed-corpus entry from readdirSync (see the note at
+      // CORPUS_DIR) — trusted, not user input. Same Semgrep false positive.
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       const data = fs.readFileSync(path.join(CORPUS_DIR, file));
       await assertInvariants(data);
     },
