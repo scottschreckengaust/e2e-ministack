@@ -78,6 +78,27 @@ Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
   fail."_ This is true in both allow- and deny-list modes. **Trivy's license
   scan is the intended full-tree backstop** for the `UNKNOWN` case (separate
   follow-up, tracked under #77).
+  - **"Could not detect a license" on a _brand-new_ release is usually harvest
+    lag, not a license problem.** GitHub sources PyPI license data from
+    [ClearlyDefined](https://clearlydefined.io), whose scan of a
+    days-old release often hasn't run yet (observed with `aiohttp` 3.14.1: PyPI
+    wheel `METADATA` says `Apache-2.0 AND MIT`, ClearlyDefined `declared: null`,
+    score 0, no harvest tools run). The procedure when a PR shows UNKNOWN:
+    1. **Verify against the primary source** — read the wheel/sdist `METADATA`
+       `License:` / `License-Expression:` field on PyPI (stronger evidence than
+       any aggregator).
+    2. **Queue an upstream harvest** to shorten the lag —
+       `curl -X POST https://api.clearlydefined.io/harvest -H 'Content-Type: application/json' -d '{"tool":"package","coordinates":"pypi/pypi/-/<name>/<version>"}'`
+       (no auth required; returns `201 Created`; no evidence payload — their
+       own tooling re-scans the artifact).
+    3. If the gate must stay quiet meanwhile, add the purl to
+       `allow-dependencies-licenses` in `security.yml` with the verified
+       license, evidence, and drop condition in the comment. **Caution: the
+       action matches exemption purls by package name only (the `@version` is
+       ignored)**, so an entry silences license checking for _every_ version of
+       that package — keep entries rare and remove them the moment
+       ClearlyDefined catches up. Sweeping dead entries is part of the
+       toolchain-update automation (#78).
 - **Dual licenses such as `(MIT OR GPL-3.0-or-later)`, `(MIT OR CC0-1.0)`,
   `(BSD-2-Clause OR MIT OR Apache-2.0)` stay GREEN** — the SPDX `OR` expression
   is satisfied by an allowed member. `case@1.6.3` (`MIT OR GPL-3.0-or-later`)

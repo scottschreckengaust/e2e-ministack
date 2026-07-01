@@ -218,6 +218,24 @@ jobs:
             BSD-2-Clause, BSD-3-Clause, 0BSD,
             BlueOak-1.0.0, Python-2.0,
             CC0-1.0, CC-BY-4.0, Unlicense
+          # Exemptions for packages whose license is verified out-of-band but
+          # not (yet) detectable upstream: GitHub sources PyPI license data
+          # from ClearlyDefined, and a brand-new release sits unharvested for
+          # days, reporting as "could not detect a license". Every entry MUST
+          # record: actual license + primary-source evidence + drop condition.
+          # CAVEAT: the action matches purls by NAME ONLY (purlsMatch ignores
+          # the @version), so each entry exempts ALL versions of the package
+          # until removed — the @version below is documentation of what was
+          # verified, not an expiry. Remove entries as soon as the drop
+          # condition is met (see docs/SECURITY-TOOLING.md "Undetected").
+          #
+          # - aiohttp@3.14.1 — Apache-2.0 AND MIT (read from the wheel's
+          #   METADATA `License:` field 2026-07-01; MIT side is vendored
+          #   llhttp; both ids are on the allow-list above). Drop once
+          #   ClearlyDefined shows a declared license (harvest queued
+          #   2026-07-01):
+          #   https://clearlydefined.io/definitions/pypi/pypi/-/aiohttp/3.14.1
+          allow-dependencies-licenses: pkg:pypi/aiohttp@3.14.1
 
   grype:
     name: Grype FS scan
