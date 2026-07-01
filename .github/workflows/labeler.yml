@@ -1,0 +1,40 @@
+name: Labeler
+
+# Auto-label PRs from their changed paths (issue #116) using the map in
+# .github/labeler.yml. Labels are ADDITIVE (`sync-labels: false`) so
+# hand-applied labels (help wanted, priority:*, effort:*) are never stripped.
+#
+# Trigger is `pull_request`, NOT `pull_request_target` (issue #116 decision
+# #1): the repo's posture keeps zizmor at ZERO findings, and zizmor's
+# dangerous-triggers audit flags `pull_request_target`; suppressing that would
+# weaken the posture for a benefit this repo can't use yet — every PR here is
+# a same-repo branch, and fork PRs (whose read-only token can't write labels
+# under `pull_request`) don't exist today. If fork traffic ever appears, the
+# one-line upgrade is: switch to `pull_request_target`, keep ZERO checkout
+# steps (so no PR-supplied code can run), and add an inline-justified zizmor
+# ignore.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Least privilege — the job below opts into pull-requests: write.
+permissions:
+  contents: read
+
+jobs:
+  label:
+    name: Label by changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # read .github/labeler.yml + the PR's changed-file list
+      pull-requests: write # apply labels
+    steps:
+      # No checkout step: the action reads the config and the changed-file
+      # list via the GitHub API, so there are no persist-credentials concerns.
+      - uses: actions/labeler@f27b608878404679385c85cfa523b85ccb86e213 # v6.1.0
+        with:
+          # Additive only — never remove labels when paths stop matching
+          # (protects hand-applied labels; issue #116 decision #2).
+          sync-labels: false

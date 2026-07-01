@@ -1,0 +1,61 @@
+# Path → label map for actions/labeler (v6 config schema — the v5+
+# `changed-files:` / `any-glob-to-any-file:` match-object format; see
+# .github/workflows/labeler.yml for the workflow that consumes this).
+#
+# Maps ONLY to labels that already exist in the repo (`gh label list`) — the
+# labeler never creates labels. Scope is the `area:*` set only (issue #116
+# decision #3): `area:deps` suffices for dependency PRs, so the separate
+# `dependencies` label stays hand-managed.
+#
+# Note: `dot: true` is the action's default since v5, so `.github/**` globs
+# match without extra configuration.
+
+area:ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/actions/**'
+          - '.github/labeler.yml'
+
+# The issue's proposed map also listed 'cdk.out/**' here — omitted because
+# cdk.out/ is gitignored, so it can never appear in a PR's changed-file list.
+area:infra:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'bin/**'
+          - 'lib/**'
+          - 'cdk.json'
+
+area:tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'test/**'
+          - 'fuzz/**'
+          - 'jest.config.js'
+          - 'stryker.config.mjs'
+
+area:deps:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'package.json'
+          - 'package-lock.json'
+          - 'mise.toml'
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'docs/**'
+          - 'LICENSE'
+
+# NOTE: the issue's proposed map also listed
+# '.github/workflows/dependency-review.yml' here — omitted because that
+# workflow was removed by PR #118 (issue #109); a glob for a deleted file
+# would never match and would only mislead.
+area:security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/security.yml'
+          - '.github/workflows/supply-chain.yml'
+          - 'threat-model.tc.json'
+          - 'SECURITY.md'
