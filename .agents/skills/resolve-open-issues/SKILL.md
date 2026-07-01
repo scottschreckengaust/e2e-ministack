@@ -24,9 +24,10 @@ then run the loop (§4).
 > flip **ready** → merge), the concurrency dial, escalation, sign-out, and the metrics work on any
 > repo with GitHub + CI. What is **per-repo** is only the substituted detail: which gates run and
 > their thresholds (read from the repo's own config, never hard-coded — §7), the governance policy
-> the worker enforces (this repo's AGPL/copyleft stance is one instance — see
-> `prompts/subagent-issue.md`), and the harness quirks in `references/gotchas.md`. Carry the core to
-> a new repo unchanged; re-derive those few specifics from the new repo's config and docs.
+> the worker enforces (read from the repo's source-of-truth doc — here `AGENTS.md` § Security
+> checks; the gate itself is in `prompts/subagent-issue.md`), and the harness quirks in
+> `references/gotchas.md`. Carry the core to a new repo unchanged; re-derive those few specifics
+> from the new repo's config and docs.
 
 ---
 

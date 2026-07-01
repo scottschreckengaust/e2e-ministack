@@ -14,6 +14,10 @@ issues, do NOT touch files outside this scope, do NOT remove your worktree.
 
 ## Environment quirks (do first, in every shell) — these read as failures but aren't
 
+_These are **harness-specific** (this repo's runtime manager + local hooks), not portable pipeline
+rules — on another repo they may not apply; verify against that repo's runtime manager and
+configured hooks instead of assuming them._
+
 - **Put the pinned Node on PATH:** `command -v node >/dev/null 2>&1 || export PATH="$(mise where
 node)/bin:$PATH"`; verify `node --version` matches `mise.toml`. git's **pre-commit hook subprocess
   may not inherit this**, so `git commit` can fail `Executable npm not found` even when `pre-commit
@@ -52,15 +56,16 @@ conflict + a compliant alternative and stop; (3) if it's clean, note the license
 policy in the PR body.
 
 **The durable value of this gate is _adopted tooling/Actions_ — not dependency licenses.** Many
-repos already fail PRs on a disallowed _dependency_ license in CI (this repo's `dependency-review`
-job uses an allow-list — any non-permissive license fails closed), so don't re-police what CI
-catches. What CI does **not** see is the license of a _tool or Action_ you wire in (its license isn't
-a package in the lockfile) — that gap is exactly where the gate earns its keep.
+repos already fail PRs on a disallowed _dependency_ license in CI (check the repo's CI config;
+here a `dependency-review` allow-list fails closed on any non-permissive license), so don't
+re-police what CI catches. What CI does **not** see is the license of a _tool or Action_ you wire in
+(its license isn't a package in the lockfile) — that gap is exactly where the gate earns its keep.
 
-> **This repo's policy instance (substitute per repo):** AGPL/copyleft is a near-dealbreaker and
-> single-vendor lock-in is avoided — the same line that ruled out **k6** and removed **Renovate**
-> (a worker once adopted AGPL-licensed Renovate for an "add update automation" issue because the
-> issue asked for automation; it had to be ripped out — the precedent this gate prevents).
+> **The policy instance is per-repo — read it, don't assume it:** grep `AGENTS.md` (here: § Security
+> checks, "Dependency/supply-chain" bullet — the tool-adoption license line) for the repo's stance
+> and any named precedents of tools accepted or rejected under it. The cautionary pattern this gate
+> prevents is real: a worker once adopted a copyleft-licensed automation tool because the issue
+> asked for automation; it conflicted with the repo's stated policy and had to be ripped out.
 
 ## Claim FIRST (self-assign + comment), THEN build
 
@@ -92,10 +97,14 @@ A missing self-assign is a defect to surface, not skip.
 
 ### Step 0b — claim comment + worktree (only after you SOLELY own every issue)
 
+Read the repo's worktree convention from its source-of-truth doc first (`AGENTS.md` § Repository
+conventions; here the canonical base is `.worktrees/<branch>`) — use that base, not your agent
+harness's native default. Branch from `origin/main` (portable rule):
+
 ```bash
 cd {{REPO_ROOT}} && git fetch origin
-git worktree add -b fix/issue-{{N}}-{{SLUG}} .claude/worktrees/fix-issue-{{N}}-{{SLUG}} origin/main
-cd .claude/worktrees/fix-issue-{{N}}-{{SLUG}} && npm ci
+git worktree add .worktrees/fix/issue-{{N}}-{{SLUG}} -b fix/issue-{{N}}-{{SLUG}} origin/main
+cd .worktrees/fix/issue-{{N}}-{{SLUG}} && npm ci
 ```
 
 Then signal state immediately, on **every** issue in {{ISSUES}}:
@@ -110,8 +119,10 @@ fix/issue-{{N}}-{{SLUG}}"`, then `git push -u origin fix/issue-{{N}}-{{SLUG}}`.
   minimal code to pass.
 - **Config/docs/CI-YAML (no jest):** the gate is the linter (actionlint / prettier / markdownlint /
   tsc) plus explicit reasoning over the change — quote before/after.
-- The **integration** tier needs a deployed MiniStack and does NOT run locally — don't attempt it
-  (CI runs it). Local sanity = `JEST_TIER=unit npx jest`.
+- Some test tiers need deployed/external infrastructure and do NOT run locally — don't attempt
+  those (CI runs them). Read which tiers exist, what each needs, and the fast local-sanity command
+  from `AGENTS.md` § Commands / test strategy (here: the integration tier needs a deployed
+  emulator; local sanity is the unit tier).
 
 ## Local gates (ALL green before the PR, from the worktree)
 
@@ -124,9 +135,11 @@ build/synth, and heavier gates only when the relevant source changed); (3) if yo
 snapshot-backed artifact, update it **deliberately** (`jest -u`) and inspect the diff.
 
 **Never regress a gate below its current high-water mark.** A gate's enforced floor may sit below
-where the repo scores today (e.g. the mutation gate's CI floor is 80% but the repo is at **100%**) —
-treat the current level as the bar, **because** an enhancement that drops mutation 100%→95% would
-still pass CI yet erode quality. Report which gates ran and their results.
+where the repo scores today — read both the floor AND the current score from the repo's own
+config/docs (`AGENTS.md` documents the gates and thresholds; e.g. a mutation gate whose CI floor
+sits below the repo's current score) and treat the current level as the bar, **because** an
+enhancement that drops a score toward a lower floor would still pass CI yet erode quality. Report
+which gates ran and their results.
 
 ## Pre-push self-review (BEFORE you commit/push)
 
@@ -157,7 +170,8 @@ Closes #{{N}}   ← one line PER fully-resolved issue (`Closes #11`, `Closes #20
 ```
 
 (`{{COAUTHOR_TRAILER}}` is injected by the orchestrator — a single source so the model name can't rot
-in two files; e.g. `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.) Then `git push`.
+in two files; it is the current model's `Co-Authored-By:` line, not a value baked into this
+template.) Then `git push`.
 
 ## Open the DRAFT PR
 
@@ -224,7 +238,7 @@ worktree.
 WORKER: {{WK}}
 ISSUES: {{ISSUES}}
 BRANCH: fix/issue-{{N}}-{{SLUG}}
-WORKTREE: .claude/worktrees/fix-issue-{{N}}-{{SLUG}} (relative to repo root — never absolute)
+WORKTREE: .worktrees/fix/issue-{{N}}-{{SLUG}} (the repo-convention base — relative to repo root, never absolute)
 ASSIGNED: <yes/no — are you the GH assignee on every issue in {{ISSUES}}? (Step 0a self-verify)>
 PR_URL: <url>
 PR_NUMBER: <n>
