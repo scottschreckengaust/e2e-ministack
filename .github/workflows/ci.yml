@@ -57,6 +57,7 @@ jobs:
               - 'tsconfig.json'
               - 'cdk.json'
               - 'jest.config.js'
+              - 'jest.fuzz.config.js'
               - '.octocov.yml'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
@@ -150,6 +151,37 @@ jobs:
               console.log("| --- | --- | --- |");
               for (const k of ["statements", "branches", "functions", "lines"])
                 console.log("| " + k + " | " + t[k].pct + "% | " + t[k].covered + " / " + t[k].total + " |");
+            '
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Fuzz regression (corpus replay)
+        # Replays the committed fuzz/corpus/ seeds through the handler as ordinary
+        # Jest tests (plain Jest — NOT @jazzer.js/jest-runner, which is
+        # incompatible with jest@30; see fuzz/handler.regression.test.js). Writes
+        # reports/junit/fuzz.xml. A corpus input that violates a handler invariant
+        # fails this step, so a pinned crash reproducer gates the PR. Distinct
+        # from the exploratory, schedule-only `fuzz` job below (which GENERATES
+        # inputs and needs the native libFuzzer addon).
+        run: npm run test:fuzz-regression
+      - name: Upload fuzz regression report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: junit-fuzz
+          path: reports/junit/fuzz.xml
+          if-no-files-found: warn
+      - name: Step summary (fuzz regression)
+        if: always()
+        run: |
+          {
+            echo '## Fuzz regression (corpus replay)'
+            node -e '
+              const fs = require("fs");
+              const p = "reports/junit/fuzz.xml";
+              if (!fs.existsSync(p)) { console.log("_No JUnit report produced._"); process.exit(0); }
+              const m = fs.readFileSync(p, "utf8").match(/<testsuites[^>]*/);
+              if (!m) { console.log("_JUnit report is malformed._"); process.exit(0); }
+              const a = (k) => (m[0].match(new RegExp(k + "=\"([^\"]*)\"")) || [, "?"])[1];
+              console.log("**" + a("tests") + "** corpus replays, **" + a("failures") + "** failures, **" + a("errors") + "** errors (" + a("time") + "s)");
             '
           } >> "$GITHUB_STEP_SUMMARY"
       # octocov (config: .octocov.yml) — coverage REPORTING, not a gate (#125).

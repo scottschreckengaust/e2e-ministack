@@ -36,8 +36,9 @@ test/**/*.d.ts
 .stryker-tmp/
 reports/
 
-# jazzer.js fuzzing: corpus is cached in CI (not committed); crash inputs are
-# generated artifacts.
+# jazzer.js fuzzing: the exploratory scheduled job's corpus is cached in CI (not
+# committed); crash inputs are generated artifacts. (The PR-gating regression
+# tier's seed corpus is committed under fuzz/corpus/ and IS tracked.)
 .fuzz-corpus/
 crash-*
 
