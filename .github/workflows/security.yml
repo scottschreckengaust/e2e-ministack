@@ -187,14 +187,18 @@ jobs:
     if: github.event_name == 'pull_request'
     # pull-requests: write is required by comment-summary-in-pr (below), which
     # posts the full vuln+license review as a single (overwritten) PR comment.
+    # issues: write is required by the license-UNKNOWN triage step (#127 Leg
+    # B1), which files/updates `license-review` issues for unlicensed deps.
     permissions:
       contents: read
       pull-requests: write
+      issues: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - id: review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           # Post the full vuln + license review summary as a PR comment on
           # every run (not just failures) so the complete output is visible
@@ -227,7 +231,89 @@ jobs:
           # @version), so a standing entry silences license checks for ALL
           # future versions of the package. Instead, route each UNKNOWN to a
           # `license-review` issue per #127 and the procedure in
-          # docs/SECURITY-TOOLING.md ("Could not detect a license").
+          # docs/SECURITY-TOOLING.md ("Could not detect a license") — the
+          # triage step below (#127 Leg B1) automates that routing.
+
+      # ── License-UNKNOWN triage (#127 Leg B1) ──────────────────────────
+      # The action's `invalid-license-changes` output is JSON with buckets
+      # `unlicensed` / `unresolved` / `forbidden`. For each `unlicensed`
+      # pypi purl this step (a) fire-and-forgets a ClearlyDefined harvest
+      # POST to shorten the lag, and (b) files/updates an idempotent
+      # `license-review` issue — the durable artifact the scheduled
+      # license-review-poller workflow later resolves (auto-close on an
+      # acceptable declared license; red run + escalation otherwise).
+      # This step NEVER fails the job: on a read-only token (fork PRs) or
+      # API hiccups it degrades to warnings. Non-pypi ecosystems are
+      # log-only (npm licenses come from the registry, not ClearlyDefined).
+      # `!cancelled()`: run even when the review step fails the gate —
+      # outputs are set before the action's own failure.
+      - name: License-UNKNOWN triage (file license-review issues)
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # Untrusted-ish JSON (manifest-controlled names) — env, never
+          # inline interpolation into the script.
+          INVALID_LICENSE_CHANGES: ${{ steps.review.outputs.invalid-license-changes }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$INVALID_LICENSE_CHANGES" ]; then
+            echo "No invalid-license-changes output (review step skipped or failed early) — nothing to triage."
+            exit 0
+          fi
+          if ! unlicensed=$(jq -c '.unlicensed // []' <<<"$INVALID_LICENSE_CHANGES"); then
+            echo "::warning::could not parse invalid-license-changes output — skipping triage"
+            exit 0
+          fi
+          count=$(jq 'length' <<<"$unlicensed")
+          echo "unlicensed changes: $count"
+          if [ "$count" = "0" ]; then exit 0; fi
+          # mapfile, not a pipe-fed while-read: gh/curl inside the loop must
+          # not be able to consume the loop's stdin.
+          mapfile -t purls < <(jq -r '.[].package_url' <<<"$unlicensed" | sort -u)
+          for purl in "${purls[@]}"; do
+            # Treat the purl as untrusted: strict validation before any use.
+            if ! printf '%s' "$purl" | grep -Eq '^pkg:pypi/[A-Za-z0-9._-]+@[A-Za-z0-9._+!-]+$'; then
+              echo "::notice::non-pypi or malformed purl — manual triage: $purl"
+              continue
+            fi
+            rest="${purl#pkg:pypi/}"
+            name="${rest%@*}"
+            version="${rest#*@}"
+            # (a) Fire-and-forget ClearlyDefined harvest (assertion-free,
+            # unauthenticated; their own tooling re-scans the artifact).
+            if curl -sf -X POST https://api.clearlydefined.io/harvest \
+                 -H 'Content-Type: application/json' \
+                 -d "{\"tool\":\"package\",\"coordinates\":\"pypi/pypi/-/${name}/${version}\"}" > /dev/null; then
+              echo "harvest queued: pypi/pypi/-/${name}/${version}"
+            else
+              echo "::warning::ClearlyDefined harvest POST failed for $purl (non-fatal)"
+            fi
+            # (b) Create-or-update the license-review issue (idempotent by
+            # exact title match; titles are matched via jq --arg, never
+            # interpolated into a query).
+            title="license-review: $purl"
+            existing=$(gh issue list --label license-review --state open \
+              --json number,title --limit 100 \
+              | jq -r --arg t "$title" '[.[] | select(.title == $t)][0].number // empty') || existing=""
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" \
+                --body "Seen again on PR #${PR_NUMBER} ($(date -u +%Y-%m-%d)) — license still undetected upstream; harvest re-queued." \
+                || echo "::warning::could not comment on issue #$existing (read-only token?) — $purl"
+            else
+              body="Dependency entered the tree with an undetected license (\`unlicensed\` bucket of dependency-review's \`invalid-license-changes\` output) on PR #${PR_NUMBER}.
+
+          - **purl:** \`${purl}\`
+          - **ClearlyDefined definition:** https://api.clearlydefined.io/definitions/pypi/pypi/-/${name}/${version} ([UI](https://clearlydefined.io/definitions/pypi/pypi/-/${name}/${version}))
+          - A harvest request was POSTed to ClearlyDefined by CI.
+
+          **Manual METADATA verification (primary source):** read the wheel/sdist \`METADATA\` \`License:\` / \`License-Expression:\` field on PyPI for \`${name}==${version}\` — stronger evidence than any aggregator.
+
+          **Close condition:** the scheduled \`license-review-poller\` workflow auto-closes this issue once ClearlyDefined reports a declared license satisfiable from the \`allow-licenses\` list in \`security.yml\`; an unacceptable declared license escalates it instead (see #127 Leg B)."
+              gh issue create --title "$title" --label license-review --body "$body" \
+                || echo "::warning::could not create license-review issue (read-only token?) — manual follow-up: $purl"
+            fi
+          done
 
   grype:
     name: Grype FS scan

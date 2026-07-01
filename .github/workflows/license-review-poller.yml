@@ -1,0 +1,202 @@
+name: License review poller
+
+# Scheduled verdict poller for `license-review` issues (#127 Leg B2).
+#
+# WHY THIS EXISTS: the dependency-review gate in security.yml is PR-diff-
+# scoped. A package that enters the tree while its license is UNKNOWN
+# (ClearlyDefined harvest lag) is never re-evaluated after merge — no future
+# PR diff contains it, so if its license later resolves to something off the
+# allow-list (e.g. AGPL-3.0) no PR-time gate ever fires. The B1 triage step
+# in security.yml files a `license-review` issue per UNKNOWN purl; this
+# workflow is THE enforcement point for those: for each open issue it fetches
+# ClearlyDefined's declared SPDX expression and either
+#   - auto-closes the issue (declared license satisfiable from security.yml's
+#     `allow-licenses` — zero human touches in the happy path),
+#   - escalates (`priority:high` + `area:security`) after 30 days unresolved
+#     (manual METADATA verdict required), or
+#   - on an UNACCEPTABLE declared license: escalates AND exits non-zero so
+#     this scheduled run goes RED — the fail gate replacing the PR gate that
+#     can no longer fire. Remediation stays a human decision on the issue.
+#
+# Closing issues here is a designed exception to "automation never closes
+# issues": it closes `license-review` BOOKKEEPING issues only, never work
+# issues.
+#
+# The allow-list is NOT duplicated here — it is extracted at runtime from
+# security.yml's `allow-licenses:` value (single source of truth). SPDX
+# satisfiability lives in .github/scripts/license-verdict.mjs (Node built-ins
+# only; conservative: unparseable/NOASSERTION → not satisfiable).
+
+on:
+  workflow_dispatch: # manual runs (e.g. right after a harvest completes)
+  schedule:
+    # Weekly, offset a few hours after security.yml's Monday 06:00 cron so
+    # the two scheduled runs don't contend.
+    - cron: '0 10 * * 1'
+
+# Least privilege by default; the poll job opts into issues: write below.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    name: Poll license-review issues
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout (script + allow-list source)
+      issues: write # comment / label / close license-review issues
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      # Pinned Node for license-verdict.mjs (built-ins only — no npm ci).
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false'
+      - name: Poll ClearlyDefined and resolve license-review issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Allow-list: extracted at runtime from security.yml (the single
+          # source of truth) — never hard-coded here or in the script.
+          ALLOW_LIST=$(awk '
+            found && /^[[:space:]]*#/ { exit }
+            found {
+              if ($0 !~ /^[[:space:]]*[^[:space:]]/) exit
+              if ($0 ~ /:/) exit
+              line = $0
+              gsub(/^[[:space:]]+/, "", line)
+              gsub(/[[:space:]]+$/, "", line)
+              list = list (list == "" ? "" : " ") line
+              next
+            }
+            /allow-licenses:[[:space:]]*>-?[[:space:]]*$/ { found = 1 }
+            END { print list }
+          ' .github/workflows/security.yml)
+          if [ -z "$ALLOW_LIST" ]; then
+            echo "::error::could not extract allow-licenses from security.yml — fix the extraction or the workflow"
+            exit 1
+          fi
+          echo "allow-list: $ALLOW_LIST"
+
+          issues=$(gh issue list --label license-review --state open \
+            --json number,title,createdAt,labels --limit 100)
+          count=$(jq 'length' <<<"$issues")
+          if [ "$count" = "0" ]; then
+            echo "nothing to review — no open license-review issues."
+            echo "No open \`license-review\` issues — nothing to review." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "open license-review issues: $count"
+          echo "## License review poller" >> "$GITHUB_STEP_SUMMARY"
+
+          now_epoch=$(date -u +%s)
+          failed=0
+          marker='<!-- license-review-poller -->'
+          # mapfile, not a pipe-fed while-read: gh/curl inside the loop must
+          # not be able to consume the loop's stdin.
+          mapfile -t rows < <(jq -c '.[]' <<<"$issues")
+          for row in "${rows[@]}"; do
+            num=$(jq -r '.number' <<<"$row")
+            title=$(jq -r '.title' <<<"$row")
+            created=$(jq -r '.createdAt' <<<"$row")
+            escalated=$(jq -r 'any(.labels[].name; . == "priority:high")' <<<"$row")
+
+            # Issue titles are attacker-influencable (anyone can label an
+            # issue): treat the extracted purl as untrusted — strict
+            # validation before it goes anywhere near a URL or shell.
+            purl="${title#license-review: }"
+            if ! printf '%s' "$purl" | grep -Eq '^pkg:pypi/[A-Za-z0-9._-]+@[A-Za-z0-9._+!-]+$'; then
+              echo "::warning::issue #$num title carries no valid pypi purl — manual triage required"
+              echo "- #$num: title is not a valid \`license-review: pkg:pypi/<name>@<version>\` — needs manual triage" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            rest="${purl#pkg:pypi/}"
+            name="${rest%@*}"
+            version="${rest#*@}"
+            coords="pypi/pypi/-/${name}/${version}"
+            def_api="https://api.clearlydefined.io/definitions/${coords}"
+            def_ui="https://clearlydefined.io/definitions/${coords}"
+
+            if ! definition=$(curl -sf "$def_api"); then
+              echo "::warning::ClearlyDefined GET failed for $coords (issue #$num)"
+              echo "- #$num (\`$purl\`): ClearlyDefined API unreachable — retrying next run" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            declared=$(jq -r '.licensed.declared // empty' <<<"$definition")
+
+            if [ -z "$declared" ] || [ "${declared^^}" = "NOASSERTION" ]; then
+              # Not yet resolved upstream.
+              age_days=$(( (now_epoch - $(date -u -d "$created" +%s)) / 86400 ))
+              if [ "$age_days" -ge 30 ]; then
+                if [ "$escalated" = "true" ]; then
+                  echo "issue #$num already escalated (${age_days}d unresolved) — leaving as-is"
+                else
+                  gh issue edit "$num" --add-label priority:high --add-label area:security
+                  gh issue comment "$num" --body "${marker}
+          Unresolved for ${age_days} days — ClearlyDefined still reports no declared license for \`$purl\` ([definition]($def_ui)). Escalating: a **manual METADATA verdict** is required (read the wheel/sdist \`License:\`/\`License-Expression:\` on PyPI, then close or act on this issue by hand)."
+                fi
+                echo "- #$num (\`$purl\`): undetected after ${age_days}d — escalated for manual METADATA verdict" >> "$GITHUB_STEP_SUMMARY"
+              else
+                # Heartbeat + harvest re-POST, but only if the last poller
+                # comment is older than the poll interval (avoid noise).
+                last=$(gh issue view "$num" --json comments \
+                  --jq "([.comments[] | select(.body | contains(\"$marker\"))] | last | .createdAt) // empty") || last=""
+                heartbeat_due=true
+                if [ -n "$last" ]; then
+                  last_epoch=$(date -u -d "$last" +%s)
+                  # 6 days, not 7: the cron is weekly, so a full-interval
+                  # threshold would race the run time and skip heartbeats.
+                  if [ $(( now_epoch - last_epoch )) -lt $(( 6 * 86400 )) ]; then
+                    heartbeat_due=false
+                  fi
+                fi
+                if [ "$heartbeat_due" = "true" ]; then
+                  curl -sf -X POST https://api.clearlydefined.io/harvest \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"tool\":\"package\",\"coordinates\":\"${coords}\"}" > /dev/null \
+                    || echo "::warning::harvest re-POST failed for $coords (non-fatal)"
+                  gh issue comment "$num" --body "${marker}
+          $(date -u +%Y-%m-%d): still no declared license on ClearlyDefined for \`$purl\` ([definition]($def_ui)); ${age_days}d elapsed (escalation at 30d). Harvest re-queued."
+                else
+                  echo "issue #$num: heartbeat suppressed (last poller comment <6d old)"
+                fi
+                echo "- #$num (\`$purl\`): still undetected (${age_days}d) — waiting" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
+            # Declared license landed → deterministic verdict against the
+            # allow-list (exit 0 acceptable / 1 unacceptable / 2 usage error).
+            set +e
+            node .github/scripts/license-verdict.mjs "$declared" "$ALLOW_LIST"
+            rc=$?
+            set -e
+            if [ "$rc" = "0" ]; then
+              gh issue close "$num" --comment "${marker}
+          **Verdict: ACCEPTABLE** — ClearlyDefined now declares \`$declared\` for \`$purl\` ([definition]($def_ui)), which is satisfiable from the \`allow-licenses\` list in \`security.yml\`. Auto-closing (#127 Leg B2)."
+              echo "- #$num (\`$purl\`): declared \`$declared\` — ACCEPTABLE, closed" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$rc" = "1" ]; then
+              failed=1
+              echo "::error::UNACCEPTABLE declared license for $purl: $declared (issue #$num)"
+              if [ "$escalated" = "true" ]; then
+                echo "issue #$num already escalated — keeping the run red until resolved"
+              else
+                gh issue edit "$num" --add-label priority:high --add-label area:security
+                gh issue comment "$num" --body "${marker}
+          **Verdict: UNACCEPTABLE** — ClearlyDefined declares \`$declared\` for \`$purl\` ([definition]($def_ui)), which is **not** satisfiable from the \`allow-licenses\` list in \`security.yml\`. Escalating; this scheduled run is marked failed until remediated (pin back / replace / remove the dependency — human decision)."
+              fi
+              echo "- #$num (\`$purl\`): declared \`$declared\` — **UNACCEPTABLE**, escalated, run marked failed" >> "$GITHUB_STEP_SUMMARY"
+            else
+              failed=1
+              echo "::error::license-verdict.mjs error (rc=$rc) for issue #$num — declared: $declared"
+              echo "- #$num (\`$purl\`): verdict script error (rc=$rc) — needs attention" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          exit "$failed"

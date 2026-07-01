@@ -75,7 +75,7 @@ These were established by running the stack, not from docs alone — don't "simp
 
 ## Security checks
 
-Two workflows. `ci.yml` (jobs: changes → unit → integration) lints, runs unit tests + the cdk-nag synth gate, then deploys/tests against MiniStack. `security.yml` runs the scanners (also on a weekly cron).
+Two main workflows. `ci.yml` (jobs: changes → unit → integration) lints, runs unit tests + the cdk-nag synth gate, then deploys/tests against MiniStack. `security.yml` runs the scanners (also on a weekly cron). A small scheduled third, `license-review-poller.yml`, resolves open `license-review` issues against ClearlyDefined weekly — auto-closing on an allow-list-satisfiable declared license, escalating (and going red on an unacceptable one) otherwise (#127 Leg B; see docs/SECURITY-TOOLING.md).
 
 **Observability convention (both workflows):** every gate writes a report file (SARIF / JUnit / HTML / text) and uploads it with `if: always()` so it's downloadable from the run's Artifacts even on failure. Hard-fail tools use the **produce → always-upload → enforce** pattern: run the tool with `set +e`, save its exit code to a `*.outcome` file, upload the report, then a final `if: always()` step `source`s the outcome and fails the job. This guarantees the diagnostic artifact exists precisely when the job fails. SARIF-capable scanners (Semgrep, checkov, Grype, OSV; CodeQL natively) also `upload-sarif` to the **Security tab**. Report/SARIF/outcome files are gitignored and prettier/markdownlint-ignored.
 
