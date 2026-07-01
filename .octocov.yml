@@ -1,0 +1,35 @@
+# octocov config (issue #125, phase 2 of #122) — coverage REPORTING only.
+# The 100% coverage gate lives in Jest (`coverageThreshold`, phase 1 #124);
+# there is deliberately NO `coverage.acceptable:` here — octocov reports,
+# never gates. Run by the SHA-pinned k1LoW/octocov-action step in ci.yml's
+# unit job, after `npm run test:unit` has written reports/coverage/lcov.info.
+coverage:
+  paths:
+    - reports/coverage/lcov.info
+
+# ONE sticky PR comment, updated in place on every push (no comment spam).
+# `is_pull_request` is also true for `push` runs whose branch has an open PR
+# (octocov resolves the PR number via the API), so the push/pull_request
+# double-trigger still converges on the same single comment. On fork PRs the
+# token is read-only — octocov skips the comment gracefully (non-fatal) and
+# the job summary below remains the fallback.
+comment:
+  if: is_pull_request
+  updatePrevious: true
+
+# Always add the report to the job's step-summary page (works on fork PRs
+# too — summaries need no write permission).
+summary:
+  if: true
+
+# Delta-vs-main: compare against the latest report stored in GitHub Actions
+# artifacts (artifact name defaults to `octocov-report`) — no vendor, no
+# extra secret. Only default-branch runs STORE the baseline (report.if),
+# so PR/branch runs diff against main rather than against each other.
+diff:
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}
+report:
+  if: is_default_branch
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}

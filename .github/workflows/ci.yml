@@ -57,6 +57,7 @@ jobs:
               - 'tsconfig.json'
               - 'cdk.json'
               - 'jest.config.js'
+              - '.octocov.yml'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
               # docs/config so the unit job's lint/format checks run on them too
@@ -75,6 +76,19 @@ jobs:
     if: needs.changes.outputs.code == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Job-level elevation for the octocov coverage step only (top-level stays
+    # `contents: read`; precedent: labeler.yml, security.yml dependency-review).
+    # On fork PRs GitHub forces the token read-only regardless of these grants,
+    # so octocov degrades to the job summary there (comment skipped, non-fatal).
+    # octocov artifact:// datastore rationale for `actions: write`: `read`
+    # downloads the diff baseline; storing the default-branch report rides
+    # ACTIONS_RUNTIME_TOKEN, but octocov first DELETES a same-name artifact
+    # (hit on job re-runs, which keep the run ID) and DeleteArtifact needs
+    # `write`. Matches octocov-action's documented permission set.
+    permissions:
+      contents: read # checkout
+      pull-requests: write # octocov: post/update the sticky PR coverage comment
+      actions: write # octocov artifact:// datastore (see rationale above)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -138,6 +152,24 @@ jobs:
                 console.log("| " + k + " | " + t[k].pct + "% | " + t[k].covered + " / " + t[k].total + " |");
             '
           } >> "$GITHUB_STEP_SUMMARY"
+      # octocov (config: .octocov.yml) — coverage REPORTING, not a gate (#125).
+      # Sticky PR comment (updated in place) + job summary + delta-vs-main via
+      # the artifact:// datastore; default-branch runs store the baseline that
+      # PR runs diff against. Deliberately a plain sequential step, NOT
+      # `if: always()`: if the test step failed, reports/coverage/lcov.info is
+      # missing or stale, and posting stale coverage would be worse than
+      # posting none (the failed job already blocks the PR).
+      - name: Coverage report (octocov)
+        uses: k1LoW/octocov-action@b3b6ee60482a667950f87553abf1df63217235d9 # v1.5.1
+        with:
+          # Content-pin the octocov binary itself (the action's default is
+          # `version: latest`, a floating download) — same tarball + SHA-256
+          # verify posture as the shellcheck/actionlint/OSV pins. The checksum
+          # is of octocov_v0.75.8_linux_amd64.tar.gz from the release's
+          # checksums-linux.txt; the action's gh-setup verifies it before
+          # install and fails on mismatch.
+          version: v0.75.8
+          checksum: 6c8451a3c1e535e47e60e681e69c35676d09bc9260d01ea904565c6d05138eee
       # cdk-nag (AwsSolutions) runs inside synth; fails on any finding.
       - name: CDK synth (cdk-nag security gate)
         run: npm run synth
