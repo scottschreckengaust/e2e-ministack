@@ -2,8 +2,10 @@
 
 Skim before the first dispatch, **because** several of these read as real failures and will
 otherwise cost a debugging detour. Each is a quirk of this repo/harness, not a bug in the work — and
-each is a **repo/harness-specific** fact (re-derive the equivalents on a new repo, see SKILL.md
-intro), not part of the portable pipeline.
+each is a **repo/harness-specific** fact, not part of the portable pipeline (the ones below marked
+general are the exceptions). On another repo these may not apply — verify against that repo's
+runtime manager (e.g. its `mise.toml`/version-pin setup) and configured hooks instead of assuming
+them, and re-derive the equivalents (see SKILL.md intro).
 
 **Worker-side quirks** (the worker hits these directly; the operative fixes live in
 `prompts/subagent-issue.md` § Environment quirks — the orchestrator only needs to recognize them in a

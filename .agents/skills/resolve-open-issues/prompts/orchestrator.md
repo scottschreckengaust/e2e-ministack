@@ -19,7 +19,8 @@ leaves to launch: the goal above, the launch parameter below, and the setup fact
 
 - **Ensure the pinned Node is on PATH** in every shell: `command -v node >/dev/null 2>&1 || export
 PATH="$(mise where node)/bin:$PATH"`; confirm `node --version` matches `mise.toml`.
-- Canonical repo root = the main checkout (worktrees go under `<root>/.claude/worktrees/`).
+- Canonical repo root = the main checkout. Worktrees go under the repo's documented convention —
+  read it from `AGENTS.md` § Repository conventions (here: `<root>/.worktrees/<branch>`).
 - Confirm identity: `gh api user --jq .login`. Issue claims + PRs author under it; each worker signs
   as `@<gh-login> (agent:wK)` (SKILL.md §2).
 
