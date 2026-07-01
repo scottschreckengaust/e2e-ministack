@@ -114,6 +114,7 @@ pre-commit install
   - **`markdown-it ^14.2.0`** — pulled by `markdownlint-cli2`. Forces past older `markdown-it` advisories (ReDoS/uncontrolled-resource-consumption in `<14`). `markdownlint-cli2` is compatible with v14, so the bump is transparent.
   - **`qs ^6.15.2`** — pulled by `@stryker-mutator/core → typed-rest-client`. Forces past the prototype-pollution class of `qs` advisories; `typed-rest-client` only uses `qs.stringify`, which is API-stable across the bump.
 - The GitHub-side Dependabot "npm_and_yarn … js-yaml" updates fail because the fix lives in this override, not a direct-dep bump; that's expected, not a CI regression.
+- **`.github/scanner-requirements/overrides.txt`** is the pip analog of the npm `overrides`: it forces `aiohttp==3.14.1` past checkov's declared `<3.14.0` cap (the sub-3.14.1 releases carry the advisories behind Dependabot alerts #14–#24). Because the pinned closure now violates checkov's metadata, `security.yml` installs it with `pip install --require-hashes --no-deps` (the lockfile is a complete closure, so install-time resolution is redundant). Regenerate `iac.txt` with the command in its header; drop the override once checkov allows `aiohttp>=3.14.1`. The GitHub-side Dependabot "pip … aiohttp" update jobs fail for the same reason as the npm ones above — the fix lives in the override + recompile, which Dependabot can't author.
 
 ## Repository conventions
 

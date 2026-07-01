@@ -32,6 +32,15 @@ supply-chain safety. This file is the authoritative inventory.
 > _installed_ versions are still pinned, but by the lockfile, not the manifest
 > (see "npm `^`/`~` ranges" below). So the install is reproducible; the
 > `package.json` declaration is a compatibility floor, not the source of truth.
+>
+> **Scanner pin closures + overrides.** The Semgrep and cfn-lint/checkov pins
+> above are the _top-level_ versions; the full hash-verified closures live in
+> `.github/scanner-requirements/{semgrep,iac}.txt` (regeneration commands in
+> each file's header). `iac.txt` additionally carries a resolution override —
+> `.github/scanner-requirements/overrides.txt` forces `aiohttp==3.14.1` past
+> checkov's `<3.14.0` cap (security fix; Dependabot alerts #14–#24) — so
+> `security.yml` installs it with `--no-deps` (see AGENTS.md "Dependency
+> notes"). Drop the override when checkov's cap allows `aiohttp>=3.14.1`.
 
 ## Intentionally NOT pinned (with reasons)
 

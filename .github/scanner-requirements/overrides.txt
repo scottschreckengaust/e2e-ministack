@@ -1,0 +1,14 @@
+# Resolution overrides for iac.txt (uv pip compile --overrides).
+# Same idea as the npm `overrides` in package.json: force a transitive
+# dependency past a consumer's stale upper bound to pick up security fixes.
+#
+# aiohttp: checkov (<= 3.3.6) pins aiohttp<3.14.0, but every aiohttp release
+# below 3.14.1 carries open advisories (GHSA-jg22-mg44-37j8, GHSA-xcgm-r5h9-7989,
+# and nine more — Dependabot alerts #14-#24). checkov only uses aiohttp as an
+# HTTP client for platform API calls, which our CI invocation (local template
+# scan) never exercises; the CI checkov gate passes unchanged on 3.14.1.
+# Because this override violates checkov's declared metadata, the install in
+# security.yml uses --no-deps (the lockfile is a complete, hash-verified
+# closure, so dependency resolution at install time is redundant).
+# Drop this override once checkov allows aiohttp>=3.14.1.
+aiohttp==3.14.1

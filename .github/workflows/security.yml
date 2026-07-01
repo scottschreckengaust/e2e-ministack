@@ -405,7 +405,10 @@ jobs:
         # Content-pinned install: every dist is hash-verified against the
         # committed lockfile (--require-hashes), so a re-published PyPI artifact
         # is rejected. Pins live in scanner-requirements/iac.txt.
-        run: pip install --require-hashes -r .github/scanner-requirements/iac.txt
+        # --no-deps: the lockfile is a complete closure, and overrides.txt forces
+        # aiohttp past checkov's declared <3.14.0 cap (security fix), which pip's
+        # resolver would otherwise reject as a conflict.
+        run: pip install --require-hashes --no-deps -r .github/scanner-requirements/iac.txt
       - name: cfn-lint (text report; errors-only enforce after upload)
         # cfn-lint is a linter (not a vuln scanner) and its SARIF formatter
         # needs unbundled deps, so keep it as text. Only the two expected W
