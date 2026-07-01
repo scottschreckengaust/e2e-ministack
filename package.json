@@ -27,6 +27,7 @@
     "test:integration": "JEST_TIER=integration jest --runInBand",
     "test:e2e": "JEST_TIER=e2e jest",
     "test:mutation": "JEST_TIER=unit stryker run",
+    "test:fuzz-regression": "jest --config jest.fuzz.config.js",
     "fuzz": "mkdir -p .fuzz-corpus && jazzer fuzz/handler.fuzz .fuzz-corpus --sync=false -- -max_total_time=60"
   },
   "devDependencies": {
