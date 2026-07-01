@@ -91,7 +91,9 @@ jobs:
       - name: Build
         run: npm run build
       - name: Unit tests (logic + CDK assertions/snapshot)
-        # Writes reports/junit/unit.xml; upload it even on failure.
+        # Writes reports/junit/unit.xml and reports/coverage/ (the npm script
+        # passes --coverage; the 100% coverageThreshold gate fails this step
+        # if any scoped file drops below 100%). Upload both even on failure.
         run: npm run test:unit
       - name: Upload unit test report
         if: always()
@@ -100,6 +102,42 @@ jobs:
           name: junit-unit
           path: reports/junit/unit.xml
           if-no-files-found: warn
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-unit
+          path: reports/coverage/
+          if-no-files-found: warn
+      # Surface test counts + the coverage table on the run's summary page.
+      # Defensive: report files may be absent if the test step crashed early.
+      - name: Step summary (tests + coverage)
+        if: always()
+        run: |
+          {
+            echo '## Unit tests'
+            node -e '
+              const fs = require("fs");
+              const p = "reports/junit/unit.xml";
+              if (!fs.existsSync(p)) { console.log("_No JUnit report produced._"); process.exit(0); }
+              const m = fs.readFileSync(p, "utf8").match(/<testsuites[^>]*/);
+              if (!m) { console.log("_JUnit report is malformed._"); process.exit(0); }
+              const a = (k) => (m[0].match(new RegExp(k + "=\"([^\"]*)\"")) || [, "?"])[1];
+              console.log("**" + a("tests") + "** tests, **" + a("failures") + "** failures, **" + a("errors") + "** errors (" + a("time") + "s)");
+            '
+            echo ''
+            echo '### Coverage (gate: 100%)'
+            node -e '
+              const fs = require("fs");
+              const p = "reports/coverage/coverage-summary.json";
+              if (!fs.existsSync(p)) { console.log("_No coverage summary produced._"); process.exit(0); }
+              const t = JSON.parse(fs.readFileSync(p, "utf8")).total;
+              console.log("| Metric | Coverage | Covered / Total |");
+              console.log("| --- | --- | --- |");
+              for (const k of ["statements", "branches", "functions", "lines"])
+                console.log("| " + k + " | " + t[k].pct + "% | " + t[k].covered + " / " + t[k].total + " |");
+            '
+          } >> "$GITHUB_STEP_SUMMARY"
       # cdk-nag (AwsSolutions) runs inside synth; fails on any finding.
       - name: CDK synth (cdk-nag security gate)
         run: npm run synth
@@ -142,6 +180,8 @@ jobs:
           restore-keys: |
             stryker-${{ hashFiles('stryker.config.mjs', 'jest.config.js', 'package-lock.json') }}-
       - name: Mutation tests
+        # Also writes reports/mutation/mutation.json (Stryker json reporter,
+        # mutation-testing-report-schema) — covered by the upload below.
         run: npm run test:mutation
       - name: Upload mutation report
         if: always()
@@ -150,6 +190,32 @@ jobs:
           name: mutation-report
           path: reports/mutation/
           if-no-files-found: warn
+      # Surface the mutation score on the run's summary page, parsed from the
+      # schema-conformant JSON report (statuses: Killed/Survived/Timeout/...).
+      - name: Step summary (mutation score)
+        if: always()
+        run: |
+          {
+            echo '## Mutation testing (Stryker)'
+            node -e '
+              const fs = require("fs");
+              const p = "reports/mutation/mutation.json";
+              if (!fs.existsSync(p)) { console.log("_No mutation report produced._"); process.exit(0); }
+              const r = JSON.parse(fs.readFileSync(p, "utf8"));
+              const mutants = Object.values(r.files).flatMap((f) => f.mutants);
+              const by = (s) => mutants.filter((m) => m.status === s).length;
+              const detected = by("Killed") + by("Timeout");
+              const undetected = by("Survived") + by("NoCoverage");
+              const valid = detected + undetected;
+              const score = valid ? ((detected / valid) * 100).toFixed(2) : "n/a";
+              const t = r.thresholds || {};
+              console.log("**Score: " + score + "%** (break threshold: " + t.break + "%)");
+              console.log("");
+              console.log("| Killed | Timeout | Survived | No coverage | Total |");
+              console.log("| --- | --- | --- | --- | --- |");
+              console.log("| " + by("Killed") + " | " + by("Timeout") + " | " + by("Survived") + " | " + by("NoCoverage") + " | " + mutants.length + " |");
+            '
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Coverage-guided fuzzing (jazzer.js). Exploratory and time-boxed, so it runs
   # on schedule / manual dispatch — NOT on every push. Needs GLIBC >= 2.38
@@ -296,6 +362,25 @@ jobs:
           name: junit-integration
           path: reports/junit/integration.xml
           if-no-files-found: warn
+
+      # Surface integration test counts on the run's summary page. No coverage
+      # here — the code under test executes inside MiniStack's Lambda
+      # container, where istanbul can't instrument it (#124).
+      - name: Step summary (tests)
+        if: always()
+        run: |
+          {
+            echo '## Integration tests (MiniStack)'
+            node -e '
+              const fs = require("fs");
+              const p = "reports/junit/integration.xml";
+              if (!fs.existsSync(p)) { console.log("_No JUnit report produced._"); process.exit(0); }
+              const m = fs.readFileSync(p, "utf8").match(/<testsuites[^>]*/);
+              if (!m) { console.log("_JUnit report is malformed._"); process.exit(0); }
+              const a = (k) => (m[0].match(new RegExp(k + "=\"([^\"]*)\"")) || [, "?"])[1];
+              console.log("**" + a("tests") + "** tests, **" + a("failures") + "** failures, **" + a("errors") + "** errors (" + a("time") + "s)");
+            '
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: MiniStack diagnostics on failure
         if: failure()
