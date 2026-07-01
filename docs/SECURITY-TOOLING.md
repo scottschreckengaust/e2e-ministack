@@ -31,6 +31,70 @@ Security tab.
 | Threat model          | security.yml | `threat-model.tc.json` parses/sections  | hard-fail      |
 | actionlint + zizmor   | security.yml | workflow correctness + security         | hard-fail      |
 
+## Remediating a scanner finding — fix it properly, don't suppress it
+
+When a SAST / code-scanning gate (Semgrep, CodeQL, …) flags code, the standard
+is a **real, proven fix**. A suppression (`nosemgrep` / inline-ignore /
+alert-dismissal) clears the _gate_ but leaves the code-scanning _alert_ open, and
+a prose "it's a false positive" note asserts safety instead of enforcing it —
+the weak form. Fixes must **stick and be actually done, not hacked**. The
+procedure, in order of preference:
+
+1. **Read the scanner's own source / rule definition — don't guess what clears
+   it.** A finding is only understood once you've read the rule. For Semgrep,
+   fetch the rule YAML from
+   [`semgrep/semgrep-rules`](https://github.com/semgrep/semgrep-rules) and read
+   its `pattern-sanitizers`; for CodeQL, the query's sources/sinks/sanitizers.
+   The recognized sanitizer shapes are specific and often surprising — e.g. the
+   `path-join-resolve-traversal` rule accepts `.replace(...)`, `.indexOf(...)`,
+   or a function whose **name matches `sanitize`** on the value entering the
+   sink, while `path.basename()` alone and a `resolve()`+`startsWith()`
+   containment check do **not** clear it. Reproduce locally with the **pinned**
+   scanner version (read it from the repo's scanner config — e.g.
+   `pip install --require-hashes -r .github/scanner-requirements/semgrep.txt`,
+   or `uvx semgrep==<pin>`) so your local verdict matches CI exactly.
+
+2. **Prefer a vetted, time-tested fixer over bespoke code.** Do **not**
+   roll-your-own for a problem an industry-standard, exercised primitive already
+   solves — reach first for: the platform/standard-library primitive (e.g.
+   `path.win32.basename`/`path.posix.basename`, `URL`, `crypto.timingSafeEqual`),
+   then a **widely-used, actively-maintained, formally-verified-or-heavily-
+   exercised** library snippet or OWASP/language-community reference
+   implementation. Bespoke security code is a liability: it lacks the years of
+   adversarial exercise a vetted implementation has. **This is subject to the
+   license policy below** — an adopted fixer library / snippet is a dependency
+   (and a _tool-adoption governance decision_, § tool-adoption line): it must be
+   license-acceptable (permissive; no AGPL/copyleft) and SHA/version-pinned like
+   any other. If the only vetted option has an unacceptable license, escalate —
+   don't silently vendor it.
+
+   **Bespoke is justified only when** no vetted primitive fits the _exact_ sink
+   semantics. Judge by behavior, not familiarity: e.g. a **reject**-invalid guard
+   is correct where a **mutating** sanitizer (`sanitize-filename`-style
+   char-stripping) would silently act on a _different_ resource than intended —
+   there, minimal format-validation against a documented allow-pattern is the
+   right call, not a library. Record _why_ bespoke was chosen in a comment.
+
+3. **Prove the fix with an adversarial corpus from an authoritative source.**
+   Add executable tests whose attack payloads come from a recognized catalogue —
+   [OWASP](https://owasp.org) attack pages (e.g. Path Traversal), CWE examples,
+   the language community's known-bad vectors — asserting the guard **rejects**
+   the attacks and **accepts** legitimate inputs. Reproduce the scanner locally
+   → **0 findings**; confirm existing behavior still passes. Prove-don't-assert
+   catches real bugs (a first-cut path guard here let `a\b` through on POSIX —
+   the OWASP-derived test caught it before merge).
+
+4. **Scope honestly.** Defend only the layer the sink sits at, and say so:
+   a filesystem-name guard need not — and must not pretend to — handle
+   URL-percent-encoded forms (`%2e%2e%2f`, overlong-UTF-8 `%c0%af`) if nothing
+   URL-decodes the value first; asserting those as "caught" misrepresents the
+   guard. Document out-of-scope forms rather than faking coverage.
+
+Suppression is a **last resort** for a genuinely unfixable true-false-positive,
+and only with explicit maintainer sign-off recorded on the PR — never
+self-approved. (The same _inline-scoped_ vs _global `--exclude-rule`_ distinction
+tracked for the vendored ruleset in #79 applies when suppression is unavoidable.)
+
 ## License policy — ALLOW-list (and why, not deny-list)
 
 The PR-time `dependency-review` gate enforces an **allow-list** of permitted

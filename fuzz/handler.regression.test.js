@@ -42,6 +42,13 @@ const CORPUS_DIR = path.join(__dirname, 'corpus');
  * site keeps the guarantee local and explicit rather than relying on the caller,
  * and is the real sanitizer the path-traversal SAST rule looks for (a
  * `sanitize`-named validator on the value entering `path.join`).
+ *
+ * Bespoke by design (per docs/SECURITY-TOOLING.md "Remediating a scanner
+ * finding"): this is built only on the vetted stdlib primitives
+ * `path.win32.basename`/`path.posix.basename` and REJECTS rather than mutates.
+ * A drop-in library like `sanitize-filename` STRIPS bad characters and returns a
+ * different name — which for a corpus read would silently open the wrong file,
+ * worse than failing — so no vetted library fits this sink's exact semantics.
  * @param {string} name a corpus filename to validate
  * @returns {string} the same name, guaranteed to be a single safe path segment
  */
