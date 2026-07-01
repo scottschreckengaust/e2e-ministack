@@ -91,14 +91,26 @@ Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
        `curl -X POST https://api.clearlydefined.io/harvest -H 'Content-Type: application/json' -d '{"tool":"package","coordinates":"pypi/pypi/-/<name>/<version>"}'`
        (no auth required; returns `201 Created`; no evidence payload — their
        own tooling re-scans the artifact).
-    3. If the gate must stay quiet meanwhile, add the purl to
-       `allow-dependencies-licenses` in `security.yml` with the verified
-       license, evidence, and drop condition in the comment. **Caution: the
-       action matches exemption purls by package name only (the `@version` is
-       ignored)**, so an entry silences license checking for _every_ version of
-       that package — keep entries rare and remove them the moment
-       ClearlyDefined catches up. Sweeping dead entries is part of the
-       toolchain-update automation (#78).
+    3. **File (or update) a `license-review`-labeled issue** for the purl,
+       recording the METADATA verdict from step 1 and the ClearlyDefined
+       definition link
+       (`https://clearlydefined.io/definitions/pypi/pypi/-/<name>/<version>`).
+       The issue closes when ClearlyDefined shows a declared license —
+       automating this create/poll/close loop is #127 Leg B. The warning
+       itself is self-expiring (dependency-review is PR-diff-scoped, so it
+       only reappears on a PR touching that package) and never fails the
+       gate, so no suppression is needed meanwhile.
+
+    As a **last resort only** — e.g. a future config where unlicensed deps
+    _do_ fail the gate and a release must ship before the harvest lands — the
+    action supports `allow-dependencies-licenses` exemptions. **Caution: it
+    matches exemption purls by package name only (the `@version` is
+    ignored)**, so an entry silences license checking for _every_ future
+    version of that package. The steady state is an empty/absent list (#127);
+    any entry added under duress must carry the verified license, evidence,
+    and drop condition in a comment and be removed the moment ClearlyDefined
+    catches up.
+
 - **Dual licenses such as `(MIT OR GPL-3.0-or-later)`, `(MIT OR CC0-1.0)`,
   `(BSD-2-Clause OR MIT OR Apache-2.0)` stay GREEN** — the SPDX `OR` expression
   is satisfied by an allowed member. `case@1.6.3` (`MIT OR GPL-3.0-or-later`)
