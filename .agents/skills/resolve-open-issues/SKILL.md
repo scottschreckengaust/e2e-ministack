@@ -225,6 +225,10 @@ orchestrator parks BLOCKED tokens (freeing the slot) and resumes them when a hum
   behavior: reconstruct the §5 metrics for a batch of merged PRs from public artifacts (no
   instrumentation) and diff before/after. Load only when evaluating a skill edit, not during a run;
   the runnable harness is `scripts/eval-batch-metrics.sh` + `scripts/eval-compare.sh`.
+- **`references/remediating-scanner-findings.md`** — reuse time-tested code over bespoke, and fix
+  (don't suppress) a scanner finding: the reuse-vs-bespoke order, the repo's own CI-verified worked
+  example (`fuzz/handler.regression.test.js`), external canon (OWASP/CWE), and a pre-push checklist.
+  Load when a worker's code trips a SAST gate or a fix touches adversarially-exposed code.
 
 ## Prompts
 
