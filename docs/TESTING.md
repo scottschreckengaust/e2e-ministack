@@ -54,7 +54,10 @@ for the scanners). `jest.config.js` selects a tier directory via the
   snapshot + fast-tier cdk-nag assertion + fast-check properties (no
   emulator/Docker). The snapshot baseline lives in `test/unit/__snapshots__/`
   and is updated with `npm run test:unit -- -u` after an intended template
-  change.
+  change. The script passes `--coverage`, so every run also collects Istanbul
+  coverage into `reports/coverage/` (`lcov` + `json-summary` + text) and
+  enforces the **100% `coverageThreshold` gate** (see "Coverage reporting
+  pipeline" below).
 - `npm run test:integration` — AWS SDK v3 against deployed MiniStack resources.
 - `npm run test:mutation` — Stryker over the Lambda logic (≥ 80% gate).
 - `npm run fuzz` — jazzer.js libFuzzer target (scheduled job, not a fast gate).
@@ -75,6 +78,65 @@ full-template snapshot instead.
 > harness, which **deploys** a stack and snapshots the result — that
 > deploy-and-compare style is **not** used here (it would belong to the
 > real-account E2E dimension, currently TBD).
+
+## Coverage reporting pipeline
+
+Test reporting is split between a **gate** (Jest) and a **reporter** (octocov)
+— deliberately, so the enforcement threshold has exactly one home (issues #124
+and #125, parent #122):
+
+- **Collection + gate (phase 1, #124):** `npm run test:unit` passes
+  `--coverage`; `jest.config.js` writes `reports/coverage/` (`lcov.info`,
+  `coverage-summary.json`, text table) and enforces
+  `coverageThreshold: 100%` on branches/functions/lines/statements — the test
+  step itself fails if any scoped file drops below 100%. Coverage is switched
+  on by the npm script, NOT `collectCoverage: true` in the config, so
+  Stryker's per-mutant Jest runs stay coverage-free (see the config comments).
+  The integration tier collects no coverage — its code executes inside
+  MiniStack's Lambda container, where Istanbul can't instrument it.
+- **Reporting (phase 2, #125):** the SHA-pinned
+  [`k1LoW/octocov-action`](https://github.com/k1LoW/octocov-action) step in
+  `ci.yml`'s unit job feeds `reports/coverage/lcov.info` to
+  [octocov](https://github.com/k1LoW/octocov) (both MIT), configured by
+  `.octocov.yml`:
+  - **One sticky PR comment** (`comment.if: is_pull_request`,
+    `updatePrevious: true`) — updated in place on each push, never spammed.
+  - **Job step summary** always (`summary.if: true`) — the fork-PR fallback,
+    since a fork's read-only token can't comment (octocov skips the comment
+    gracefully; summaries need no write permission).
+  - **Delta vs `main`** via the `artifact://` datastore: default-branch runs
+    (`report.if: is_default_branch`) store the baseline report as an Actions
+    artifact (`octocov-report`); PR runs `diff:` against it. No SaaS vendor,
+    no extra secret.
+  - **No `coverage.acceptable:`** — octocov reports, never gates; the 100%
+    threshold lives in Jest only.
+- **Step summaries (phase 1, #124):** the unit, integration, and mutation jobs
+  each append test counts (and the coverage/mutation tables) to
+  `GITHUB_STEP_SUMMARY` with `if: always()`, so the run's summary page shows
+  results even on failure.
+
+All report files live under the gitignored `reports/` tree and are uploaded as
+artifacts with `if: always()` (the produce → always-upload → enforce
+convention).
+
+### Polyglot reporting contract
+
+The reporting layer is language-agnostic by construction — jest-junit emits
+the cross-language JUnit XML schema, octocov reads LCOV/Cobertura/Clover/
+SimpleCov/JaCoCo/Go natively, and Stryker's JSON conforms to the
+mutation-testing-report-schema. **Any new language tier added to this repo
+(e.g. the planned jmeter-java-dsl Java tier, #73) MUST plug into the same
+report tree rather than inventing its own:**
+
+| Report            | Where               | Format                                                                                |
+| ----------------- | ------------------- | ------------------------------------------------------------------------------------- |
+| Test results      | `reports/junit/`    | JUnit XML (one file per tier, e.g. `unit.xml`)                                        |
+| Coverage          | `reports/coverage/` | **LCOV preferred**; JaCoCo/Cobertura/Clover/SimpleCov XML acceptable (octocov-native) |
+| Mutation (if any) | `reports/mutation/` | mutation-testing-report-schema JSON                                                   |
+
+New coverage files are wired in by appending to `coverage.paths:` in
+`.octocov.yml` — the sticky comment, summary, and delta then aggregate across
+languages with no new tooling.
 
 ## Planned — Load / performance (issue #73)
 
