@@ -44,13 +44,18 @@ the existing `test/integration/integration.test.ts`** on both paths:
   `statusCode === 400`, no `FunctionError` (the handler validates and _returns_
   a 400 envelope; it never throws, so the invoke succeeds at the HTTP layer).
 - **`checkCli`** — the EXACT command a human pastes into AWS CloudShell:
-  `aws lambda invoke --function-name <name> --payload <base64 {n:21}>
+  `aws lambda invoke --function-name <name> --payload '{"n":21}'
 --cli-binary-format raw-in-base64-out <outfile>`, then parse the response and
   assert `doubled === 42` / `nodeVersion`. Same handled-400 assertion on
-  `{ n: 'abc' }`. The response body is written to a per-invocation temp file
-  (`os.tmpdir()`, unique name) that is read + parsed + unlinked. Args are passed
-  to `execFile` as an argv array (never a shell string) — no shell, no injection
-  surface.
+  `{ n: 'abc' }`. **The `--payload` is RAW JSON, not base64:** AWS CLI v2 treats
+  `--payload` as base64 by default, and `--cli-binary-format raw-in-base64-out`
+  flips blob input back to raw — the two must be consistent, or the CLI
+  double-handles the value (a base64 string under `raw-in-base64-out` is
+  forwarded verbatim, the handler parses the base64 text, and `n` comes back
+  NaN ⇒ a bogus 400). Raw JSON is also what a human actually pastes. The
+  response body is written to a per-invocation temp file (`os.tmpdir()`, unique
+  name) that is read + parsed + unlinked. Args are passed to `execFile` as an
+  argv array (never a shell string) — no shell, no injection surface.
 
 ### `ministackEnv` helper
 
