@@ -137,8 +137,27 @@ describe('MiniStack compatibility registries — unit schema gate', () => {
       expect(ok).toBe(true);
     });
 
-    it('starts empty (rows are appended by later verticals, #136+)', () => {
-      expect(provisioningData.results).toEqual([]);
+    it('carries the lambda/cdk vertical row (first appended by #136)', () => {
+      // #135 authored this registry empty; the first vertical (#136) appends
+      // the lambda × AWS::Lambda::Function × cdk row, stamped with the pinned
+      // MiniStack digest. Assert it is present and green so the rot-guard also
+      // catches a later accidental deletion/verdict regression of it.
+      const rows = provisioningData.results as Array<{
+        service: string;
+        resource: string;
+        iac: string;
+        deploy: string;
+        oracles: { sdk: string; cli: string };
+        lastVerifiedDigest: string;
+      }>;
+      const lambdaCdk = rows.find(
+        (r) => r.service === 'lambda' && r.iac === 'cdk',
+      );
+      expect(lambdaCdk).toBeDefined();
+      expect(lambdaCdk!.resource).toBe('AWS::Lambda::Function');
+      expect(lambdaCdk!.deploy).toBe('pass');
+      expect(lambdaCdk!.oracles).toEqual({ sdk: 'pass', cli: 'pass' });
+      expect(lambdaCdk!.lastVerifiedDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
     });
 
     it('enforces the deploy/oracles verdict enum (rejects a bad verdict)', () => {

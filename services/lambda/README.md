@@ -1,0 +1,130 @@
+# Lambda vertical (`services/lambda/`)
+
+The first service vertical of the MiniStack compatibility harness (epic
+[#117](https://github.com/scottschreckengaust/e2e-ministack/issues/117),
+sub-issue B / [#136](https://github.com/scottschreckengaust/e2e-ministack/issues/136)).
+It proves the harness end-to-end on **one service (Lambda) × one IaC tool
+(CDK)** with **both** oracles, and is the reference every later vertical copies.
+
+## Layout
+
+```text
+services/lambda/
+  README.md          # this file
+  contract.ts        # LambdaContract = Contract & { functionName: string } (types-only)
+  checks.sdk.ts      # checkSdk — typed AWS SDK v3 oracle   (defined ONCE, integration tier)
+  checks.cli.ts      # checkCli — documented AWS CLI oracle  (defined ONCE, integration tier)
+  iac/
+    cdk/
+      construct.ts   # DoublerFunction — reusable hardened doubler construct (100%-gated)
+      deploy.ts      # cdkLambda: DeployAdapter<LambdaContract> (short-circuits, integration tier)
+      README.md
+    terraform/       # RESERVED — README stub only (future sub-issue)
+    cloudformation/  # RESERVED — README stub only (future sub-issue)
+```
+
+The behavioral matrix lives in
+[`test/integration/services/lambda.test.ts`](../../test/integration/services/lambda.test.ts):
+`describe.each(adapters) × it.each(oracles)`. With `adapters = [cdkLambda]` and
+`oracles = { sdk, cli }` it emits the named JUnit cases
+`lambda provisioned via cdk › passes the sdk oracle` and
+`… passes the cli oracle` to `reports/junit/integration.xml` — no new reporting
+plumbing (the integration tier already emits JUnit and collects no coverage).
+
+## The two oracles (provisioner-blind, defined once)
+
+Both take only a `LambdaContract` (the function name) and never know which IaC
+tool created the function — that indirection is what lets one oracle pair be
+shared across CDK, Terraform, and CloudFormation. Each asserts **parity with
+the existing `test/integration/integration.test.ts`** on both paths:
+
+- **`checkSdk`** — invokes via `@aws-sdk/client-lambda`. Happy path `{ n: 21 }`
+  → `doubled === 42`, `statusCode === 200`, `nodeVersion` matches `/^v24\./`, no
+  `FunctionError`, HTTP `StatusCode` 200. Handled path `{ n: 'abc' }` → payload
+  `statusCode === 400`, no `FunctionError` (the handler validates and _returns_
+  a 400 envelope; it never throws, so the invoke succeeds at the HTTP layer).
+- **`checkCli`** — the EXACT command a human pastes into AWS CloudShell:
+  `aws lambda invoke --function-name <name> --payload '{"n":21}'
+--cli-binary-format raw-in-base64-out <outfile>`, then parse the response and
+  assert `doubled === 42` / `nodeVersion`. Same handled-400 assertion on
+  `{ n: 'abc' }`. **The `--payload` is RAW JSON, not base64:** AWS CLI v2 treats
+  `--payload` as base64 by default, and `--cli-binary-format raw-in-base64-out`
+  flips blob input back to raw — the two must be consistent, or the CLI
+  double-handles the value (a base64 string under `raw-in-base64-out` is
+  forwarded verbatim, the handler parses the base64 text, and `n` comes back
+  NaN ⇒ a bogus 400). Raw JSON is also what a human actually pastes. The
+  response body is written to a per-invocation temp file (`os.tmpdir()`, unique
+  name) that is read + parsed + unlinked. Args are passed to `execFile` as an
+  argv array (never a shell string) — no shell, no injection surface.
+
+### `ministackEnv` helper
+
+`checks.cli.ts` exports `ministackEnv`: the environment the AWS CLI needs to
+reach MiniStack — `AWS_ENDPOINT_URL` (default `http://localhost:4566`),
+`AWS_REGION`/`AWS_DEFAULT_REGION` (`us-east-1`), and the dummy `test`/`test`
+credentials. It copies `process.env` and applies each default only when the var
+is absent (never overriding an explicit value). In CI these are all set at the
+integration-job level and inherited, so the helper is effectively
+`{ ...process.env }`; the point is that the documented command is
+copy-pasteable and reproduces locally against a MiniStack on the default port.
+
+## The CDK vertical
+
+- **`iac/cdk/construct.ts`** — `DoublerFunction`, a standalone reusable
+  construct that mirrors the hardened `cdk-doubler` in
+  [`lib/ministack-stack.ts`](../../lib/ministack-stack.ts): Node 24 runtime, the
+  repo-root `lambda/` asset + `index.handler`, a least-privilege
+  customer-managed role, a KMS-encrypted log group on a rotated CMK, a DLQ on
+  its own rotated CMK, and reserved concurrency. **Additive by design** — it is
+  NOT wired into the deployed stack (see the adapter's short-circuit below), so
+  #136 stays off `lib/`, the CDK snapshot, and cdk-nag/checkov re-verification
+  of a live-stack change. It documents/proves the hardened pattern the harness
+  exposes. Under `iac/**` but not named `deploy.ts`, so it is **coverage-gated
+  at 100%** and fully exercised by the pure-synth unit test
+  [`test/unit/services/lambda-construct.test.ts`](../../test/unit/services/lambda-construct.test.ts)
+  (mirrors `test/unit/stack.test.ts`).
+- **`iac/cdk/deploy.ts`** — `cdkLambda: DeployAdapter<LambdaContract>`.
+  `deploy()` **short-circuits** to `{ functionName: 'cdk-doubler' }` because CI
+  runs `cdk deploy` before the integration tier. No `teardown` — the function is
+  a shared, pre-deployed resource owned by the main stack.
+
+## Coverage
+
+Per the merged `jest.config.js` path-convention excludes (no per-vertical config
+edits needed):
+
+- `checks.sdk.ts`, `checks.cli.ts` (`checks.*.ts`) and `iac/cdk/deploy.ts`
+  (`iac/**/deploy.ts`) run only in the **integration tier** against a live
+  MiniStack, so istanbul can't instrument them — **coverage-EXCLUDED**.
+- `contract.ts` is types-only → erases to zero runtime statements.
+- `iac/cdk/construct.ts` is pure synth logic → **100%-gated**, held there by
+  `lambda-construct.test.ts`.
+
+The integration matrix's correctness is verified by CI's
+**Integration (MiniStack)** job on the PR (it cannot run locally without an
+emulator).
+
+## MiniStack Lambda boundary notes
+
+- MiniStack executes Lambda in **real Docker sibling containers**
+  (`LAMBDA_EXECUTOR=docker` + the mounted host Docker socket + `--network host`
+  — see [AGENTS.md](../../AGENTS.md) "Why these flags"). The `nodejs24.x`
+  runtime works end-to-end against the pinned image, which is why `nodeVersion`
+  matches `/^v24\./`.
+- Both invocations use the default `RequestResponse` type: a handler that
+  _returns_ a 400 envelope (as `cdk-doubler` does for non-numeric input) yields
+  HTTP `StatusCode` 200 with `FunctionError` undefined and the 400 inside the
+  payload — an unhandled _throw_ would instead set `FunctionError:'Unhandled'`.
+  Both oracles assert `FunctionError` (SDK) / `statusCode` (CLI) accordingly.
+- No additional Lambda-emulation limitation was discovered for this
+  reservation-blind invoke path. Axis-1 breadth for Lambda is recorded as
+  `supported` in
+  [`services/_registry/ministack-support.json`](../_registry/ministack-support.json);
+  this vertical adds the Axis-2 `lambda × AWS::Lambda::Function × cdk` row to
+  [`provisioning.json`](../_registry/provisioning.json).
+
+## Upstream references
+
+- MiniStack supported services (Lambda): <https://github.com/ministackorg/ministack#supported-services>
+- AWS CLI `lambda invoke`: <https://docs.aws.amazon.com/cli/latest/reference/lambda/invoke.html>
+- `@aws-sdk/client-lambda` `InvokeCommand`: <https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/lambda/command/InvokeCommand/>
