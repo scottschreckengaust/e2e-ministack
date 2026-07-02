@@ -1,0 +1,422 @@
+name: MiniStack compat
+
+# MiniStack-bump compatibility harness (epic #117, sub-issue D / #138).
+#
+# WHY THIS EXISTS: the compat registry (services/_registry/provisioning.json)
+# records, per service/IaC, whether MiniStack can deploy + exercise a resource,
+# and which MiniStack image digest that verdict was verified against
+# (lastVerifiedDigest). Those verdicts only stay true for the pinned image. When
+# the MiniStack pin bumps, every row whose lastVerifiedDigest no longer matches
+# the current pin is STALE and must be re-verified against the new image. This
+# workflow is the mechanism keyed to the MiniStack version: it re-runs on a pin
+# change (or weekly / on dispatch), computes the stale-row work-list, deploys the
+# stack against a live MiniStack, runs the integration verticals, and diffs the
+# live result against the committed registry. On DRIFT (the registry claims a row
+# passes but it now fails against the image) it opens/updates a marker-idempotent
+# issue in THIS repo with the evidence artifact — it NEVER auto-commits the
+# registry. A human turns the drift into a reviewed PR (batch issue->worker->PR
+# model). On NO drift it files nothing and is green.
+#
+# SECURITY / FORK-SAFETY: the verify job mounts the host Docker socket
+# (--network host + /var/run/docker.sock) and runs `cdk deploy` — privileged. The
+# triggers below are schedule / workflow_dispatch / push only; there is NO
+# `pull_request` trigger, so a fork PR cannot reach this job (push runs on
+# branches in THIS repo, and `needs:` does not let a fork PR event slip through
+# because no PR event fires this workflow at all). Do NOT add a `pull_request`
+# trigger — that would expose the socket to fork-controlled code (the same
+# container-escape risk gated in ci.yml's integration job).
+
+on:
+  workflow_dispatch:
+    inputs:
+      reverify_all:
+        description: >-
+          Re-verify every provisioning.json row regardless of lastVerifiedDigest
+          (default true on manual/scheduled runs; a pin-change push verifies only
+          stale rows).
+        required: false
+        default: 'true'
+        type: boolean
+  schedule:
+    # Weekly, offset from security.yml (Mon 06:00) and license-review-poller
+    # (Mon 10:00) so the three scheduled runs don't contend for the runner /
+    # Docker daemon.
+    - cron: '0 14 * * 1'
+  push:
+    # The MiniStack digest is pinned in three places (see docs/PINNING.md); a
+    # bump touches at least ministack-pin.json. Re-verify the harness whenever
+    # any of them changes on a branch in THIS repo.
+    paths:
+      - 'services/_registry/ministack-pin.json'
+      - 'AGENTS.md'
+      - '.github/workflows/ci.yml'
+
+# Least privilege by default; the verify job opts into issues: write below.
+permissions:
+  contents: read
+
+# Serialize runs: this workflow mounts the host Docker socket and spawns sibling
+# containers — overlapping runs would contend for the daemon.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # Single job: compute the stale-row work-list, deploy + run the verticals,
+  # diff against the registry, and open/update the drift issue on failure. Kept
+  # in one job so the socket-mounting work and the issue-reporting share a
+  # checkout and the produce -> always-upload -> enforce artifact.
+  verify:
+    name: Verify compat against current pin
+    runs-on: ubuntu-latest
+    # MiniStack deploy + integration is the long pole (container pull, health
+    # wait, bootstrap, deploy, tests); 30m matches ci.yml's integration job.
+    timeout-minutes: 30
+    permissions:
+      contents: read # checkout (registries + stack code)
+      issues: write # open / update the drift issue on regression
+
+    # Stable AWS toolchain env shared by every step that talks to MiniStack
+    # (region, fake creds, the generic endpoint) — copied from ci.yml's
+    # integration job. Step-specific deltas (AWS_ENDPOINT_URL_S3 + CDK_DEFAULT_*)
+    # stay inline on the bootstrap/deploy steps below.
+    env:
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+
+      # 1) Read the current pinned digest from the registry, then 2) compute the
+      # stale-row work-list (rows whose lastVerifiedDigest != the current pin).
+      # On a pin-change push we verify only stale rows; on schedule/dispatch we
+      # re-verify ALL rows (reverify_all defaults true) — the emulator may have
+      # been re-tagged under the same digest string, or a row's verdict may have
+      # rotted independently. The work-list is echoed either way (never a silent
+      # skip). `should_run` gates the expensive deploy: if nothing needs
+      # verifying we short-circuit green.
+      - name: Compute stale-row work-list
+        id: worklist
+        # Untrusted / event inputs are passed via env (never interpolated into
+        # the shell body) — injection-safe per the GitHub Actions guidance and
+        # zizmor's template-injection audit. EVENT_NAME/REVERIFY_ALL are the only
+        # event-derived values; everything else comes from the checked-in
+        # registry files.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REVERIFY_ALL: ${{ github.event.inputs.reverify_all }}
+        run: |
+          set -euo pipefail
+          pin_file=services/_registry/ministack-pin.json
+          prov_file=services/_registry/provisioning.json
+
+          current_digest=$(jq -r '.digest' "$pin_file")
+          if [ -z "$current_digest" ] || [ "$current_digest" = "null" ]; then
+            echo "::error::could not read .digest from $pin_file"
+            exit 1
+          fi
+          short_digest=${current_digest#sha256:}
+          short_digest=${short_digest:0:12}
+          echo "current pin digest: $current_digest"
+
+          reverify_all="$REVERIFY_ALL"
+          # REVERIFY_ALL is only set on workflow_dispatch; on schedule it is
+          # empty. Treat schedule (and dispatch-default) as "re-verify all"; a
+          # pin-change push verifies only stale rows.
+          if [ "$EVENT_NAME" = "push" ]; then
+            reverify_all='false'
+          elif [ -z "$reverify_all" ]; then
+            reverify_all='true'
+          fi
+          echo "event=$EVENT_NAME reverify_all=$reverify_all"
+
+          # Build the work-list. A row is in scope when reverify_all is true, OR
+          # when its lastVerifiedDigest differs from the current pin (stale).
+          worklist=$(jq -c --arg pin "$current_digest" --arg all "$reverify_all" '
+            [ .results[]
+              | select($all == "true" or (.lastVerifiedDigest != $pin))
+              | { service, resource, iac, deploy, oracles, lastVerifiedDigest } ]
+          ' "$prov_file")
+          count=$(jq 'length' <<<"$worklist")
+
+          {
+            echo "## MiniStack compat — work-list"
+            echo ""
+            echo "Current pin: \`$current_digest\`"
+            echo ""
+            echo "Rows to verify: **$count** (reverify_all=$reverify_all, event=$EVENT_NAME)"
+            echo ""
+            if [ "$count" != "0" ]; then
+              echo '| service | iac | resource | expected deploy | expected sdk/cli | lastVerifiedDigest |'
+              echo '| --- | --- | --- | --- | --- | --- |'
+              jq -r '.[] | "| \(.service) | \(.iac) | \(.resource) | \(.deploy) | \(.oracles.sdk)/\(.oracles.cli) | \(.lastVerifiedDigest) |"' <<<"$worklist"
+            else
+              echo "_All rows already verified against the current pin — nothing to re-verify._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "work-list ($count rows):"
+          jq . <<<"$worklist"
+
+          # Expose for later steps.
+          {
+            echo "current_digest=$current_digest"
+            echo "short_digest=$short_digest"
+            echo "count=$count"
+            echo "should_run=$([ "$count" != "0" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+          # Persist the work-list to a file for the drift issue body (avoids
+          # smuggling multi-line JSON through step outputs).
+          echo "$worklist" > worklist.json
+
+      # From here the deploy/verify steps only run when the work-list is
+      # non-empty. Everything below tolerates the short-circuit (they're gated on
+      # steps.worklist.outputs.should_run) so a no-work run finishes green.
+
+      - name: Start MiniStack
+        if: steps.worklist.outputs.should_run == 'true'
+        # Copied verbatim from ci.yml's integration job — these flags are
+        # load-bearing (AGENTS.md "Why these flags"): --network host makes
+        # MiniStack's sibling Lambda/RDS containers reachable; the docker.sock
+        # mount + LAMBDA_EXECUTOR=docker enable real Lambda containers; NO
+        # --health-cmd override (the image ships its own python HEALTHCHECK — a
+        # curl override goes unhealthy exit 127). This MUST be a `docker run`
+        # step, not a `services:` container (a services container can't join the
+        # host network, so RDS hangs in "creating").
+        run: |
+          docker run -d --name ministack \
+            --network host \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -e LAMBDA_EXECUTOR=docker \
+            -e MINISTACK_RDS_PUBLIC_ENDPOINT=1 \
+            -e MINISTACK_HOST=localhost \
+            ministackorg/ministack:full@sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3
+
+      - name: Wait for MiniStack to be healthy
+        if: steps.worklist.outputs.should_run == 'true'
+        run: |
+          # The image ships its own python-based HEALTHCHECK; poll Docker's
+          # reported health status rather than reimplementing the probe.
+          for i in $(seq 1 30); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' ministack 2>/dev/null || echo missing)"
+            echo "attempt $i: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "MiniStack did not become healthy in time" >&2
+          docker logs ministack || true
+          exit 1
+
+      - name: Build
+        if: steps.worklist.outputs.should_run == 'true'
+        run: npm run build
+
+      # Bare `cdk` (CLI >= 2.1000) honors AWS_ENDPOINT_URL for credentials and
+      # CloudFormation. AWS_ENDPOINT_URL_S3 must ALSO be set — S3 virtual-host
+      # addressing can't be inferred from the generic endpoint.
+      - name: CDK bootstrap
+        if: steps.worklist.outputs.should_run == 'true'
+        env:
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_REGION: us-east-1
+        run: npm run bootstrap
+
+      - name: CDK deploy
+        if: steps.worklist.outputs.should_run == 'true'
+        env:
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_REGION: us-east-1
+        run: npm run deploy
+
+      # Diff live results against the committed registry: the integration tier
+      # PASSING == the committed deploy:pass / oracles pass verdicts still hold
+      # for the current pin. If it FAILS, a row the registry says should pass now
+      # fails against the (possibly new) image — that is DRIFT.
+      #
+      # SCOPE (current): the whole integration tier runs (it covers the single
+      # lambda/cdk row via test/integration/services/lambda.test.ts). Per-row
+      # granular test selection is a FUTURE enhancement — it isn't needed while
+      # there is one vertical, and #139/#140 will add rows the work-list already
+      # picks up. Uses the produce -> always-upload -> enforce pattern so the
+      # evidence artifact (JUnit + drift summary) exists even when the tier fails.
+      - name: Run integration verticals (diff vs registry)
+        id: verticals
+        if: steps.worklist.outputs.should_run == 'true'
+        run: |
+          set +e
+          npm run test:integration
+          echo "$?" > verticals.outcome
+          set -e
+          echo "outcome file:"
+          cat verticals.outcome
+
+      # Build the drift-evidence summary regardless of the tier's outcome, so the
+      # uploaded artifact is meaningful both on pass and on drift.
+      - name: Build drift summary
+        if: always() && steps.worklist.outputs.should_run == 'true'
+        # Values via env (not inline in the body) — consistent with the
+        # injection-safe posture of the other run: steps.
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          CURRENT_DIGEST: ${{ steps.worklist.outputs.current_digest }}
+          ROW_COUNT: ${{ steps.worklist.outputs.count }}
+        run: |
+          set -euo pipefail
+          rc=$(cat verticals.outcome 2>/dev/null || echo "missing")
+          {
+            echo "MiniStack compat drift evidence"
+            echo "==============================="
+            echo "run: $RUN_URL"
+            echo "event: $EVENT_NAME"
+            echo "current pin digest: $CURRENT_DIGEST"
+            echo "rows verified: $ROW_COUNT"
+            echo "integration tier exit code: $rc  (0 = registry verdicts still hold; non-zero = DRIFT)"
+            echo ""
+            echo "Work-list (registry rows that were re-verified):"
+            cat worklist.json 2>/dev/null || echo "(work-list unavailable)"
+            echo ""
+            echo "See reports/junit/integration.xml (uploaded alongside) for per-test detail."
+          } > drift-summary.txt
+          echo "----- drift-summary.txt -----"
+          cat drift-summary.txt
+
+      - name: Upload compat evidence
+        if: always() && steps.worklist.outputs.should_run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ministack-compat-evidence
+          path: |
+            reports/junit/integration.xml
+            drift-summary.txt
+            worklist.json
+          if-no-files-found: warn
+
+      - name: MiniStack diagnostics on failure
+        if: failure() && steps.worklist.outputs.should_run == 'true'
+        # Capture container state AND logs so a fast `docker run` failure (image /
+        # flag error where `docker logs` is empty) is still visible.
+        run: |
+          {
+            echo "===== docker ps -a ====="
+            docker ps -a || true
+            echo "===== docker logs ministack ====="
+            docker logs ministack 2>&1 || true
+          } > ministack.log 2>&1 || true
+
+      - name: Upload MiniStack logs on failure
+        if: failure() && steps.worklist.outputs.should_run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ministack-compat-logs
+          path: ministack.log
+          if-no-files-found: ignore
+
+      - name: Stop MiniStack
+        if: always() && steps.worklist.outputs.should_run == 'true'
+        run: docker rm -f ministack || true
+
+      # DRIFT REPORTING: on a verticals failure (a row the registry says passes
+      # now fails against the current pin), open OR update a marker-idempotent
+      # issue in THIS repo — mirroring license-review-poller.yml's marker+search
+      # pattern. NEVER auto-commit the registry; a human turns the drift into a
+      # reviewed PR. On NO drift this step files nothing (the workflow is green).
+      #
+      # TO SIMULATE DRIFT (acceptance criterion): dispatch this workflow while a
+      # provisioning.json row is temporarily edited on a branch to claim
+      # deploy:pass for something MiniStack can't actually do (or point the pin at
+      # a digest that regresses the lambda vertical). The integration tier then
+      # fails, verticals.outcome is non-zero, and this step opens/updates the
+      # issue. Revert the edit to return to green + file-nothing. (The step's
+      # branch logic is a plain `run:` block so this path is inspectable without a
+      # live runner; actionlint shellchecks it.)
+      - name: Open or update drift issue
+        # Only when the verticals step actually ran AND recorded a non-zero exit.
+        if: always() && steps.worklist.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CURRENT_DIGEST: ${{ steps.worklist.outputs.current_digest }}
+          SHORT_DIGEST: ${{ steps.worklist.outputs.short_digest }}
+        run: |
+          set -euo pipefail
+          rc=$(cat verticals.outcome 2>/dev/null || echo "0")
+          if [ "$rc" = "0" ]; then
+            echo "No drift — integration tier held against pin ${CURRENT_DIGEST}. Filing nothing."
+            echo "No compat drift on \`${CURRENT_DIGEST}\` — registry verdicts still hold; filed nothing." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::warning::compat DRIFT detected against pin ${CURRENT_DIGEST} (integration tier exit $rc)"
+          marker='<!-- ministack-compat-drift -->'
+          title="Compat drift on MiniStack ${SHORT_DIGEST}: integration verticals regressed"
+
+          # Build the body into a file (no unindented heredoc — that breaks the
+          # YAML block scalar). The marker on the FIRST line makes the issue
+          # idempotently findable. Env-provided values are shell vars here, never
+          # interpolated inline in the workflow body.
+          worklist_json=$(cat worklist.json 2>/dev/null || echo '[]')
+          {
+            echo "$marker"
+            echo "**Compat drift detected** — the integration verticals FAILED against the current"
+            echo "MiniStack pin, but the committed registry"
+            echo "(\`services/_registry/provisioning.json\`) says they should pass. A row's live"
+            echo "result no longer matches its recorded verdict."
+            echo ""
+            echo "- **Current pin:** \`${CURRENT_DIGEST}\`"
+            echo "- **Integration tier exit code:** ${rc} (non-zero => drift)"
+            echo "- **Run:** ${RUN_URL}"
+            echo "- **Evidence:** the \`ministack-compat-evidence\` artifact on that run"
+            echo "  (\`reports/junit/integration.xml\` + \`drift-summary.txt\` + the re-verified work-list)."
+            echo ""
+            echo "**Work-list re-verified this run:**"
+            echo '```json'
+            echo "$worklist_json"
+            echo '```'
+            echo ""
+            echo "**Next step (human, not automation):** a maintainer reviews the evidence and"
+            echo "turns this drift into a reviewed PR (batch issue -> worker -> PR model) —"
+            echo "re-hardening the stack, updating the affected \`provisioning.json\` row's verdict,"
+            echo "and bumping its \`lastVerifiedDigest\`. **This workflow never edits the registry itself.**"
+          } > drift-issue-body.md
+
+          # Marker-idempotent handling (mirrors license-review-poller.yml): find
+          # an existing OPEN drift issue by the hidden marker; comment if found,
+          # else create. Labels applied are ones that EXIST in this repo
+          # (enhancement, area:tests) — no invented compat/drift label.
+          existing=$(gh issue list --state open --search "$marker in:body" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "updating existing drift issue #$existing"
+            gh issue comment "$existing" --body-file drift-issue-body.md
+            echo "- Updated existing drift issue #$existing" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "opening new drift issue"
+            new_url=$(gh issue create --title "$title" --body-file drift-issue-body.md \
+              --label enhancement --label area:tests)
+            echo "created $new_url"
+            echo "- Opened drift issue: $new_url" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # produce -> always-upload -> ENFORCE: fail the job iff the verticals tier
+      # failed. Runs after the evidence upload + drift-issue steps so the artifact
+      # exists and the issue is filed precisely when this job goes red.
+      - name: Enforce compat result
+        if: always() && steps.worklist.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+          rc=$(cat verticals.outcome 2>/dev/null || echo "1")
+          if [ "$rc" != "0" ]; then
+            echo "::error::MiniStack compat drift — integration verticals exited $rc against the current pin"
+            exit "$rc"
+          fi
+          echo "compat holds against the current pin — no drift."

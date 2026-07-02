@@ -94,11 +94,72 @@ Expanding write-automation later means: flip the gate, add the guarded
 enabled path (and, ideally, a dry-run/confirmation step). Until then the harness
 reads upstream freely and writes only to our own registry.
 
+## The bump workflow: `.github/workflows/ministack-compat.yml`
+
+The compat harness is a **mechanism keyed to the MiniStack version** (sub-issue
+D, [#138](https://github.com/scottschreckengaust/e2e-ministack/issues/138)). The
+registry verdicts in
+[`services/_registry/provisioning.json`](../services/_registry/provisioning.json)
+are only true for the image they were verified against — recorded per row as
+`lastVerifiedDigest`. When the pin bumps, every row whose `lastVerifiedDigest` no
+longer matches the current pin
+([`services/_registry/ministack-pin.json`](../services/_registry/ministack-pin.json))
+is **stale** and must be re-verified. `ministack-compat.yml` is that re-verifier.
+
+### Triggers
+
+- **`schedule`** — weekly (Mon 14:00 UTC, offset from `security.yml` at 06:00 and
+  `license-review-poller.yml` at 10:00 so the three don't contend).
+- **`push`** on the paths that pin the digest — `ministack-pin.json`, `AGENTS.md`,
+  `.github/workflows/ci.yml` — so a bump re-runs the harness automatically.
+- **`workflow_dispatch`** — with a `reverify_all` boolean input (default `true`).
+
+There is deliberately **no `pull_request` trigger**: the job mounts the host
+Docker socket (`--network host` + `/var/run/docker.sock`, verbatim from
+`ci.yml`'s integration job — those flags are load-bearing, see `AGENTS.md`), so a
+fork PR must never reach it (container-escape risk). `push`/`schedule`/`dispatch`
+are not fork-PR events, so the exposure is naturally limited.
+
+### What it does
+
+1. Reads the current pinned digest from `ministack-pin.json`.
+2. Builds the **stale-row work-list**: on a pin-change push, rows whose
+   `lastVerifiedDigest` != the current pin; on schedule/dispatch, all rows
+   (`reverify_all`). The work-list is echoed to the job summary (never a silent
+   skip); an empty work-list short-circuits green.
+3. If there is work, starts MiniStack, `cdk bootstrap` + `cdk deploy`, then runs
+   the integration verticals (`npm run test:integration` — currently covers the
+   single lambda/CDK row via `test/integration/services/lambda.test.ts`; per-row
+   granular selection is a future enhancement as `#139`/`#140` add verticals).
+4. **Diffs live results against the committed registry:** the integration tier
+   passing means the recorded `deploy:pass` / oracle verdicts still hold for the
+   current pin. If it **fails**, a row the registry says should pass now regresses
+   against the image — that is **drift**.
+
+### On drift
+
+It **opens or updates a marker-idempotent issue in this repo** (hidden marker
+`<!-- ministack-compat-drift -->`, mirroring the license-review poller), with the
+current pin, which rows were re-verified, and a link to the run's evidence
+artifact (`reports/junit/integration.xml` + a drift summary, uploaded with
+`if: always()`). It labels the issue with existing labels only (`enhancement`,
+`area:tests`) and **never auto-commits the registry** — a human turns the drift
+into a reviewed PR (batch issue → worker → PR model). On **no drift** it files
+nothing and the run is green.
+
+### Simulating drift
+
+To exercise the drift path (acceptance criterion): dispatch the workflow on a
+branch where a `provisioning.json` row is temporarily edited to claim a verdict
+MiniStack can't satisfy (or point the pin at a digest that regresses the lambda
+vertical). The integration tier fails, the drift issue is opened/updated, and the
+run goes red. Revert the edit to return to file-nothing + green.
+
 ## Related
 
 - Epic [#117](https://github.com/scottschreckengaust/e2e-ministack/issues/117)
   (compat harness), sub-issue A / #135 (harness core), sub-issue B / #136
-  (Lambda vertical).
-- Wiring `query`/`draft-comment` into a CI workflow is deferred to #138.
+  (Lambda vertical), sub-issue C / #137 (upstream tracking), sub-issue D / #138
+  (this bump workflow).
 - Automated posting/watching on the upstream repo is a **non-goal** here
   (deferred by maintainer decision) — this script builds the gated path only.
