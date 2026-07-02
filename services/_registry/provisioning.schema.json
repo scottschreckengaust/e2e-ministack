@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/scottschreckengaust/e2e-ministack/services/_registry/provisioning.schema.json",
+  "title": "Provisioning registry (Axis 2 — depth per IaC tool)",
+  "description": "Grown one vertical at a time (#136+): for each (service × resource × iac), did it deploy and did the SDK/CLI oracles pass, against which MiniStack digest. Starts empty. See services/README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["results"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/provisioningRow" }
+    }
+  },
+  "definitions": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail", "skipped"]
+    },
+    "provisioningRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service",
+        "resource",
+        "iac",
+        "deploy",
+        "oracles",
+        "lastVerifiedDigest",
+        "notes"
+      ],
+      "properties": {
+        "service": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Service key, matching a row in ministack-support.json."
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CloudFormation resource type, e.g. 'AWS::Lambda::Function'."
+        },
+        "iac": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IaC tool that provisioned it, e.g. 'cdk', 'terraform', 'cloudformation'."
+        },
+        "deploy": {
+          "$ref": "#/definitions/verdict",
+          "description": "Did the adapter's deploy() succeed?"
+        },
+        "oracles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sdk", "cli"],
+          "properties": {
+            "sdk": {
+              "$ref": "#/definitions/verdict",
+              "description": "Result of the typed AWS SDK v3 oracle."
+            },
+            "cli": {
+              "$ref": "#/definitions/verdict",
+              "description": "Result of the documented `aws <svc> <op>` CLI oracle."
+            }
+          }
+        },
+        "lastVerifiedDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "MiniStack image digest this row was verified against (self-invalidating on a bump)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form notes (may be empty)."
+        }
+      }
+    }
+  }
+}

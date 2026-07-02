@@ -1,0 +1,6 @@
+{
+  "image": "ministackorg/ministack:full",
+  "digest": "sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3",
+  "source": "AGENTS.md",
+  "note": "The MiniStack image digest the Axis-1 support registry was verified against. Keep in sync with the pinned digest in AGENTS.md; a bump invalidates the catalog (see services/README.md)."
+}
