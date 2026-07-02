@@ -1,0 +1,109 @@
+{
+  "services": [
+    {
+      "service": "lambda",
+      "status": "supported",
+      "evidence": "MiniStack README 'Supported Services' lists Lambda with CreateFunction, DeleteFunction, GetFunction, GetFunctionConfiguration, ListFunctions, Invoke, UpdateFunctionCode. Exercised end-to-end by this repo's cdk-doubler function against the pinned image.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "stepfunctions",
+      "status": "supported",
+      "evidence": "MiniStack README lists Step Functions with a full ASL interpreter (CreateStateMachine, StartExecution, StartSyncExecution, DescribeExecution, GetExecutionHistory, CreateActivity, TestState, ...) supporting retry/catch, task tokens, and Pass/Task/Choice/Wait/Succeed/Fail/Map/Parallel states.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "s3",
+      "status": "supported",
+      "evidence": "MiniStack README lists S3 with CreateBucket, DeleteBucket, ListBuckets, HeadBucket, PutObject, GetObject, DeleteObject, HeadObject. Exercised end-to-end by this repo's cdk-demo-bucket against the pinned image.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "dynamodb",
+      "status": "supported",
+      "evidence": "MiniStack README lists DynamoDB with CreateTable, UpdateTable, DeleteTable, DescribeTable, ListTables, PutItem, GetItem, DeleteItem.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "sqs",
+      "status": "supported",
+      "evidence": "MiniStack README lists SQS with CreateQueue, DeleteQueue, ListQueues, GetQueueUrl, GetQueueAttributes, SetQueueAttributes.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "sns",
+      "status": "supported",
+      "evidence": "MiniStack README lists SNS with CreateTopic, DeleteTopic, ListTopics, GetTopicAttributes, SetTopicAttributes, Subscribe.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "eventbridge",
+      "status": "supported",
+      "evidence": "MiniStack README lists EventBridge with CreateEventBus, UpdateEventBus, DeleteEventBus, ListEventBuses, DescribeEventBus.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "apigateway",
+      "status": "supported",
+      "evidence": "MiniStack README lists API Gateway (v1 and v2), e.g. API Gateway v2 CreateApi, GetApi, GetApis, UpdateApi, DeleteApi, CreateRoute.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "rds-postgres",
+      "status": "supported",
+      "evidence": "MiniStack README lists RDS with CreateDBInstance, DeleteDBInstance, DescribeDBInstances and states engine support includes postgres and mysql; MiniStack runs a real Postgres container (data-plane), reachable via MINISTACK_RDS_PUBLIC_ENDPOINT=1 (set in this repo's AGENTS.md).",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "cloudfront",
+      "status": "supported",
+      "evidence": "MiniStack README lists CloudFront with CreateDistribution, GetDistribution, GetDistributionConfig, ListDistributions.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "route53",
+      "status": "supported",
+      "evidence": "Maintainer was skeptical; README confirms it. MiniStack README lists Route53 with CreateHostedZone, GetHostedZone, DeleteHostedZone, ListHostedZones, ChangeResourceRecordSets (CREATE/UPSERT/DELETE), ListResourceRecordSets, GetChange, CreateHealthCheck/GetHealthCheck/DeleteHealthCheck/ListHealthChecks, plus alias records and weighted/failover/latency routing and auto-created SOA+NS records. Data-plane DNS resolution not independently exercised here; verify in a future vertical.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "ecs",
+      "status": "supported",
+      "evidence": "MiniStack README lists ECS as ~47 actions (CreateCluster, DeleteCluster, DescribeClusters, ListClusters, UpdateCluster, RunTask, StopTask, ...) and states RunTask starts real Docker containers via the Docker socket, with full Terraform ECS coverage.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "eks",
+      "status": "supported",
+      "evidence": "Heavy: MiniStack README states EKS CreateCluster spawns a real k3s container (~75 MB) with a full Kubernetes API server (kubectl/Helm work), requiring Docker socket access and --privileged; cascading delete removes nodegroups and the k3s container.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "dsql",
+      "status": "unsupported",
+      "evidence": "Aurora DSQL is not mentioned anywhere in the MiniStack README 'Supported Services' listing and no upstream MiniStack issue proposing it was found. CDK also only ships an L1 for DSQL. No emulation.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack#supported-services",
+      "ministackRef": null
+    },
+    {
+      "service": "agentcore",
+      "status": "upstream-tracked",
+      "evidence": "Bedrock AgentCore is not in the MiniStack README. Upstream issue ministackorg/ministack#1021 ('New service emulator — Amazon Bedrock AgentCore', OPEN) proposes a phased emulator (control plane + deterministic InvokeAgentRuntime first); proposed, not built.",
+      "evidenceUrl": "https://github.com/ministackorg/ministack/issues/1021",
+      "ministackRef": "ministackorg/ministack#1021"
+    }
+  ]
+}

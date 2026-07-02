@@ -51,6 +51,20 @@ module.exports = {
     'lambda/**/*.js',
     'lib/**/*.{ts,js}',
     'bin/**/*.{ts,js}',
+    // MiniStack compatibility harness (services/, #135). Pure logic here is
+    // 100%-gated like lib/bin, but code that only runs in the INTEGRATION tier
+    // is excluded — istanbul can't see it from the unit tier (same reason the
+    // integration tier collects zero coverage: it executes against a live
+    // MiniStack, e.g. inside its Lambda container). These are PATH-CONVENTION
+    // excludes, so later verticals (#136+) need no further jest.config edits:
+    //   checks.*.ts        — SDK/CLI oracles (integration-tier, live MiniStack)
+    //   iac/**/deploy.ts   — DeployAdapters (integration-tier provisioners)
+    //   *.test.ts          — spec files
+    // Any OTHER pure logic under services/ stays gated at 100%.
+    'services/**/*.{ts,js}',
+    '!services/**/*.test.ts',
+    '!services/**/checks.*.ts',
+    '!services/**/iac/**/deploy.ts',
     // Type declarations (the hand-written lambda/index.d.ts contract) carry
     // no executable code.
     '!**/*.d.ts',

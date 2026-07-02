@@ -38,6 +38,7 @@
     "@stryker-mutator/jest-runner": "^9.6.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.13.2",
+    "ajv": "^6.15.0",
     "aws-cdk": "2.1128.0",
     "cdk-nag": "^3.0.1",
     "eslint": "^10.5.0",

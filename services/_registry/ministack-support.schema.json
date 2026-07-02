@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/scottschreckengaust/e2e-ministack/services/_registry/ministack-support.schema.json",
+  "title": "MiniStack support registry (Axis 1 — API breadth)",
+  "description": "Evidence-backed record of whether MiniStack emulates a service's API, independent of any IaC tool. One row per service in the target scope. See services/README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["services"],
+  "properties": {
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/supportRow" }
+    }
+  },
+  "definitions": {
+    "supportRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service",
+        "status",
+        "evidence",
+        "evidenceUrl",
+        "ministackRef"
+      ],
+      "properties": {
+        "service": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable service key, e.g. 'lambda', 'rds-postgres'."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["supported", "partial", "unsupported", "upstream-tracked"],
+          "description": "MiniStack emulation status for this service's API."
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable basis for the status — what was checked in MiniStack source/README."
+        },
+        "evidenceUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "description": "A real, checkable MiniStack source/README anchor supporting the evidence."
+        },
+        "ministackRef": {
+          "type": ["string", "null"],
+          "pattern": "^[^/]+/[^#]+#[0-9]+$",
+          "description": "Upstream tracking ref 'owner/repo#N' (e.g. for upstream-tracked), or null."
+        }
+      }
+    }
+  }
+}
