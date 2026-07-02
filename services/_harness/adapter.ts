@@ -29,25 +29,36 @@
 export type Contract = Record<string, unknown>;
 
 /**
- * A `DeployAdapter<C>` provisions a resource (or short-circuits if it is
- * already up) and returns the typed {@link Contract} the shared oracles run
- * against. One adapter is authored per (service × IaC tool).
+ * A `DeployAdapter<C>` provisions a resource (verifying first, provisioning if
+ * absent) and returns the typed {@link Contract} the shared oracles run against.
+ * One adapter is authored per (service × IaC tool).
  *
  * The generic `C` lets each vertical specialize the returned contract (e.g.
  * `DeployAdapter<LambdaContract>`) while every adapter still satisfies this one
  * uniform interface — so `test/integration/services/*.test.ts` can
  * `describe.each(adapters)` over a heterogeneous list.
  *
- * CDK adapters may **short-circuit**: CI runs `cdk deploy` before the
- * integration tier today, so `deploy()` can return the contract for an
- * already-deployed resource without redeploying. Other tools (Terraform,
- * CloudFormation, …) do the real `apply`/`deploy` work inside `deploy()`.
+ * **VERIFY-OR-PROVISION — the per-vertical self-provisioning model (#147).**
+ * Each vertical OWNS and SELF-PROVISIONS its own IaC artifact(s); the topology
+ * is agnostic (single stack, multiple stacks, nested, or cross-app-via-outputs).
+ * `deploy()` verifies the resource exists (fast path, no rework) and provisions
+ * it if absent, then returns the `Contract`. The CDK Lambda adapter does exactly
+ * this against its own `CompatLambdaStack` (distinct `compat-*` physical name),
+ * fully decoupled from the demo stack `lib/ministack-stack.ts` — it no longer
+ * relies on CI having run `cdk deploy` of the demo stack first. Terraform /
+ * CloudFormation adapters do their tool's own `apply`/`deploy` inside `deploy()`
+ * the same way. This interface is UNCHANGED — provisioning is entirely the
+ * adapter's concern, which is what keeps the oracles IaC-tool-agnostic.
  */
 export interface DeployAdapter<C extends Contract = Contract> {
   /** IaC tool identity, e.g. `'cdk' | 'terraform' | 'cloudformation'`. */
   name: string;
-  /** Provision (or reuse) the resource and return its contract. */
+  /** Verify-or-provision the resource and return its contract. */
   deploy(): Promise<C>;
-  /** Optional cleanup; omitted when the resource is shared/pre-deployed. */
+  /**
+   * Optional cleanup. Omitted when reset is delegated to
+   * `POST /_ministack/reset` (the upstream cross-vertical pattern) or when the
+   * adapter must not tear down what it did not provision.
+   */
   teardown?(): Promise<void>;
 }

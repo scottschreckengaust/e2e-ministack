@@ -1,0 +1,96 @@
+import * as cdk from 'aws-cdk-lib';
+import { Template } from 'aws-cdk-lib/assertions';
+import { AwsSolutionsChecks } from 'cdk-nag';
+import { CompatLambdaStack } from '../../../services/lambda/iac/cdk/stack';
+import { buildCompatApp } from '../../../services/lambda/iac/cdk/app';
+import { MINISTACK_ENV } from '../../../lib/env';
+
+// Pure-synth unit test for the Lambda/CDK vertical's self-provisioned compat
+// stack + app entrypoint (epic #117, #147). Mirrors test/unit/stack.test.ts and
+// test/unit/services/lambda-construct.test.ts: synthesize to CloudFormation and
+// assert against the template — no AWS, no MiniStack, no Docker.
+//
+// stack.ts and app.ts are under services/ but are NOT checks.*.ts, deploy.ts,
+// or *.test.ts, so jest.config.js holds them at the repo's 100% coverage gate.
+// This test exercises them in full so they stay there. The adapter's
+// integration-tier provisioner (iac/cdk/deploy.ts) is coverage-excluded by the
+// path convention and proven instead by the CI Integration job / the
+// fresh-MiniStack demonstration on the PR.
+describe('CompatLambdaStack — self-provisioned compat stack', () => {
+  function synth(): Template {
+    const app = new cdk.App();
+    const stack = new CompatLambdaStack(app, 'CompatLambdaStack', {
+      env: MINISTACK_ENV,
+    });
+    return Template.fromStack(stack);
+  }
+
+  const template = synth();
+
+  it('names the function compat-lambda-doubler (distinct from the demo cdk-doubler)', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'compat-lambda-doubler',
+      Runtime: 'nodejs24.x',
+      Handler: 'index.handler',
+    });
+  });
+
+  it('carries the hardened DoublerFunction shape (DLQ + reserved concurrency)', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      ReservedConcurrentExecutions: 5,
+    });
+    template.resourceCountIs('AWS::SQS::Queue', 1);
+  });
+
+  it('pins the deploy target to the MiniStack account/region unconditionally', () => {
+    const app = new cdk.App();
+    const stack = new CompatLambdaStack(app, 'CompatLambdaStack', {
+      env: MINISTACK_ENV,
+    });
+    expect(stack.account).toBe(MINISTACK_ENV.account);
+    expect(stack.region).toBe(MINISTACK_ENV.region);
+  });
+});
+
+describe('CompatLambdaStack — cdk-nag (AwsSolutions) fast-tier gate', () => {
+  it('synthesizes with zero unsuppressed AwsSolutions findings', () => {
+    // Parity with test/unit/stack.test.ts:169-200. bin/app.ts and the compat
+    // app.ts attach the AwsSolutions pack via the cdk-nag v3 policy-validation
+    // API (Validations.of(app).addPlugins(...)), but that gate only fires
+    // inside the CDK CLI's `cdk synth`. We drive the SAME pack class directly
+    // via its documented `validateScope(stack)` entry point so a nag regression
+    // in the compat stack fails fast in the unit tier, not only in CI synth.
+    const app = new cdk.App();
+    const stack = new CompatLambdaStack(app, 'NagCompatLambdaStack', {
+      env: MINISTACK_ENV,
+    });
+    app.synth();
+
+    const report = new AwsSolutionsChecks(stack, {
+      verbose: true,
+    }).validateScope(stack);
+    const findings = report.violations.map(
+      (v) => `${v.ruleName}: ${v.description}`,
+    );
+    expect(findings).toEqual([]);
+    expect(report.success).toBe(true);
+  });
+});
+
+describe('buildCompatApp — per-vertical CDK app entrypoint', () => {
+  it('instantiates the CompatLambdaStack pinned to the MiniStack env', () => {
+    const app = buildCompatApp();
+    const stack = app.node.findChild('CompatLambdaStack') as cdk.Stack;
+
+    expect(stack.account).toBe(MINISTACK_ENV.account);
+    expect(stack.region).toBe(MINISTACK_ENV.region);
+  });
+
+  it('synthesizes the compat-lambda-doubler function through the app', () => {
+    const app = buildCompatApp();
+    const stack = app.node.findChild('CompatLambdaStack') as cdk.Stack;
+    Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'compat-lambda-doubler',
+    });
+  });
+});
