@@ -49,6 +49,7 @@ jobs:
               - 'bin/**'
               - 'lib/**'
               - 'lambda/**'
+              - 'services/**'
               - 'test/**'
               - 'fuzz/**'
               - 'stryker.config.mjs'
