@@ -8,6 +8,11 @@ image digest bumps. This directory is the foundation (epic
 sub-issue A / [#135](https://github.com/scottschreckengaust/e2e-ministack/issues/135));
 per-service depth arrives in later sub-issues (#136+).
 
+> **Operator guide:** the upstream-tracking flow — how a red/partial verdict is
+> connected to an `ministackorg/ministack` issue/PR (query = automated) and how
+> a maintainer optionally comments upstream (comment/watch = human-gated) —
+> lives in [`docs/MINISTACK-COMPAT.md`](../docs/MINISTACK-COMPAT.md).
+
 ## The two-axis model
 
 Compatibility is recorded on two orthogonal axes, kept in separate registries
