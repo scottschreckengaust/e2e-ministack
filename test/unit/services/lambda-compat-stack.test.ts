@@ -93,4 +93,20 @@ describe('buildCompatApp — per-vertical CDK app entrypoint', () => {
       FunctionName: 'compat-lambda-doubler',
     });
   });
+
+  it('attaches the cdk-nag AwsSolutions pack to the app (so `cdk synth` gates)', () => {
+    // The cdk-nag "zero findings" test above drives the pack class DIRECTLY,
+    // so it passes even if app.ts forgot to register the pack — meaning the
+    // one line that makes the CLI's `cdk synth` actually enforce cdk-nag on
+    // the compat stack (Validations.of(app).addPlugins(new AwsSolutionsChecks
+    // (...))) was executed-but-not-ASSERTED: deleting it kept every test green
+    // at 100% coverage. Assert the effect here — the app must carry the pack as
+    // a registered policy-validation plugin. `policyValidationBeta1` is the
+    // typed public getter cdk populates from addPlugins(); AwsSolutionsChecks
+    // reports itself as the 'AwsSolutions' plugin. If app.ts drops the
+    // addPlugins call, this array is empty and the test fails.
+    const app = buildCompatApp();
+    const pluginNames = app.policyValidationBeta1.map((p) => p.name);
+    expect(pluginNames).toContain('AwsSolutions');
+  });
 });
