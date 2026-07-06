@@ -43,9 +43,10 @@ const endpoint = process.env.AWS_ENDPOINT_URL ?? 'http://localhost:4566';
 const region = process.env.AWS_DEFAULT_REGION ?? 'us-east-1';
 
 // Repo root (…/e2e-ministack) — this file is services/lambda/iac/cdk/deploy.ts,
-// five levels down. cdk is invoked with cwd=repoRoot so cdk.json + the
-// repo-root `lambda/` asset resolve regardless of where jest is launched from.
-const repoRoot = path.resolve(__dirname, '..', '..', '..', '..', '..');
+// four levels down (cdk → iac → lambda → services → repoRoot). cdk is invoked
+// with cwd=repoRoot so cdk.json + the repo-root `lambda/` asset resolve
+// regardless of where jest is launched from.
+const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 
 // The per-vertical CDK app entrypoint (Decision #2: the vertical owns its own
 // app — this is NOT bin/app.ts). Passed to `--app`; the .ts path is resolved
