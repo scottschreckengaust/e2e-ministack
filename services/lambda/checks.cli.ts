@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { ministackEnv as buildMinistackEnv } from '../_harness/aws-env';
 import type { LambdaContract } from './contract';
 
 const execFileAsync = promisify(execFile);
@@ -17,23 +18,16 @@ const execFileAsync = promisify(execFile);
  * point of the CLI oracle.
  *
  * `ministackEnv` is the environment the AWS CLI needs to talk to MiniStack:
- * `AWS_ENDPOINT_URL` + region + dummy `test`/`test` credentials. In CI these
- * are all set at the integration-job level and inherited, so the helper is just
- * `{ ...process.env }` with the same defaults the SDK oracle uses applied only
- * when a var is absent — so the documented command works whether you run it in
- * CI (vars inherited) or reproduce it locally against a MiniStack on the
- * default port. It never overrides an explicitly-set value.
+ * `AWS_ENDPOINT_URL` + region + dummy `test`/`test` credentials. Those defaults
+ * now come from the shared `_harness/aws-env` module (`ministackEnv`): it spreads
+ * `process.env` and backfills each MiniStack default only when the var is absent,
+ * never overriding an explicitly-set value — so the documented command works
+ * whether you run it in CI (vars inherited) or reproduce it locally against a
+ * MiniStack on the default port.
  *
  * Oracle (`checks.*.ts`): coverage-EXCLUDED, integration-tier only.
  */
-export const ministackEnv: NodeJS.ProcessEnv = {
-  ...process.env,
-  AWS_ENDPOINT_URL: process.env.AWS_ENDPOINT_URL ?? 'http://localhost:4566',
-  AWS_REGION: process.env.AWS_REGION ?? 'us-east-1',
-  AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
-  AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? 'test',
-  AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? 'test',
-};
+export const ministackEnv: NodeJS.ProcessEnv = buildMinistackEnv(process.env);
 
 /**
  * Invoke the function once via the AWS CLI and return its parsed response

@@ -1,4 +1,5 @@
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { endpoint, region } from '../_harness/aws-env';
 import type { LambdaContract } from './contract';
 
 /**
@@ -16,15 +17,16 @@ import type { LambdaContract } from './contract';
  *    the invoke still succeeds at the HTTP layer).
  *
  * This is an oracle (`checks.*.ts`): coverage-EXCLUDED (jest.config.js) and run
- * only in the integration tier against a live MiniStack. `AWS_ENDPOINT_URL`
- * (set at the CI integration-job level) points the client at the emulator; the
- * dummy test/test credentials are accepted by MiniStack.
+ * only in the integration tier against a live MiniStack. The endpoint and region
+ * come from the shared `_harness/aws-env` module (`AWS_ENDPOINT_URL` /
+ * `AWS_DEFAULT_REGION`, set at the CI integration-job level, else the MiniStack
+ * defaults); the dummy test/test credentials are accepted by MiniStack.
  */
-const endpoint = process.env.AWS_ENDPOINT_URL ?? 'http://localhost:4566';
-const region = process.env.AWS_DEFAULT_REGION ?? 'us-east-1';
-
 export async function checkSdk(c: LambdaContract): Promise<void> {
-  const lambda = new LambdaClient({ endpoint, region });
+  const lambda = new LambdaClient({
+    endpoint: endpoint(process.env),
+    region: region(process.env),
+  });
 
   // Happy path: 21 → 42.
   const ok = await lambda.send(
