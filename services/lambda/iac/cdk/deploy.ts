@@ -124,6 +124,20 @@ async function isFunctionPresent(functionName: string): Promise<boolean> {
   }
 }
 
+// Options shared by both `cdk` execFile calls. `maxBuffer` is set explicitly:
+// execFile's default is 1 MiB of combined stdout/stderr, and when a child
+// exceeds it Node KILLS the process (ERR_CHILD_PROCESS_STDIO_MAXBUFFER) and
+// rejects — mid-deploy. A cold `cdk bootstrap`/`cdk deploy` with verbose
+// cdk-nag output, asset bundling logs, and streamed CloudFormation events can
+// cross 1 MiB, which would abort the deploy AND (before this) leave a
+// half-created function the verify fast-path might adopt. 64 MiB is ample
+// headroom for cdk's chattiest output without meaningfully bounding memory.
+const cdkExecOpts = {
+  cwd: repoRoot,
+  env: cdkEnv,
+  maxBuffer: 64 * 1024 * 1024,
+};
+
 async function provisionCompatStack(): Promise<void> {
   // `cdk bootstrap` is idempotent — safe to run on every provision. The env is
   // pinned by MINISTACK_ENV in the compat app, matching the repo bootstrap
@@ -131,7 +145,7 @@ async function provisionCompatStack(): Promise<void> {
   await execFileAsync(
     cdkBin,
     ['bootstrap', 'aws://000000000000/us-east-1', '--app', compatAppCommand],
-    { cwd: repoRoot, env: cdkEnv },
+    cdkExecOpts,
   );
 
   await execFileAsync(
@@ -144,7 +158,7 @@ async function provisionCompatStack(): Promise<void> {
       '--app',
       compatAppCommand,
     ],
-    { cwd: repoRoot, env: cdkEnv },
+    cdkExecOpts,
   );
 }
 
