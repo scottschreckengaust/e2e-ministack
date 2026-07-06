@@ -5,6 +5,8 @@ import {
   LambdaClient,
   GetFunctionCommand,
   ResourceNotFoundException,
+  State,
+  LastUpdateStatus,
 } from '@aws-sdk/client-lambda';
 import type { DeployAdapter } from '../../../_harness/adapter';
 import type { LambdaContract } from '../../contract';
@@ -86,11 +88,36 @@ const cdkEnv: NodeJS.ProcessEnv = {
     'http://localhost:4566',
 };
 
+/**
+ * Verify that `functionName` exists AND is healthy enough to skip provisioning.
+ *
+ * `GetFunction` succeeding proves a function OBJECT exists, not that it runs the
+ * current asset or is invocable — a prior run killed mid-deploy (or a
+ * `LastUpdateStatus: Failed`) can leave a half-created function. If we
+ * short-circuited on mere existence, that stale function would be adopted and
+ * the failure would surface as a confusing ORACLE assertion error ("expected
+ * 42…") rather than "the compat stack needs re-provisioning". So we treat a
+ * definitively broken/transient function as ABSENT and let the caller
+ * re-provision (`cdk deploy` is idempotent, so re-running is cheap and safe).
+ *
+ * We only re-provision on an EXPLICIT bad state — `State: Failed/Inactive` or
+ * `LastUpdateStatus: Failed`. `Active`/`Successful` (what MiniStack returns for
+ * a healthy function) short-circuit, and an ABSENT/unknown status is tolerated
+ * as present (never re-provision just because a field was omitted) so the
+ * fast-path is not defeated by an emulator that doesn't populate it.
+ */
 async function isFunctionPresent(functionName: string): Promise<boolean> {
   const lambda = new LambdaClient({ endpoint, region });
   try {
-    await lambda.send(new GetFunctionCommand({ FunctionName: functionName }));
-    return true;
+    const res = await lambda.send(
+      new GetFunctionCommand({ FunctionName: functionName }),
+    );
+    const cfg = res.Configuration;
+    const brokenState =
+      cfg?.State === State.Failed || cfg?.State === State.Inactive;
+    const failedUpdate = cfg?.LastUpdateStatus === LastUpdateStatus.Failed;
+    // Exists but broken/half-deployed → report absent so we re-provision.
+    return !(brokenState || failedUpdate);
   } catch (err) {
     if (err instanceof ResourceNotFoundException) return false;
     throw err;
