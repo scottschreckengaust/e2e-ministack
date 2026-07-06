@@ -48,12 +48,22 @@ const region = process.env.AWS_DEFAULT_REGION ?? 'us-east-1';
 // regardless of where jest is launched from.
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 
+// Resolve the CDK CLI and ts-node from the repo's OWN node_modules/.bin
+// (both are local devDependencies — there is no global `cdk`). Absolute
+// paths remove all PATH dependence, so the adapter provisions correctly
+// whether launched via `npm run` (which injects node_modules/.bin) or a
+// bare test runner, and pins to the locked aws-cdk / ts-node versions
+// rather than whatever a PATH lookup finds. (Linux-only repo — MiniStack
+// needs --network host — so the POSIX `.bin/<name>` path is correct.)
+const cdkBin = path.join(repoRoot, 'node_modules', '.bin', 'cdk');
+const tsNodeBin = path.join(repoRoot, 'node_modules', '.bin', 'ts-node');
+
 // The per-vertical CDK app entrypoint (Decision #2: the vertical owns its own
 // app — this is NOT bin/app.ts). Passed to `--app`; the .ts path is resolved
-// absolutely so cwd is irrelevant. `ts-node --prefer-ts-exts` runs the .ts
-// directly (mirrors cdk.json's `app` for the demo stack).
+// absolutely so cwd is irrelevant. The local pinned `ts-node --prefer-ts-exts`
+// runs the .ts directly (mirrors cdk.json's `app` for the demo stack).
 const compatAppEntry = path.join(__dirname, 'app.ts');
-const compatAppCommand = `npx ts-node --prefer-ts-exts ${compatAppEntry}`;
+const compatAppCommand = `${tsNodeBin} --prefer-ts-exts ${compatAppEntry}`;
 
 /**
  * Environment for the `cdk` execFile calls.
@@ -92,13 +102,13 @@ async function provisionCompatStack(): Promise<void> {
   // pinned by MINISTACK_ENV in the compat app, matching the repo bootstrap
   // target aws://000000000000/us-east-1.
   await execFileAsync(
-    'cdk',
+    cdkBin,
     ['bootstrap', 'aws://000000000000/us-east-1', '--app', compatAppCommand],
     { cwd: repoRoot, env: cdkEnv },
   );
 
   await execFileAsync(
-    'cdk',
+    cdkBin,
     [
       'deploy',
       'CompatLambdaStack',
