@@ -32,9 +32,20 @@ import type { LambdaContract } from '../../../services/lambda/contract';
  * start are much slower, so 300_000ms gives ample headroom over the default
  * 120_000. The verify fast-path (function already up) short-circuits in well
  * under a second, so warm re-runs never approach the limit.
+ *
+ * The ORACLE cases carry their own {@link ORACLE_TIMEOUT_MS}: `beforeAll` only
+ * provisions the function, so the FIRST invocation happens inside the oracle
+ * `it` and pays MiniStack's real-container Lambda COLD START. That would
+ * otherwise run under jest's default integration `testTimeout` (60_000,
+ * jest.config.js) and can flake on a slow CI host; 120_000 gives the cold
+ * invoke the same kind of headroom `beforeAll` has for the deploy.
  */
 const adapters = [cdkLambda /*, terraformLambda, cfnLambda — added later */];
 const oracles = { sdk: checkSdk, cli: checkCli };
+
+// Per-oracle timeout — see the block comment: the first invoke absorbs the
+// MiniStack Lambda cold start, which the 60s default testTimeout can't cover.
+const ORACLE_TIMEOUT_MS = 120_000;
 
 describe.each(adapters)('lambda provisioned via $name', (adapter) => {
   let c: LambdaContract;
@@ -47,7 +58,9 @@ describe.each(adapters)('lambda provisioned via $name', (adapter) => {
     await adapter.teardown?.();
   });
 
-  it.each(Object.entries(oracles))('passes the %s oracle', (_name, oracle) =>
-    oracle(c),
+  it.each(Object.entries(oracles))(
+    'passes the %s oracle',
+    (_name, oracle) => oracle(c),
+    ORACLE_TIMEOUT_MS,
   );
 });
