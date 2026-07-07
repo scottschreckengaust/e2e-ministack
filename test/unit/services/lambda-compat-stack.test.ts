@@ -1,7 +1,10 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { AwsSolutionsChecks } from 'cdk-nag';
-import { CompatLambdaStack } from '../../../services/lambda/iac/cdk/stack';
+import {
+  CompatLambdaStack,
+  COMPAT_LAMBDA_FUNCTION_NAME,
+} from '../../../services/lambda/iac/cdk/stack';
 import { buildCompatApp } from '../../../services/lambda/iac/cdk/app';
 import { MINISTACK_ENV } from '../../../lib/env';
 
@@ -33,6 +36,17 @@ describe('CompatLambdaStack — self-provisioned compat stack', () => {
       Runtime: 'nodejs24.x',
       Handler: 'index.handler',
     });
+  });
+
+  it('keeps the compat function name DISTINCT from the demo cdk-doubler (collision guard)', () => {
+    // The whole point of the distinct name is that MiniStack shares one global
+    // namespace: a compat stack reusing the demo `cdk-doubler` (the
+    // DoublerFunction default) would collide with lib/ministack-stack.ts
+    // whenever both are deployed (as in CI). This invariant is otherwise only
+    // convention — lock it so a future edit that "simplifies" back to the
+    // default name fails here rather than in a confusing MiniStack collision.
+    // Mirrors the two-bucket guard in test/unit/stack.test.ts.
+    expect(COMPAT_LAMBDA_FUNCTION_NAME).not.toBe('cdk-doubler');
   });
 
   it('carries the hardened DoublerFunction shape (DLQ + reserved concurrency)', () => {
