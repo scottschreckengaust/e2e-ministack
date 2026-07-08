@@ -7,7 +7,7 @@
       "deploy": "pass",
       "oracles": { "sdk": "pass", "cli": "pass" },
       "lastVerifiedDigest": "sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3",
-      "notes": "reuses cdk-doubler"
+      "notes": "self-provisions its own CompatLambdaStack (compat-lambda-doubler) via verify-or-provision; decoupled from the demo stack (#147)"
     }
   ]
 }

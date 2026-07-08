@@ -17,7 +17,9 @@ services/lambda/
   iac/
     cdk/
       construct.ts   # DoublerFunction — reusable hardened doubler construct (100%-gated)
-      deploy.ts      # cdkLambda: DeployAdapter<LambdaContract> (short-circuits, integration tier)
+      stack.ts       # CompatLambdaStack — self-provisioned compat stack (100%-gated)
+      app.ts         # buildCompatApp — per-vertical CDK app entrypoint (100%-gated)
+      deploy.ts      # cdkLambda: DeployAdapter<LambdaContract> (verify-or-provision, integration tier)
       README.md
     terraform/       # RESERVED — README stub only (future sub-issue)
     cloudformation/  # RESERVED — README stub only (future sub-issue)
@@ -68,25 +70,37 @@ integration-job level and inherited, so the helper is effectively
 `{ ...process.env }`; the point is that the documented command is
 copy-pasteable and reproduces locally against a MiniStack on the default port.
 
-## The CDK vertical
+## The CDK vertical (self-provisioning — #147)
+
+This vertical **owns and self-provisions its own CDK app + stack**, fully
+decoupled from the demo stack `lib/ministack-stack.ts` (the "compat = proof" half
+of the sample-vs-proof split). Full file-level detail lives in
+[`iac/cdk/README.md`](iac/cdk/README.md); in brief:
 
 - **`iac/cdk/construct.ts`** — `DoublerFunction`, a standalone reusable
   construct that mirrors the hardened `cdk-doubler` in
   [`lib/ministack-stack.ts`](../../lib/ministack-stack.ts): Node 24 runtime, the
   repo-root `lambda/` asset + `index.handler`, a least-privilege
   customer-managed role, a KMS-encrypted log group on a rotated CMK, a DLQ on
-  its own rotated CMK, and reserved concurrency. **Additive by design** — it is
-  NOT wired into the deployed stack (see the adapter's short-circuit below), so
-  #136 stays off `lib/`, the CDK snapshot, and cdk-nag/checkov re-verification
-  of a live-stack change. It documents/proves the hardened pattern the harness
-  exposes. Under `iac/**` but not named `deploy.ts`, so it is **coverage-gated
-  at 100%** and fully exercised by the pure-synth unit test
+  its own rotated CMK, and reserved concurrency. It documents/proves the
+  hardened pattern the harness exposes. Under `iac/**` but not named
+  `deploy.ts`, so it is **coverage-gated at 100%** and fully exercised by the
+  pure-synth unit test
   [`test/unit/services/lambda-construct.test.ts`](../../test/unit/services/lambda-construct.test.ts)
   (mirrors `test/unit/stack.test.ts`).
+- **`iac/cdk/stack.ts`** — `CompatLambdaStack`, this vertical's own `cdk.Stack`.
+  It instantiates `DoublerFunction` under the **distinct** physical name
+  `compat-lambda-doubler` so it never collides with the demo `cdk-doubler` in
+  MiniStack's single global namespace. Pinned to `MINISTACK_ENV`. **100%-gated**.
+- **`iac/cdk/app.ts`** — `buildCompatApp()`, the per-vertical CDK app entrypoint
+  (owned by the vertical, NOT `bin/app.ts`); attaches cdk-nag via the v3
+  `Validations.of(app).addPlugins(...)` API. **100%-gated**.
 - **`iac/cdk/deploy.ts`** — `cdkLambda: DeployAdapter<LambdaContract>`.
-  `deploy()` **short-circuits** to `{ functionName: 'cdk-doubler' }` because CI
-  runs `cdk deploy` before the integration tier. No `teardown` — the function is
-  a shared, pre-deployed resource owned by the main stack.
+  `deploy()` is **verify-or-provision**: `GetFunction` for
+  `compat-lambda-doubler` (fast path, no redeploy); on
+  `ResourceNotFoundException` it runs `cdk bootstrap` + `cdk deploy
+CompatLambdaStack` via the compat app. No `teardown` — cross-vertical reset is
+  `POST /_ministack/reset` and the adapter must not tear down the demo stack.
 
 ## Coverage
 
@@ -97,8 +111,9 @@ edits needed):
   (`iac/**/deploy.ts`) run only in the **integration tier** against a live
   MiniStack, so istanbul can't instrument them — **coverage-EXCLUDED**.
 - `contract.ts` is types-only → erases to zero runtime statements.
-- `iac/cdk/construct.ts` is pure synth logic → **100%-gated**, held there by
-  `lambda-construct.test.ts`.
+- `iac/cdk/construct.ts`, `iac/cdk/stack.ts`, and `iac/cdk/app.ts` are pure
+  synth logic → **100%-gated**, held there by `lambda-construct.test.ts` and
+  `lambda-compat-stack.test.ts`.
 
 The integration matrix's correctness is verified by CI's
 **Integration (MiniStack)** job on the PR (it cannot run locally without an

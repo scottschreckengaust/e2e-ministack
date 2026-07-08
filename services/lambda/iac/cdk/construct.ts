@@ -10,9 +10,13 @@ import * as path from 'node:path';
 /** Props for {@link DoublerFunction}. */
 export interface DoublerFunctionProps {
   /**
-   * Physical function name. Defaults to `cdk-doubler` so a stack that adopts
-   * this construct verbatim matches the name the harness's CDK
-   * {@link DeployAdapter} (iac/cdk/deploy.ts) short-circuits to.
+   * Physical function name. Defaults to `cdk-doubler` (mirroring the demo
+   * function's name for standalone/verbatim reuse), but the compat stack
+   * ({@link CompatLambdaStack} in iac/cdk/stack.ts) OVERRIDES it to
+   * `compat-lambda-doubler` on purpose: MiniStack shares one global namespace,
+   * so leaving the default would collide with the demo `cdk-doubler` whenever
+   * both are deployed (as in CI). Pass a distinct `compat-*` name in any stack
+   * that provisions this construct alongside the demo stack.
    */
   readonly functionName?: string;
 }
@@ -29,14 +33,18 @@ export interface DoublerFunctionProps {
  * rotated CMK, and a reserved-concurrency cap) so it passes cdk-nag
  * (AwsSolutions) and checkov identically.
  *
- * This construct is ADDITIVE: it is NOT wired into the deployed
- * `MiniStackStack`. The vertical's CDK adapter short-circuits to the
- * already-deployed `cdk-doubler`, so the live stack is untouched (which keeps
- * #136 off `lib/`, the CDK snapshot, and the cdk-nag/checkov re-verification of
- * a stack change). The construct documents and proves the hardened
- * doubler-equivalent pattern the harness offers for reuse; it is exercised in
- * full by the pure-synth unit test `test/unit/services/lambda-construct.test.ts`,
- * which holds it under the repo's 100% coverage gate.
+ * This construct is the reusable building block the vertical PROVISIONS: it is
+ * instantiated by {@link CompatLambdaStack} (iac/cdk/stack.ts), which the CDK
+ * {@link DeployAdapter} (iac/cdk/deploy.ts) verify-or-provisions against a live
+ * MiniStack (#147). It is deliberately NOT added to the demo stack
+ * `lib/ministack-stack.ts` — that stays the decoupled "sample", while each
+ * compat vertical owns and deploys its own `Compat*Stack` (the sample-vs-proof
+ * split). Keeping it out of `lib/` also keeps #136 off the demo CDK snapshot and
+ * the cdk-nag/checkov re-verification a live demo-stack change would trigger.
+ * The construct documents and proves the hardened doubler-equivalent pattern the
+ * harness offers for reuse; it is exercised in full by the pure-synth unit test
+ * `test/unit/services/lambda-construct.test.ts`, which holds it under the repo's
+ * 100% coverage gate.
  */
 export class DoublerFunction extends Construct {
   /** The underlying Lambda function, exposed so callers can grant/wire it. */

@@ -46,12 +46,12 @@ Both interfaces live in [`_harness/adapter.ts`](./_harness/adapter.ts):
 - A **`Contract`** is the typed handle to a provisioned resource. Each vertical
   narrows it to the minimal shape its oracles need, e.g.
   `type LambdaContract = Contract & { functionName: string }`.
-- A **`DeployAdapter<C>`** provisions (or short-circuits if already up) and
-  returns that `Contract`. One adapter per `(service × IaC tool)`; the returned
-  contract is the only thing that crosses the deploy⇄verify boundary, which is
-  what keeps the oracles tool-agnostic. CDK adapters may short-circuit (CI runs
-  `cdk deploy` before the integration tier today); other tools do real
-  `apply`/`deploy` work inside `deploy()`.
+- A **`DeployAdapter<C>`** **verify-or-provisions** the resource and returns
+  that `Contract`. One adapter per `(service × IaC tool)`; the returned contract
+  is the only thing that crosses the deploy⇄verify boundary, which is what keeps
+  the oracles tool-agnostic. `deploy()` verifies the resource exists (fast path,
+  no rework) and provisions it if absent — see
+  [Per-vertical self-provisioning](#per-vertical-self-provisioning-147) below.
 
 ## Layout (service-primary, IaC-nested)
 
@@ -72,7 +72,7 @@ services/
     checks.sdk.ts                 # shared SDK v3 oracle   (integration tier)
     checks.cli.ts                 # shared `aws <svc> ...` oracle (integration tier)
     iac/
-      cdk/            construct.ts + deploy.ts
+      cdk/            construct.ts + stack.ts + app.ts + deploy.ts  # vertical owns its OWN app/stack (#147)
       terraform/      main.tf      + deploy.ts   (reserved)
       cloudformation/ template.yaml + deploy.ts  (reserved)
 ```
@@ -100,12 +100,58 @@ diffs — never auto-committed by CI.
    `null`). Add the service key to `EXPECTED_SERVICES` in
    `test/unit/registry.test.ts`.
 2. **Vertical (depth, #136+):** create `services/<service>/` with `contract.ts`,
-   the shared `checks.sdk.ts` / `checks.cli.ts` oracles, and one
-   `iac/<tool>/deploy.ts` adapter per IaC tool; wire them into
-   `test/integration/services/<service>.test.ts`.
+   the shared `checks.sdk.ts` / `checks.cli.ts` oracles, and — per IaC tool —
+   the tool's OWN self-provisioned artifact(s) plus its
+   `iac/<tool>/deploy.ts` adapter. For CDK that is a `construct.ts` + `stack.ts`
+   (a `Compat*Stack` with a distinct `compat-*` physical name) + `app.ts`
+   (the per-vertical CDK app), whose `deploy()` verify-or-provisions that stack;
+   for Terraform it is `main.tf` + `deploy.ts`, and so on. Wire the adapter(s)
+   into `test/integration/services/<service>.test.ts`. **Do NOT add the
+   resource-under-test to `lib/ministack-stack.ts`** — that is the decoupled
+   sample; the vertical is the proof (see
+   [Per-vertical self-provisioning](#per-vertical-self-provisioning-147)).
 3. **Axis-2 rows:** the vertical appends `(service × resource × iac)` result
    rows to `_registry/provisioning.json`, each stamped with the current
    `lastVerifiedDigest`.
+
+## Per-vertical self-provisioning (#147)
+
+Each vertical **owns and self-provisions its own IaC artifact(s)** — the harness
+does **not** depend on the demo stack `lib/ministack-stack.ts`. This is the
+`sample` vs `proof` split, locked on
+[#147](https://github.com/scottschreckengaust/e2e-ministack/issues/147):
+
+- **`lib/` = decoupled sample.** `lib/ministack-stack.ts` stays the repo's
+  minimal "trivial demo" (two S3 buckets + one Lambda) with its own
+  `test/integration/integration.test.ts`. It is never extended to hold
+  resources-under-test.
+- **compat verticals = proof.** Each `services/<svc>/iac/<tool>/` owns its own
+  app(s)/stack(s) and provisions them itself. The Lambda/CDK vertical (the pilot)
+  ships `stack.ts` (`CompatLambdaStack`, function `compat-lambda-doubler`) and
+  `app.ts` (`buildCompatApp()`); its `deploy()` verify-or-provisions that stack
+  against a live MiniStack.
+
+**Topology-agnostic.** A vertical may own **any** shape — a single stack,
+multiple stacks, nested stacks, or cross-app-via-outputs — and its
+`DeployAdapter.deploy()` provisions whatever it owns and returns the `Contract`.
+The `DeployAdapter` and `Contract` interfaces are **UNCHANGED**; provisioning is
+entirely the adapter's concern, which is exactly what keeps the SDK/CLI oracles
+IaC-tool-agnostic. Distinct `compat-*` physical names avoid collisions with the
+demo stack in MiniStack's single global namespace.
+
+**Verify-or-provision.** `deploy()` verifies the resource exists (fast path — no
+redeploy on warm re-runs) and provisions it if absent. It works standalone on a
+fresh MiniStack with **no** prior `cdk deploy` of the demo stack. Cross-vertical
+reset uses `POST /_ministack/reset` (the upstream pattern); an adapter must never
+tear down what it did not provision.
+
+Downstream verticals inherit this pilot pattern: **[S3
+(#139)](https://github.com/scottschreckengaust/e2e-ministack/issues/139)** builds
+its own `CompatS3Stack` and **[DynamoDB
+(#140)](https://github.com/scottschreckengaust/e2e-ministack/issues/140)** its own
+`CompatDynamoStack` — **NOT** additions to `lib/ministack-stack.ts`. Other IaC
+tools (Terraform / SAM / CloudFormation / AWS Blocks) are separate future
+issue/PR paths.
 
 ## Coverage
 
@@ -122,6 +168,9 @@ coverage today. `jest.config.js` `collectCoverageFrom` encodes this as
 - `services/**/*.test.ts` — spec files
 
 Everything else under `services/` (e.g. `_harness/adapter.ts`, `contract.ts`,
-and any pure helpers) is gated at 100%. `_harness/adapter.ts` is types-only, so
-it erases to zero runtime statements and trivially satisfies the gate; any
-executable pure logic you add must be exercised by a unit test to hold 100%.
+any `construct.ts` / `stack.ts` / `app.ts` synth logic, and any pure helpers) is
+gated at 100%. `_harness/adapter.ts` and `contract.ts` are types-only, so they
+erase to zero runtime statements and trivially satisfy the gate; the CDK
+`construct.ts`/`stack.ts`/`app.ts` are pure synth logic held at 100% by
+`test/unit/services/*.test.ts` (no emulator). Any executable pure logic you add
+must be exercised by a unit test to hold 100%.
