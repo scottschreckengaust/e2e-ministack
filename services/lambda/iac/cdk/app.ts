@@ -3,7 +3,6 @@ import * as cdk from 'aws-cdk-lib';
 import { Validations } from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { CompatLambdaStack } from './stack';
-import { MINISTACK_ENV } from '../../../../lib/env';
 
 /**
  * The per-vertical CDK app entrypoint for the Lambda/CDK compat vertical (epic
@@ -16,9 +15,11 @@ import { MINISTACK_ENV } from '../../../../lib/env';
  * `DeployAdapter.deploy()` provisions whatever shape it owns and returns the
  * `Contract`. Here the Lambda vertical ships one stack.
  *
- * Mirrors `bin/app.ts`: pin the deploy target via `MINISTACK_ENV` (issue #2 —
- * do NOT read `CDK_DEFAULT_*`, which the CDK CLI populates from the ambient
- * credential chain) and attach cdk-nag through the v3 policy-validation API
+ * Mirrors `bin/app.ts`: the deploy target is pinned to `MINISTACK_ENV` (issue
+ * #2 — do NOT read `CDK_DEFAULT_*`, which the CDK CLI populates from the ambient
+ * credential chain) by the {@link CompatStack} base the stack extends, so this
+ * entrypoint no longer passes `env` itself. It attaches cdk-nag through the v3
+ * policy-validation API
  * (`Validations.of(app).addPlugins(...)`, NOT the v2 `Aspects` API) so any
  * unsuppressed AwsSolutions finding fails synth. `verbose` surfaces rule text.
  *
@@ -30,9 +31,7 @@ import { MINISTACK_ENV } from '../../../../lib/env';
 export function buildCompatApp(): cdk.App {
   const app = new cdk.App();
 
-  new CompatLambdaStack(app, 'CompatLambdaStack', {
-    env: MINISTACK_ENV,
-  });
+  new CompatLambdaStack(app, 'CompatLambdaStack');
 
   Validations.of(app).addPlugins(
     new AwsSolutionsChecks(app, { verbose: true }),

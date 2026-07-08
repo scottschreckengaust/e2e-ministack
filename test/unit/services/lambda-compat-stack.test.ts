@@ -22,9 +22,7 @@ import { MINISTACK_ENV } from '../../../lib/env';
 describe('CompatLambdaStack — self-provisioned compat stack', () => {
   function synth(): Template {
     const app = new cdk.App();
-    const stack = new CompatLambdaStack(app, 'CompatLambdaStack', {
-      env: MINISTACK_ENV,
-    });
+    const stack = new CompatLambdaStack(app, 'CompatLambdaStack');
     return Template.fromStack(stack);
   }
 
@@ -58,9 +56,7 @@ describe('CompatLambdaStack — self-provisioned compat stack', () => {
 
   it('pins the deploy target to the MiniStack account/region unconditionally', () => {
     const app = new cdk.App();
-    const stack = new CompatLambdaStack(app, 'CompatLambdaStack', {
-      env: MINISTACK_ENV,
-    });
+    const stack = new CompatLambdaStack(app, 'CompatLambdaStack');
     expect(stack.account).toBe(MINISTACK_ENV.account);
     expect(stack.region).toBe(MINISTACK_ENV.region);
   });
@@ -75,9 +71,7 @@ describe('CompatLambdaStack — cdk-nag (AwsSolutions) fast-tier gate', () => {
     // via its documented `validateScope(stack)` entry point so a nag regression
     // in the compat stack fails fast in the unit tier, not only in CI synth.
     const app = new cdk.App();
-    const stack = new CompatLambdaStack(app, 'NagCompatLambdaStack', {
-      env: MINISTACK_ENV,
-    });
+    const stack = new CompatLambdaStack(app, 'NagCompatLambdaStack');
     app.synth();
 
     const report = new AwsSolutionsChecks(stack, {

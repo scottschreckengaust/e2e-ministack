@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import { CompatStack } from '../../../_harness/cdk-stack';
 import { DoublerFunction } from './construct';
 
 /**
@@ -26,12 +27,18 @@ export const COMPAT_LAMBDA_FUNCTION_NAME = 'compat-lambda-doubler';
  * adapter (iac/cdk/deploy.ts) verify-or-provisions THIS stack; the returned
  * {@link LambdaContract} names {@link COMPAT_LAMBDA_FUNCTION_NAME}.
  *
- * Reuses `MINISTACK_ENV` (via the caller passing `env`) so the account/region
- * are pinned unconditionally — the issue-#2 defense — keeping the deploy target
- * independent of the ambient `CDK_DEFAULT_*` the CDK CLI would otherwise inject.
+ * The deploy target's account/region are pinned to `MINISTACK_ENV` by the
+ * {@link CompatStack} base — unconditionally, and `Omit<cdk.StackProps,'env'>`
+ * makes passing `env` a compile error — the issue-#2 defense, keeping the deploy
+ * target independent of the ambient `CDK_DEFAULT_*` the CDK CLI would otherwise
+ * inject. The pin is written once in the base and inherited by every vertical.
  */
-export class CompatLambdaStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class CompatLambdaStack extends CompatStack {
+  constructor(
+    scope: Construct,
+    id: string,
+    props?: Omit<cdk.StackProps, 'env'>,
+  ) {
     super(scope, id, props);
 
     new DoublerFunction(this, 'Doubler', {
