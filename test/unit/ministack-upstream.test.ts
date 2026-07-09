@@ -173,13 +173,13 @@ describe('ministack-upstream — pure match/format logic (offline fixture)', () 
 
   it('drafts a structured comment body carrying the digest, verdict, and ask', () => {
     const body = callExport(
-      `m.draftCommentBody({ service: 'agentcore', status: 'upstream-tracked', ministackRef: 'ministackorg/ministack#1021' }, 'sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3')`,
+      `m.draftCommentBody({ service: 'agentcore', status: 'upstream-tracked', ministackRef: 'ministackorg/ministack#1021' }, 'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef')`,
     ) as string;
     expect(body).toContain('agentcore');
     expect(body).toContain('upstream-tracked');
     // The MiniStack image digest it was verified against.
     expect(body).toContain(
-      'sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3',
+      'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
     );
     // An explicit ask so the maintainer knows what the comment requests.
     expect(body.toLowerCase()).toMatch(/ask|would|please|request/);

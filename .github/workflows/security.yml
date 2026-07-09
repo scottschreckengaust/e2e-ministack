@@ -376,12 +376,12 @@ jobs:
         with:
           persist-credentials: false
       # NOTE: this digest MUST match the image pinned in ci.yml
-      # (ministackorg/ministack:full@sha256:c5ce466...). Keep them in sync;
+      # (ministackorg/ministack:full@sha256:dd2cf4d...). Keep them in sync;
       # if ci.yml bumps the digest, bump it here too.
       - id: grype
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          image: 'ministackorg/ministack:full@sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3'
+          image: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
           # Report-only: third-party image we can't patch (see comment above).
           fail-build: false
           severity-cutoff: high
