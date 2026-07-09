@@ -64,9 +64,20 @@ adversary-reachability claim: MiniStack is a local-only CI emulator (binds port
 4566 on loopback, ephemeral per-run container, never network-exposed, exercised
 only by this repo's own CDK/SDK test traffic, not a deployed/production
 artifact), so no adversary can supply crafted input reaching the vulnerable
-code. The full rationale + fix state is in each record's `impact_statement`. The
-exact package purl(s) from the scan SARIF are the `products[].@id`. Grouped by
-package (the record file is named for the CVE):
+code. The full rationale + fix state is in each record's `impact_statement`.
+
+The `products[].@id` are **qualifier-less package purls** (`pkg:deb/debian/<name>@<version>`,
+`pkg:generic/python@<version>`) — NOT the scanner's full purl. This is deliberate:
+grype and trivy emit different qualifiers for the same package (grype
+`?arch=amd64&distro=debian-13`, trivy `?arch=all&distro=debian-13.5`), and
+[go-vex](https://github.com/openvex/go-vex) only matches when the statement's
+qualifiers equal the scanned component's. A base purl matches BOTH scanners
+across arch / distro-minor differences. For debian packages carrying an **epoch**,
+grype keeps it in the version (`name@1:2.41-5`) while trivy strips it to a
+qualifier and uses the epoch-less version (`name@2.41-5`); those records therefore
+list **both** version forms as products. Verified against grype v0.110.0 (SBOM)
+and trivy v0.70.0 (`trivy image <digest>`) — see `docs/SECURITY-TOOLING.md`.
+Grouped by package (the record file is named for the CVE):
 
 - **bsdutils** (1): CVE-2026-53615
 - **gzip** (1): CVE-2026-41992

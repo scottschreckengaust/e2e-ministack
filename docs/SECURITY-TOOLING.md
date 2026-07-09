@@ -314,9 +314,28 @@ Either way the `.vex/CVE-*` set is the single source of truth; a new/removed CVE
 record means one line added/removed in `trivy.yaml` (the grype side is glob-driven
 and needs no edit). See `.vex/README.md`.
 
+**Product PURL structure — qualifier-less, and why (a real cross-scanner gotcha).**
+OpenVEX matching is per-PRODUCT, and [go-vex](https://github.com/openvex/go-vex)
+(used by both scanners) only matches when the statement's product purl equals the
+scanned component's purl, **including qualifiers**. Grype and trivy emit
+**different** purls for the same image package: grype `?arch=amd64&distro=debian-13`,
+trivy `?arch=all&distro=debian-13.5` (trivy also tracks the distro _minor_). So a
+record carrying one scanner's full purl silently fails to match the other — this
+is exactly why the first hard-fail attempt passed grype but the image CVEs came
+through unfiltered in trivy. The fix: each `products[].@id` is a **qualifier-less
+base purl** (`pkg:deb/debian/<name>@<version>`, `pkg:generic/python@<version>`),
+which matches BOTH scanners regardless of arch / distro-minor. Debian **epochs** are
+a second wrinkle — grype keeps the epoch in the version (`name@1:2.41-5`), trivy
+strips it (`name@2.41-5`); those records list **both** version forms as products.
+Verified against grype v0.110.0 (SBOM) and trivy v0.70.0 (`trivy image <digest>`,
+the real CI path): both exit 0, all high+ suppressed. **When adding a record for a
+new CVE, use the qualifier-less purl (and add the epoch-less form if the version has
+an epoch)** — not the raw scanner SARIF purl.
+
 **Severity-cutoff ratchet plan.** The image gate starts at `severity-cutoff: high`
-(Grype) / `TRIVY_SEVERITY: HIGH,CRITICAL` (Trivy) — the smallest acceptable
-starting set. The end state is "fail on **any** new CVE at the configured floor,
+(Grype) / trivy's `severity: HIGH,CRITICAL` action input (with
+`limit-severities-for-sarif: true`, because the trivy-action otherwise unsets the
+severity filter on SARIF output) — the smallest acceptable starting set. The end state is "fail on **any** new CVE at the configured floor,
 with every accepted one explicitly VEX'd." The floor is a **documented, ratcheting
 value**: once the high+ set is under VEX control and CI is green, progressively
 lower it — **high → medium → low** — VEX-accepting the newly-surfaced
