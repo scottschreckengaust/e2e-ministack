@@ -16,6 +16,8 @@ threat-model.tc.json
 *.sarif
 *.outcome
 cfn-lint.txt
+trivy-fs.txt
+trivy-image.txt
 npm-audit.json
 reports/
 .fuzz-corpus/
