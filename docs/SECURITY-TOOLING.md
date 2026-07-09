@@ -328,15 +328,26 @@ SonarQube is a **single-vendor** SonarSource product. Two separable concerns:
   `trivy-fs` report-only posture. **Ratchet:** a follow-up flips it to
   `test "$QG_STATUS" = "PASSED"` once the baseline is triaged / the quality
   profile is tuned.
-- **Semgrep false-positive (maintainer-approved suppression).** The generic
-  secrets rule `generic.secrets.security.detected-sonarqube-docs-api-key` matches
-  `sonar…<40-hex>`, which the pinned image **digest** and the two commit-**SHA**
-  action pins unavoidably are (SHA-pinning SonarSource's own actions is required
-  by the repo's pinning rules). These are public, required pins — not API keys.
-  Cleared with a **rule-scoped, same-line `# nosemgrep`** on exactly those lines
-  (detection of the rule is preserved everywhere else — not a blanket
-  `--exclude-rule`), a genuinely-unfixable true-false-positive suppression with
-  the maintainer sign-off the "Remediating a scanner finding" section requires.
+- **Semgrep false-positive (maintainer-approved, TEMPORARY rule exclude).** The
+  generic secrets rule `generic.secrets.security.detected-sonarqube-docs-api-key`
+  matches `sonar…<40-hex>`, which the pinned image **digest** and the two
+  commit-**SHA** action pins unavoidably are (SHA-pinning SonarSource's own
+  actions is required by the repo's pinning rules). These are public, required
+  pins — not API keys. Cleared with a single **`--exclude-rule`** on the semgrep
+  invocation, **not** inline `# nosemgrep`. Why `--exclude-rule` and not
+  `nosemgrep`: `# nosemgrep` marks the finding `suppressions:[{inSource}]` but
+  **leaves the result in the SARIF**, and GitHub Code Scanning still ingests and
+  surfaces it — reddening the `Semgrep OSS` check that consumes our uploaded
+  SARIF. `--exclude-rule` drops the rule entirely (0 results), clearing both the
+  gate and the Code Scanning alert. Scoped to this ONE rule, so every other
+  secret/SAST rule still runs on the whole tree (including `docs/`). This is a
+  genuinely-unfixable true-false-positive with the maintainer sign-off the
+  "Remediating a scanner finding" section requires, and it is **temporary**:
+  **remove the `--exclude-rule` once the upstream fix
+  ([semgrep/semgrep-rules#3994](https://github.com/semgrep/semgrep-rules/pull/3994))
+  lands in `r/all`** — tracked by #163, and folded into the vendored ruleset
+  under #79. Until a Semgrep pre-commit hook exists (#79), the exclude lives only
+  in CI; when that hook is added it must carry the same `--exclude-rule`.
 
 ### dependency-review `allow-dependencies-licenses` (#161)
 

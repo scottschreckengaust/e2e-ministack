@@ -65,16 +65,23 @@ jobs:
           # --error sets a non-zero exit on findings; capture it so the report
           # still uploads, then enforce in a later step.
           set +e
-          # --exclude=docs/superpowers: the brainstorming spec/plan artifacts
-          # (#150/#161) write out this repo's SHA/digest PINS in prose + code
-          # fences, which the generic `detected-sonarqube-docs-api-key` rule
-          # matches ("sonar…<40-hex>"). Those are public, required pins in
-          # non-shippable design docs — a proven false positive (same rule the
-          # sonarqube job's inline nosemgrep addresses), excluded at the
-          # directory level here since per-line nosemgrep in markdown prose is
-          # impractical. Does NOT blind semgrep to any executable code.
+          # TEMPORARY, rule-scoped --exclude-rule for the buggy
+          # `detected-sonarqube-docs-api-key` (a PROVEN false positive: its regex
+          # `(?i)sonar.{0,50}…[0-9a-f]{40}` matches this repo's SHA-pinned
+          # SonarSource actions + the sonarqube image digest — public, required
+          # pins, NOT API keys; #163). We EXCLUDE the rule rather than `# nosemgrep`
+          # it inline because a suppressed finding still ships in the SARIF
+          # (`suppressions:[{inSource}]`) and GitHub Code Scanning surfaces it —
+          # reddening the "Semgrep OSS" check that ingests our uploaded SARIF.
+          # --exclude-rule drops the rule ENTIRELY (0 results), clearing both the
+          # gate and the Code Scanning alert. This is maintainer-approved and
+          # TEMPORARY: REMOVE this flag once the upstream fix
+          # (semgrep/semgrep-rules#3994) lands in r/all — tracked by #163
+          # (and folded into the vendored ruleset under #79). Scoped to this ONE
+          # rule, so every other secret/SAST rule still runs.
           semgrep scan --config=auto --error --sarif --output semgrep.sarif \
-            --exclude=node_modules --exclude=cdk.out --exclude=docs/superpowers
+            --exclude=node_modules --exclude=cdk.out \
+            --exclude-rule=generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()
@@ -247,13 +254,12 @@ jobs:
           # cosmetic; a future SHA/version bump does NOT re-trigger review, the
           # entries silence license checks for ALL versions of these actions. That
           # is intended here (they're LGPL at every version, permanently exempt).
-          # nosemgrep (maintainer-approved, same proven false positive as the
-          # sonarqube job's pins): the exemption purls carry the actions'
-          # 40-char commit SHAs, tripping the "sonar…<40-hex>" secrets heuristic.
-          # NOTE: a plain quoted scalar (not a `>-` block) so the trailing
-          # `# nosemgrep` is a real YAML comment — inside a block scalar it would
-          # be literal text and corrupt the purls (breaking the exemption).
-          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b' # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+          # NOTE: a plain quoted scalar (not a `>-` block) so the two purls parse
+          # as a single clean comma-list (a block scalar would fold in stray
+          # text). The detected-sonarqube-docs-api-key secrets rule would match
+          # these SHA-bearing purls, but it is globally --exclude-rule'd in the
+          # semgrep job (temporary; see #163) so no inline suppression is needed.
+          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b'
           # Aside from that one entry, allow-dependencies-licenses stays empty for
           # the license-UNKNOWN path: "Could not detect a license" on a brand-new
           # release is upstream harvest lag (GitHub sources PyPI license data from
@@ -802,12 +808,13 @@ jobs:
       security-events: write # upload SARIF to code scanning
     services:
       sonarqube:
-        # nosemgrep is a maintainer-approved suppression of a PROVEN false
-        # positive: the generic secrets rule matches "sonar…<40-hex>", which the
-        # image digest below (and the SHA-pinned SonarSource actions further
-        # down) unavoidably are. These are PUBLIC, REQUIRED pins — not API keys.
-        # Rule-scoped so real SonarQube keys are still caught elsewhere. See PR + docs/SECURITY-TOOLING.md.
-        image: sonarqube:community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3 # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+        # The detected-sonarqube-docs-api-key secrets rule matches "sonar…<40-hex>"
+        # — i.e. this image digest and the SHA-pinned SonarSource actions below,
+        # all PUBLIC REQUIRED pins, not API keys (a PROVEN false positive, #163).
+        # The rule is globally --exclude-rule'd in the semgrep job (temporary,
+        # until upstream semgrep/semgrep-rules#3994 lands), so no inline
+        # suppression is needed here.
+        image: sonarqube:community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
         ports:
           - 127.0.0.1:9000:9000
         env:
@@ -870,9 +877,7 @@ jobs:
           curl -s -X POST -H "Authorization: Bearer $SONAR_TOKEN" \
             "http://localhost:9000/api/projects/create?project=e2e-ministack&name=e2e-ministack" > /dev/null
       - name: Run SonarQube scan
-        # nosemgrep (maintainer-approved, see the services block above): the
-        # 40-char commit-SHA pin trips the "sonar…<40-hex>" secrets heuristic.
-        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0 # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         env:
           SONAR_HOST_URL: http://localhost:9000
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
@@ -885,9 +890,7 @@ jobs:
       - name: Check quality gate (report-only)
         id: qg
         continue-on-error: true
-        # nosemgrep (maintainer-approved, see the services block above): the
-        # 40-char commit-SHA pin trips the "sonar…<40-hex>" secrets heuristic.
-        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0 # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
         timeout-minutes: 5
         env:
           SONAR_HOST_URL: http://localhost:9000
