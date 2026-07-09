@@ -19,7 +19,25 @@ export default {
   // not signal. The stack is covered instead by cdk-nag, checkov, fine-grained
   // CDK assertions, and the template snapshot. Add lib/ back here only if the
   // stack grows real computed logic (loops/conditionals/helpers).
-  mutate: ['lambda/index.js'],
+  // Scope also includes the helper-script LOGIC modules (#165): the two SARIF
+  // parsers, the SPDX allow-list decider, and the upstream-tracker pure logic.
+  // These are input→output transformers whose output is load-bearing for
+  // security (a wrong SARIF hides Code Scanning alerts; a wrong license verdict
+  // wrongly closes/escalates a review issue), so they are the IDEAL mutation
+  // targets — arguably more than the trivial doubler. The maintainer bar for
+  // #165 is 0 SURVIVING mutants on these files. Their unit specs import the
+  // `.ts` IN-PROCESS (test/unit/{clamav,sonar}-to-sarif.test.ts,
+  // license-verdict.test.ts, ministack-upstream.test.ts), so Stryker's
+  // jest-runner mutates them against the unit tier with no extra tooling. The
+  // thin `.mjs` CLI shims and network-only I/O are deliberately NOT here (no
+  // in-process coverage → Stryker would report them as "no coverage" noise).
+  mutate: [
+    'lambda/index.js',
+    '.github/scripts/clamav-to-sarif.ts',
+    '.github/scripts/sonar-to-sarif.ts',
+    '.github/scripts/license-verdict.ts',
+    'scripts/ministack-upstream.ts',
+  ],
   // Speed: cache verdicts and re-test only mutants in changed files.
   incremental: true,
   incrementalFile: 'reports/mutation/incremental.json',

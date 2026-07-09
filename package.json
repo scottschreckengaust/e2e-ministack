@@ -11,7 +11,7 @@
     "e2e-ministack": "bin/app.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.scripts.json",
     "watch": "tsc -w",
     "synth": "cdk synth",
     "bootstrap": "cdk bootstrap aws://000000000000/us-east-1",

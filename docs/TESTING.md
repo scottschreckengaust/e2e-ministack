@@ -78,7 +78,8 @@ for the scanners). `jest.config.js` selects a tier directory via the
 - `npm run test:e2e` — runs the `describe.skip` placeholder (no real-account
   stage yet).
 
-Mutation testing is scoped to `lambda/index.js` only; the CDK stack is
+Mutation testing covers the pure input→output logic: `lambda/index.js` and the
+helper-script logic modules (see "Helper-script tier" below). The CDK stack is
 declarative config Stryker can't tie to synth output, so the infra is covered
 by cdk-nag/checkov, fine-grained CDK `Template` assertions, and the
 `@aws-cdk/integ-runner` snapshot baseline instead.
@@ -91,6 +92,66 @@ by cdk-nag/checkov, fine-grained CDK `Template` assertions, and the
 > **deploy-and-assert** workflow (`--update-on-failed`), which we use only when
 > refreshing the baseline against MiniStack. That deploy style is still **not** a
 > real-account E2E dimension (currently TBD).
+
+## Helper-script tier (`.github/scripts/` + `scripts/`)
+
+The CI/security helper scripts are **first-class citizens of the same
+coverage + mutation + fuzz gates** as the application code (issue #165). Before
+that change they were `.mjs` files that either had a `*.test.mjs` **nothing ever ran**
+(jest globs `test/**/*.test.ts`; no workflow invoked `node --test`) or no test
+at all — a false green on security-critical transformers (a wrong ClamAV/Sonar
+SARIF silently resolves Code-Scanning alerts; a wrong `license-verdict` closes
+or escalates a `license-review` issue).
+
+**Layout — one pair per script:**
+
+- `<name>.ts` — the **tested logic module** (the pure transformer/decider).
+  Imported **in-process** by unit specs (`test/unit/<name>.test.ts`) and by the
+  fuzz-regression tier, so it flows through the 100% coverage gate (#124) and
+  Stryker (#122) with **zero new tooling**.
+- `<name>.mjs` — a **thin CLI shim** (argv/read/write/exit only) that
+  `import`s the `.ts`. **Node 24 strips the types on import** (stable,
+  unflagged), so the workflows keep calling `node .github/scripts/<name>.mjs …`
+  with **no build step and no path change** (`security.yml`,
+  `license-review-poller.yml`). The shim is not gate-collectable in-process and
+  is excluded by the `**/*.ts`-only globs.
+
+Gated modules today: `clamav-to-sarif.ts`, `sonar-to-sarif.ts`,
+`license-verdict.ts` (`.github/scripts/`), and `ministack-upstream.ts`
+(`scripts/`, pure logic only — its network `gh search` / registry I/O stays in
+the `.mjs` shim, uncollectable in-process by the same convention that excludes
+`services/**/checks.*.ts`).
+
+**Path convention — future scripts inherit the gates automatically:**
+
+- `jest.config.js` `collectCoverageFrom` includes `.github/scripts/**/*.ts` and
+  `scripts/**/*.ts` (100% gate).
+- `jest.config.js` `moduleFileExtensions` puts `ts` **before** `mjs`/`js` so an
+  extension-less import resolves to the `.ts` logic module (never the sibling
+  `.mjs` CLI shim), which is also what makes Stryker mutate the file jest
+  actually loads.
+- `stryker.config.mjs` `mutate:` lists the four modules; the maintainer bar for
+  #165 is **0 surviving mutants** (not merely ≥ 80%). The handful of genuinely
+  **equivalent** mutants (e.g. a caught-then-discarded `throw` message, a
+  regex anchor made redundant by a downstream re-validation, a defensive
+  `?? []` fallback) are marked with an inline `// Stryker disable next-line
+<mutator>: <reason>` — each justified, never a blanket ignore.
+- `tsconfig.json` **excludes** these `.ts` from the emitting build (so no
+  compiled `.js` shadows the source); `tsconfig.scripts.json` (`noEmit`)
+  type-checks them and is run by `npm run build`.
+- `jest.fuzz.config.js` uses `ts-jest` so the SARIF/`license-verdict`
+  fuzz-regression targets can import the `.ts` in-process, with corpora under
+  `fuzz/corpus-clamav/`, `fuzz/corpus-sonar/`, `fuzz/corpus-license/` — seeded
+  with the adversarial cases (filenames containing `": "`/`FOUND`, empty,
+  garbage/binary, very-long, and the REAL `Eicar-Test-Signature FOUND` line —
+  never the live EICAR byte-string on a scanned path).
+- `.github/workflows/ci.yml` path-filter lists `.github/scripts/**`,
+  `scripts/**`, and `tsconfig.scripts.json` so a change to any of them runs the
+  unit / mutation / fuzz jobs.
+
+Adding a new logic-bearing helper is therefore: drop a `<name>.ts` + a
+`test/unit/<name>.test.ts`, keep any CLI in a `<name>.mjs` shim — and it is
+gated with no further config edits.
 
 ## Coverage reporting pipeline
 

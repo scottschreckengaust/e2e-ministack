@@ -24,13 +24,19 @@ repos:
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
       - id: check-vcs-permalinks
+      # Byte-exact fixtures the hygiene hooks must NOT rewrite: the
+      # @aws-cdk/integ-runner cloud-assembly snapshots (#168) and the fuzz
+      # corpora (#165), whose trailing spaces, CRLF, missing final newline and
+      # raw binary are INTENTIONAL inputs the parsers must survive.
       - id: end-of-file-fixer
-        exclude: ^integ/.*\.js\.snapshot/
+        exclude: ^(integ/.*\.js\.snapshot/|fuzz/corpus-[^/]+/)
       - id: trailing-whitespace
+        exclude: ^fuzz/corpus-[^/]+/
       - id: mixed-line-ending
         args: ['--fix=lf']
+        exclude: ^fuzz/corpus-[^/]+/
       - id: check-json # validates threat-model.tc.json, cdk.json, package.json
-        exclude: ^tsconfig\.json$ # JSONC (has comments) — not strict JSON
+        exclude: ^tsconfig(\.scripts)?\.json$ # JSONC (has comments) — not strict JSON
       - id: check-yaml # validates the workflow files
       - id: detect-private-key # committed PEM/SSH keys
       # detect-aws-credentials removed: false-positives on @aws-cdk/* package
