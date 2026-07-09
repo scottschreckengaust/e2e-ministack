@@ -231,6 +231,30 @@ Closing the _cheap, high-signal_ subset of this gap (a Semgrep pre-commit hook
 matching CI, OSV-Scanner locally) is tracked separately — Semgrep parity under
 **#79**, the rest under **#77**'s parent scope.
 
+## Accepted risks (documented, not suppressed)
+
+A finding stays open in a scanner or Dependabot only when a real, proven fix is
+preferred — see "Remediating a scanner finding" above. The exceptions below are
+**accepted risks**: no fix exists to apply _and_ the vulnerable path is not
+reachable in this repo's usage. Each is documented here and dismissed at source
+with a matching rationale, and re-opens the moment an upstream fix ships.
+
+- **`ecdsa` (pip) — GHSA-wj6h-64fc-37mp / CVE-2024-23342 ("Minerva" timing
+  side-channel), high.** A transitive dependency of checkov, pinned in
+  `.github/scanner-requirements/iac.txt` (`ecdsa==0.19.2`). **No fix to pin
+  to:** upstream `python-ecdsa` treats side-channel resistance as out of scope,
+  so the advisory's `first_patched_version` is **null** — there is no fixed
+  release. **Not reachable here:** Minerva is only exploitable when the library
+  performs ECDSA **signing** (`sign_digest`, private-key operations) with
+  attacker-observable timing; this repo only runs checkov to scan local
+  synthesized CloudFormation templates **offline** — no signing, no private
+  keys, no attacker timing channel. Tracked as Dependabot alert #13, dismissed
+  `tolerable_risk`. **If a fix ever ships**, it flows through the same
+  coupled-closure mechanism as the `aiohttp==3.14.1` override (§ Dependency
+  notes / `overrides.txt`, AGENTS.md): add the floor to
+  `.github/scanner-requirements/overrides.txt`, recompile `iac.txt` with
+  `--require-hashes`, and install `--no-deps`.
+
 ## Pinning
 
 All scanner tools are pinned (action SHA / binary checksum / pinned version) per
