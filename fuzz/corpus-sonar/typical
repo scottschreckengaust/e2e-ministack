@@ -1,0 +1,1 @@
+{"total":1,"issues":[{"rule":"javascript:S1234","severity":"CRITICAL","component":"proj:lambda/index.js","line":42,"textRange":{"startLine":42,"endLine":42,"startOffset":2,"endOffset":10},"message":"Refactor."}],"components":[{"key":"proj:lambda/index.js","path":"lambda/index.js"}]}

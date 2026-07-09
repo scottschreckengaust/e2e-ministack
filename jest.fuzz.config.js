@@ -15,10 +15,29 @@
 // FuzzedDataProvider, so no native libFuzzer addon is needed and it runs on any
 // host (unlike the exploratory scheduled jazzer job).
 module.exports = {
+  // ts-jest so the SARIF-parser fuzz-regression targets (#165) can import the
+  // TypeScript logic modules (.github/scripts/*.ts) in-process, exactly like
+  // the unit tier. The original plain-JS handler replay
+  // (handler.regression.test.js) still runs unchanged — ts-jest transforms
+  // `.ts`/`.tsx` and leaves plain `.js` alone. `moduleFileExtensions` matches
+  // the unit config so an extension-less script import resolves to the `.ts`
+  // logic module, never its sibling `.mjs` CLI shim.
+  preset: 'ts-jest',
   testEnvironment: 'node',
-  // Only the corpus-replay regression test. Plain JS, so no ts-jest transform.
+  moduleFileExtensions: [
+    'ts',
+    'tsx',
+    'js',
+    'mjs',
+    'cjs',
+    'jsx',
+    'json',
+    'node',
+  ],
+  // The corpus-replay regression tests: the plain-JS Lambda handler replay plus
+  // the TypeScript SARIF-parser replays (#165).
   roots: ['<rootDir>/fuzz'],
-  testMatch: ['**/handler.regression.test.js'],
+  testMatch: ['**/*.regression.test.js', '**/*.regression.test.ts'],
   testTimeout: 15000,
   // No coverage / NO coverageThreshold here — this tier is a robustness gate,
   // not a coverage source. The 100% coverage gate lives in the unit tier only.

@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 /* global process, console */
-// (The repo's flat eslint config declares no Node globals for .mjs — this and
-// .github/scripts/license-verdict.mjs are the only standalone Node scripts it
-// lints, so declare the globals inline rather than widening eslint.config.mjs.)
+// (The repo's flat eslint config declares no Node globals for .mjs — declare
+// the globals inline rather than widening eslint.config.mjs.)
 //
 // Upstream MiniStack tracking (#137, sub-issue C of epic #117).
+//
+// CLI + THIN I/O SHIM. Every PURE function (ranking, formatting, the
+// AUTO_POST_UPSTREAM gate) now lives in the jest-visible `ministack-upstream.ts`
+// so it flows through the repo's 100% coverage gate (#124) + Stryker mutation
+// (#122) + fuzz-regression tier (#165). This file keeps only the plumbing that
+// CANNOT be gated in-process — the network-touching `gh search` and the
+// registry read/write — plus the CLI. Node 24 imports the `.ts` natively
+// (stable, unflagged type-stripping — no build step), so
+// `node scripts/ministack-upstream.mjs <cmd> <service>` is unchanged.
 //
 // CORE PRINCIPLE — query = automated, comment/watch = HUMAN-GATED.
 // Commenting on the foreign OSS repo `ministackorg/ministack` is an
@@ -15,12 +23,9 @@
 // only DRAFTS a comment body and PRINTS the exact copy-pasteable command (and
 // a one-click URL) for a maintainer to run manually.
 //
-// The maintainer has explicitly chosen to START GATED and expand
-// write-automation later once comfortable. So the write path is structured so
-// that enabling auto-post later is a SINGLE, well-marked flag flip:
-// `AUTO_POST_UPSTREAM` below (default off). Do NOT flip it without maintainer
-// sign-off; the never-auto-post property is locked by a unit test
-// (test/unit/ministack-upstream.test.ts).
+// The never-auto-post property is locked by a unit test
+// (test/unit/ministack-upstream.test.ts) against the AUTO_POST_UPSTREAM export
+// in ministack-upstream.ts.
 //
 // Node built-ins only — no npm deps (repo governance line, #73/#80). The
 // GitHub search reuses `gh` via node:child_process (no secrets committed, no
@@ -43,15 +48,19 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  UPSTREAM_REPO,
+  draftCommentBody,
+  formatOneClickUrl,
+  formatPostCommand,
+  formatRef,
+  isValidServiceName,
+  selectBestMatch,
+} from './ministack-upstream.ts';
 
-// ── The single gate ────────────────────────────────────────────────────────
-// #137: this is the ONE place a future maintainer would flip to enable
-// auto-posting to the foreign repo. Flipping to true is a deliberate,
-// documented policy change — do NOT flip it without maintainer sign-off.
-// While false, `draft-comment` only PRINTS a command for a human to run.
-export const AUTO_POST_UPSTREAM = false;
-
-const UPSTREAM_REPO = 'ministackorg/ministack';
+// Re-export the single gate so importers that read it via the .mjs still see it
+// (the value lives in the tested .ts module).
+export { AUTO_POST_UPSTREAM } from './ministack-upstream.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,131 +72,6 @@ const PIN_PATH = path.resolve(
   __dirname,
   '../services/_registry/ministack-pin.json',
 );
-
-// ── Pure helpers (unit-tested offline; no network) ──────────────────────────
-
-/**
- * A service key must be a safe, stable token so it can never inject shell
- * metacharacters into a child_process call (defense-in-depth — we already use
- * argv arrays, not a shell). Matches the registry's `service` convention:
- * lowercase letters, digits and single dashes (e.g. `lambda`, `rds-postgres`).
- * @param {unknown} name
- * @returns {boolean}
- */
-export function isValidServiceName(name) {
-  return typeof name === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name);
-}
-
-/**
- * Format a single `gh search` result as an `owner/repo#N` tracking ref, or
- * null when there is no match.
- * @param {{ number: number } | null | undefined} match
- * @returns {string | null}
- */
-export function formatRef(match) {
-  if (!match || typeof match.number !== 'number') return null;
-  return `${UPSTREAM_REPO}#${match.number}`;
-}
-
-/**
- * Choose the best upstream match for a service from `gh search` payloads.
- * Ranking (higher wins): a title hit outranks a non-title hit; among equal
- * title-hits an OPEN item outranks a CLOSED one; ties break to the LOWEST issue
- * number (the earliest/canonical tracking item). Returns null when nothing
- * mentions the service at all.
- *
- * The inputs are the parsed JSON of
- *   gh search issues --repo <repo> "<service>" --json number,title,url,state
- *   gh search prs    --repo <repo> "<service>" --json number,title,url,state
- * kept OUT of this function (thin I/O lives in fetchUpstreamMatches) so the
- * ranking is unit-tested offline against a fixture.
- *
- * @param {Array<{number:number,title:string,url:string,state:string}>} issues
- * @param {Array<{number:number,title:string,url:string,state:string}>} prs
- * @param {string} service
- * @returns {{number:number,title:string,url:string,state:string} | null}
- */
-export function selectBestMatch(issues, prs, service) {
-  const needle = String(service).toLowerCase();
-  const candidates = [...(issues ?? []), ...(prs ?? [])].filter(
-    (r) => r && typeof r.number === 'number',
-  );
-  if (candidates.length === 0) return null;
-
-  const scored = candidates
-    .map((r) => {
-      const title = String(r.title ?? '').toLowerCase();
-      // A candidate must actually mention the service to count as a match.
-      const titleHit = title.includes(needle);
-      return { r, titleHit, open: String(r.state).toLowerCase() === 'open' };
-    })
-    // gh already searched for the term, but be defensive: require a title hit.
-    .filter((c) => c.titleHit);
-
-  if (scored.length === 0) return null;
-
-  scored.sort((a, b) => {
-    if (a.open !== b.open) return a.open ? -1 : 1; // OPEN first
-    return a.r.number - b.r.number; // then lowest (earliest) number
-  });
-  return scored[0].r;
-}
-
-/**
- * Draft the structured comment body for a service: what MiniStack digest it
- * was verified against, the current registry verdict, and the ask. This is the
- * text a maintainer would post — the script only PRINTS it.
- * @param {{service:string,status:string,ministackRef:string|null}} row
- * @param {string} digest the pinned MiniStack image digest
- * @returns {string}
- */
-export function draftCommentBody(row, digest) {
-  const ref = row.ministackRef;
-  const ask = ref
-    ? `Is there an ETA or a way we can help move ${row.service} forward? We track it against your issue ${ref}.`
-    : `Would you consider tracking ${row.service} emulation? We didn't find an existing issue/PR for it.`;
-  return [
-    `Hi from the [e2e-ministack](https://github.com/scottschreckengaust/e2e-ministack) compatibility harness 👋`,
-    ``,
-    `- **Service:** \`${row.service}\``,
-    `- **Our verdict:** \`${row.status}\``,
-    `- **Verified against MiniStack digest:** \`${digest}\``,
-    ref ? `- **Upstream ref:** ${ref}` : `- **Upstream ref:** none found yet`,
-    ``,
-    `**Ask:** ${ask}`,
-    ``,
-    `_This message was drafted by an automated harness but posted manually by a maintainer — replies are read by a human._`,
-  ].join('\n');
-}
-
-/**
- * The exact copy-pasteable command a maintainer runs to post the drafted
- * comment on an EXISTING upstream ref. The script PRINTS this; it never runs
- * it (while AUTO_POST_UPSTREAM is false).
- * @param {string} ref owner/repo#N
- * @param {string} body the drafted comment body
- * @returns {string}
- */
-export function formatPostCommand(ref, body) {
-  // Single-quote the body for a POSIX shell so the maintainer can paste it
-  // verbatim; escape embedded single quotes the standard way.
-  const quoted = `'${String(body).replace(/'/g, `'\\''`)}'`;
-  return `gh issue comment ${ref} --repo ${UPSTREAM_REPO} --body ${quoted}`;
-}
-
-/**
- * A one-click browser URL: the existing upstream issue (to comment on) when a
- * ref exists, otherwise the "new issue" page on the upstream repo.
- * @param {string|null} ref owner/repo#N
- * @returns {string}
- */
-export function formatOneClickUrl(ref) {
-  if (ref) {
-    const n = ref.split('#')[1];
-    return `https://github.com/${UPSTREAM_REPO}/issues/${n}`;
-  }
-  return `https://github.com/${UPSTREAM_REPO}/issues/new`;
-}
 
 // ── Thin I/O (NOT unit-tested; needs network / gh auth) ─────────────────────
 

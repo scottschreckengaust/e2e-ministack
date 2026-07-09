@@ -26,5 +26,23 @@
     // ones we rely on must be listed explicitly (node globals + jest).
     "types": ["node", "jest"]
   },
-  "exclude": ["node_modules", "cdk.out"]
+  // The helper-script logic modules under .github/scripts/ + scripts/ are
+  // EXCLUDED from this (emitting) build on purpose (#165): they are loaded only
+  // by jest (as `.ts`) and by their sibling `.mjs` CLI shims (Node 24 strips
+  // the types on import — no build step). Emitting a compiled `.js` next to the
+  // `.ts` here would shadow the source under jest/Stryker (jest resolves the
+  // `.js`, so Stryker would mutate a `.ts` nobody loads → every mutant "no
+  // coverage"). They are still fully TYPE-CHECKED — by `tsconfig.scripts.json`
+  // (noEmit) which `npm run build` runs, and by type-aware eslint.
+  "exclude": [
+    "node_modules",
+    "cdk.out",
+    ".github/scripts/**/*.ts",
+    "scripts/**/*.ts",
+    // The TypeScript fuzz-regression targets import the excluded logic modules
+    // above; tsc would otherwise follow those imports and emit a `.js` sibling
+    // next to each. Exclude them from the emitting build too — they are loaded
+    // only by jest (ts-jest) — and type-check them via tsconfig.scripts.json.
+    "fuzz/**/*.ts"
+  ]
 }

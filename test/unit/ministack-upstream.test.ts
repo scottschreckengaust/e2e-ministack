@@ -1,29 +1,31 @@
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
+import {
+  AUTO_POST_UPSTREAM,
+  UPSTREAM_REPO,
+  draftCommentBody,
+  formatOneClickUrl,
+  formatPostCommand,
+  formatRef,
+  isValidServiceName,
+  selectBestMatch,
+} from '../../scripts/ministack-upstream';
 
-// TDD tests for scripts/ministack-upstream.mjs (#137, sub-issue C of epic
-// #117): upstream MiniStack tracking. The script's core principle is
+// Unit tests for scripts/ministack-upstream.ts (#137, sub-issue C of epic #117;
+// gated under #165). The tracker's core principle is
 // query = automated, comment/watch = HUMAN-GATED. It may READ upstream freely
 // (gh search) and WRITE to OUR registry, but it NEVER auto-posts/subscribes to
 // the foreign repo — draft-comment only PRINTS a copy-pasteable command.
 //
-// This suite locks two things:
-//   1. the never-auto-post safety property (the #1 thing to get right), and
-//   2. the pure match/format logic (offline, from a fixture — no network).
-//
-// The pure logic is exercised through the ESM export surface (imported via a
-// spawned Node harness that dynamic-imports the .mjs and prints JSON), and the
-// CLI contract is exercised by spawning the script directly — the exact style
-// of test/unit/license-verdict.test.ts. Network I/O (the real `gh search`) is
-// kept OUT of the pure functions, so this suite runs fully offline.
+// The PURE logic (ranking, formatting, the AUTO_POST_UPSTREAM gate) is
+// exercised by importing the .ts module IN-PROCESS so it flows through the
+// 100% coverage gate (#124) + Stryker mutation (#122). (The old suite spawned
+// the .mjs CLI / a child-Node dynamic import, which istanbul/Stryker cannot
+// instrument, so the pure logic was silently ungated.) A tail of CLI tests
+// still spawns the thin `.mjs` shim to lock the never-auto-post safety property
+// and the argv/exit-code contract against the real Node-24 `.ts` import.
 const SCRIPT = path.resolve(__dirname, '../../scripts/ministack-upstream.mjs');
 
-/**
- * Run the script CLI with argv and capture stdout + exit code, mirroring
- * license-verdict.test.ts. `draft-comment` never touches the network and never
- * posts (its only child_process use is the read-only `gh search` on the `query`
- * path), so these runs are safe and offline.
- */
 interface Run {
   code: number;
   stdout: string;
@@ -49,28 +51,6 @@ function run(args: string[]): Run {
   }
 }
 
-/**
- * Evaluate a tiny JS snippet in a child Node that dynamic-imports the .mjs, so
- * we can exercise the exported pure functions from this CJS ts-jest env
- * (jest's VM would need --experimental-vm-modules for a direct import()). The
- * snippet prints a JSON line we parse back.
- */
-function callExport(snippet: string): unknown {
-  const program = `
-    import * as m from ${JSON.stringify(SCRIPT)};
-    const out = (${snippet});
-    process.stdout.write(JSON.stringify(out));
-  `;
-  const stdout = execFileSync(
-    process.execPath,
-    ['--input-type=module', '-e', program],
-    {
-      encoding: 'utf8',
-    },
-  );
-  return JSON.parse(stdout);
-}
-
 // A representative `gh search issues/prs --json number,title,url,state` payload
 // (the AgentCore case). We do NOT hit the network — this is the fixture the
 // pure selection logic runs against.
@@ -85,7 +65,7 @@ const AGENTCORE_ISSUES = [
 
 describe('ministack-upstream — never-auto-post safety property', () => {
   it('exports AUTO_POST_UPSTREAM defaulting to false (the single gate)', () => {
-    expect(callExport('m.AUTO_POST_UPSTREAM')).toBe(false);
+    expect(AUTO_POST_UPSTREAM).toBe(false);
   });
 
   it('draft-comment PRINTS a copy-pasteable gh command and never posts', () => {
@@ -121,29 +101,101 @@ describe('ministack-upstream — never-auto-post safety property', () => {
   });
 });
 
-describe('ministack-upstream — pure match/format logic (offline fixture)', () => {
+describe('ministack-upstream — pure match/format logic (offline, in-process)', () => {
   it('selects the best upstream match from a gh search payload', () => {
-    const match = callExport(
-      `m.selectBestMatch(${JSON.stringify(AGENTCORE_ISSUES)}, [], 'agentcore')`,
-    );
+    const match = selectBestMatch(AGENTCORE_ISSUES, [], 'agentcore');
     expect(match).toMatchObject({ number: 1021 });
   });
 
   it('formats a matched result as owner/repo#N', () => {
-    const ref = callExport(
-      `m.formatRef(${JSON.stringify(AGENTCORE_ISSUES[0])})`,
-    );
-    expect(ref).toBe('ministackorg/ministack#1021');
+    expect(formatRef(AGENTCORE_ISSUES[0])).toBe('ministackorg/ministack#1021');
   });
 
   it('returns null (→ no ref) when nothing matches (the DSQL case)', () => {
-    const match = callExport(`m.selectBestMatch([], [], 'dsql')`);
-    expect(match).toBeNull();
-    const ref = callExport(`m.formatRef(null)`);
-    expect(ref).toBeNull();
+    expect(selectBestMatch([], [], 'dsql')).toBeNull();
+    expect(formatRef(null)).toBeNull();
+    // Undefined/missing-number inputs also collapse to null.
+    expect(formatRef(undefined)).toBeNull();
+    expect(formatRef({})).toBeNull();
   });
 
-  it('prefers an OPEN issue over a CLOSED one, and a title hit over a body-only hit', () => {
+  it('treats nullish issues/prs lists as empty (no candidates → null)', () => {
+    // Guards the `issues ?? []` / `prs ?? []` branches.
+    expect(selectBestMatch(null, null, 'agentcore')).toBeNull();
+    expect(selectBestMatch(undefined, undefined, 'agentcore')).toBeNull();
+    // A match still comes through when only ONE list is nullish.
+    expect(
+      selectBestMatch(
+        null,
+        [{ number: 3, state: 'open', title: 'agentcore' }],
+        'agentcore',
+      )?.number,
+    ).toBe(3);
+  });
+
+  it('treats a candidate with NO title as a non-match (title ?? "")', () => {
+    // Guards the `r.title ?? ''` branch: a numbered candidate with an absent
+    // title cannot contain the needle, so it is filtered out.
+    const match = selectBestMatch(
+      [{ number: 50, state: 'open' } as { number: number }],
+      [],
+      'agentcore',
+    );
+    expect(match).toBeNull();
+  });
+
+  it('pulls a match out of the PRs list, not just issues', () => {
+    const match = selectBestMatch(
+      [],
+      [{ number: 77, state: 'open', title: 'agentcore PR', url: 'x' }],
+      'agentcore',
+    );
+    expect(match).toMatchObject({ number: 77 });
+  });
+
+  it('ignores candidates whose title does NOT mention the service', () => {
+    // gh already searched, but selectBestMatch defensively requires a title
+    // hit — a body-only hit (no title mention) must NOT be selected.
+    const match = selectBestMatch(
+      [{ number: 9, state: 'open', title: 'unrelated networking thing' }],
+      [],
+      'agentcore',
+    );
+    expect(match).toBeNull();
+  });
+
+  it('skips malformed candidates lacking a numeric number', () => {
+    const match = selectBestMatch(
+      [
+        null as unknown as { number: number },
+        { title: 'agentcore' } as unknown as { number: number },
+        { number: 42, state: 'open', title: 'agentcore emulator' },
+      ],
+      [],
+      'agentcore',
+    );
+    expect(match).toMatchObject({ number: 42 });
+  });
+
+  it('requires number to be a NUMBER, not merely present (typeof check)', () => {
+    // Kills the `typeof r.number === 'number'` guard being dropped: a candidate
+    // whose `number` is a STRING (and which title-matches) must be rejected —
+    // dropping the typeof check would let it through as the sole match.
+    const strung = selectBestMatch(
+      [
+        {
+          number: '3' as unknown as number,
+          state: 'open',
+          title: 'agentcore strung',
+        },
+      ],
+      [],
+      'agentcore',
+    );
+    expect(strung).toBeNull();
+  });
+
+  it('prefers an OPEN issue over a CLOSED one, then the lowest number', () => {
     const results = [
       {
         number: 10,
@@ -164,48 +216,135 @@ describe('ministack-upstream — pure match/format logic (offline fixture)', () 
         url: 'https://github.com/ministackorg/ministack/issues/5',
       },
     ];
-    const match = callExport(
-      `m.selectBestMatch(${JSON.stringify(results)}, [], 'agentcore')`,
-    ) as { number: number };
     // #20: open + title contains the service name → best.
-    expect(match.number).toBe(20);
+    expect(selectBestMatch(results, [], 'agentcore')?.number).toBe(20);
   });
 
-  it('drafts a structured comment body carrying the digest, verdict, and ask', () => {
-    const body = callExport(
-      `m.draftCommentBody({ service: 'agentcore', status: 'upstream-tracked', ministackRef: 'ministackorg/ministack#1021' }, 'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef')`,
-    ) as string;
-    expect(body).toContain('agentcore');
-    expect(body).toContain('upstream-tracked');
-    // The MiniStack image digest it was verified against.
-    expect(body).toContain(
-      'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+  it('among equal OPEN title-hits breaks ties to the LOWEST number', () => {
+    const results = [
+      { number: 30, state: 'open', title: 'agentcore later' },
+      { number: 12, state: 'open', title: 'agentcore earliest' },
+    ];
+    expect(selectBestMatch(results, [], 'agentcore')?.number).toBe(12);
+  });
+
+  it('OPEN beats CLOSED even when the CLOSED item has the LOWEST number', () => {
+    // Designed to be sort-order-independent: a CLOSED #1 alongside OPEN #5/#9.
+    // Correct comparator → open precedence wins, then lowest OPEN number (#5).
+    // A broken open-precedence (the `a.open ? -1 : 1` sign) would fall back to
+    // the number tie-break and pick the CLOSED #1 — a distinct, detectable
+    // result. We assert BOTH the number and the state so neither sort branch
+    // nor the state comparison can be mutated away undetected.
+    const results = [
+      { number: 1, state: 'closed', title: 'agentcore closed lowest' },
+      { number: 9, state: 'open', title: 'agentcore open high' },
+      { number: 5, state: 'open', title: 'agentcore open low' },
+    ];
+    const best = selectBestMatch(results, [], 'agentcore');
+    expect(best?.number).toBe(5);
+    expect(best?.state).toBe('open');
+    // Reverse the array order too, to defeat any input-order dependence.
+    const best2 = selectBestMatch([...results].reverse(), [], 'agentcore');
+    expect(best2?.number).toBe(5);
+    expect(best2?.state).toBe('open');
+  });
+
+  it('a CLOSED title-hit is still returned when it is the only match', () => {
+    const results = [{ number: 8, state: 'closed', title: 'agentcore only' }];
+    expect(selectBestMatch(results, [], 'agentcore')?.number).toBe(8);
+  });
+
+  it('drafts the EXACT structured comment body for a matched ref', () => {
+    // Pin the whole body byte-for-byte so every template line (and the
+    // matched-ref conditional + ETA ask branch) is mutation-covered.
+    const digest =
+      'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    const body = draftCommentBody(
+      {
+        service: 'agentcore',
+        status: 'upstream-tracked',
+        ministackRef: 'ministackorg/ministack#1021',
+      },
+      digest,
     );
-    // An explicit ask so the maintainer knows what the comment requests.
-    expect(body.toLowerCase()).toMatch(/ask|would|please|request/);
+    expect(body).toBe(
+      [
+        `Hi from the [e2e-ministack](https://github.com/scottschreckengaust/e2e-ministack) compatibility harness 👋`,
+        ``,
+        `- **Service:** \`agentcore\``,
+        `- **Our verdict:** \`upstream-tracked\``,
+        `- **Verified against MiniStack digest:** \`${digest}\``,
+        `- **Upstream ref:** ministackorg/ministack#1021`,
+        ``,
+        `**Ask:** Is there an ETA or a way we can help move agentcore forward? We track it against your issue ministackorg/ministack#1021.`,
+        ``,
+        `_This message was drafted by an automated harness but posted manually by a maintainer — replies are read by a human._`,
+      ].join('\n'),
+    );
+  });
+
+  it('drafts the EXACT NEW-issue-ask body when there is no ref yet (null branch)', () => {
+    const body = draftCommentBody(
+      { service: 'dsql', status: 'unsupported', ministackRef: null },
+      '(unpinned)',
+    );
+    expect(body).toBe(
+      [
+        `Hi from the [e2e-ministack](https://github.com/scottschreckengaust/e2e-ministack) compatibility harness 👋`,
+        ``,
+        `- **Service:** \`dsql\``,
+        `- **Our verdict:** \`unsupported\``,
+        `- **Verified against MiniStack digest:** \`(unpinned)\``,
+        `- **Upstream ref:** none found yet`,
+        ``,
+        `**Ask:** Would you consider tracking dsql emulation? We didn't find an existing issue/PR for it.`,
+        ``,
+        `_This message was drafted by an automated harness but posted manually by a maintainer — replies are read by a human._`,
+      ].join('\n'),
+    );
+    expect(body).not.toContain('ETA');
   });
 
   it('builds the exact copy-pasteable post command for a known ref', () => {
-    const cmd = callExport(
-      `m.formatPostCommand('ministackorg/ministack#1021', 'hello body')`,
-    ) as string;
-    expect(cmd).toContain(
-      'gh issue comment ministackorg/ministack#1021 --repo ministackorg/ministack',
+    const cmd = formatPostCommand('ministackorg/ministack#1021', 'hello body');
+    expect(cmd).toBe(
+      "gh issue comment ministackorg/ministack#1021 --repo ministackorg/ministack --body 'hello body'",
     );
-    expect(cmd).toContain('--body');
+  });
+
+  it('single-quote-escapes an apostrophe in the post command body', () => {
+    const cmd = formatPostCommand('r#1', "it's here");
+    // POSIX close-quote / escaped-quote / reopen: 'it'\''s here'
+    expect(cmd).toContain(`--body 'it'\\''s here'`);
+  });
+
+  it('builds the issue URL for a ref, else the new-issue URL', () => {
+    expect(formatOneClickUrl('ministackorg/ministack#1021')).toBe(
+      `https://github.com/${UPSTREAM_REPO}/issues/1021`,
+    );
+    expect(formatOneClickUrl(null)).toBe(
+      `https://github.com/${UPSTREAM_REPO}/issues/new`,
+    );
   });
 
   it('validates a service name (rejects shell-metachar injection)', () => {
     // The service arg must never carry shell metacharacters into any execFile.
-    expect(callExport(`m.isValidServiceName('agentcore')`)).toBe(true);
-    expect(callExport(`m.isValidServiceName('rds-postgres')`)).toBe(true);
-    expect(callExport(`m.isValidServiceName('a; rm -rf /')`)).toBe(false);
-    expect(callExport(`m.isValidServiceName('$(whoami)')`)).toBe(false);
-    expect(callExport(`m.isValidServiceName('')`)).toBe(false);
+    expect(isValidServiceName('agentcore')).toBe(true);
+    expect(isValidServiceName('rds-postgres')).toBe(true);
+    expect(isValidServiceName('lambda')).toBe(true);
+    expect(isValidServiceName('a; rm -rf /')).toBe(false);
+    expect(isValidServiceName('$(whoami)')).toBe(false);
+    expect(isValidServiceName('UPPER')).toBe(false); // lowercase only
+    expect(isValidServiceName('-leading')).toBe(false);
+    expect(isValidServiceName('trailing-')).toBe(false);
+    expect(isValidServiceName('double--dash')).toBe(false);
+    expect(isValidServiceName('')).toBe(false);
+    expect(isValidServiceName(42)).toBe(false); // non-string
+    expect(isValidServiceName(undefined)).toBe(false);
   });
 });
 
-describe('ministack-upstream — CLI contract', () => {
+describe('ministack-upstream.mjs — CLI contract', () => {
   it('exits 2 with usage on an unknown subcommand', () => {
     const res = run(['frobnicate']);
     expect(res.code).toBe(2);

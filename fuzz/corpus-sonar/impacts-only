@@ -1,0 +1,1 @@
+{"issues":[{"rule":"r","component":"proj:a.ts","impacts":[{"softwareQuality":"SECURITY","severity":"HIGH"}]}]}

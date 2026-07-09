@@ -1,0 +1,16 @@
+// Type-check-only project for the helper-script LOGIC modules under
+// .github/scripts/ + scripts/ (#165). These are EXCLUDED from the emitting
+// build (tsconfig.json) so no compiled `.js` shadows the `.ts` under
+// jest/Stryker — but they must still be type-checked. `npm run build` runs
+// `tsc -p tsconfig.scripts.json` (noEmit) after the main build to enforce that.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // node globals for the logic modules + jest globals for the fuzz-regression
+    // `.ts` targets (describe/it/expect) that this project also type-checks.
+    "types": ["node", "jest"]
+  },
+  "include": [".github/scripts/**/*.ts", "scripts/**/*.ts", "fuzz/**/*.ts"],
+  "exclude": ["node_modules", "cdk.out"]
+}

@@ -51,12 +51,17 @@ jobs:
               - 'integ/**'
               - 'lambda/**'
               - 'services/**'
+              # Helper-script logic modules (#165) — now unit/mutation/fuzz-gated
+              # like the rest of the tree. The `.mjs` CLI shims live here too.
+              - '.github/scripts/**'
+              - 'scripts/**'
               - 'test/**'
               - 'fuzz/**'
               - 'stryker.config.mjs'
               - 'package.json'
               - 'package-lock.json'
               - 'tsconfig.json'
+              - 'tsconfig.scripts.json'
               - 'cdk.json'
               - 'jest.config.js'
               - 'jest.fuzz.config.js'

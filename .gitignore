@@ -35,6 +35,13 @@ test/**/*.d.ts
 # committed artifacts here are hand-written .json/.schema.json/.md, not emit.
 services/**/*.js
 services/**/*.d.ts
+# Helper-script logic modules (#165): the .ts sources compile in place; the
+# committed runnable entrypoints here are hand-written .mjs (CLI shims) + .sh,
+# not emit. Only the tsc-generated .js/.d.ts siblings are ignored.
+.github/scripts/*.js
+.github/scripts/*.d.ts
+scripts/*.js
+scripts/*.d.ts
 
 # threat-composer-ai generated workflow output (the curated model lives in
 # threat-model.tc.json at the repo root, not here)
