@@ -67,6 +67,12 @@ supply-chain safety. This file is the authoritative inventory.
   keep runs fast despite the float, the DB is **cached across runs** with
   `actions/cache` (rolling `github.run_id` key, mirroring the mutation/fuzz
   caches in `ci.yml`), so each run refreshes rather than re-downloads from cold.
+  Note (#84): because the DB floats and the `ministack-image` / `trivy-image`
+  jobs are now **hard-fail** (VEX-gated), a newly-disclosed high+ CVE on the
+  pinned image can turn CI red **without any repo change** — that is the intended
+  signal, resolved by VEX-accepting it under `.vex/` (or bumping the digest once
+  MiniStack ships a fix). The weekly `security.yml` cron surfaces such drift even
+  absent a push.
 - **`ubuntu-latest` runner image** — GitHub-managed; floats by design. Pin to
   `ubuntu-24.04` if you need the OS image fixed.
 - **Homebrew tool versions (local dev only)** — `pre-commit`, scanners

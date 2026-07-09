@@ -6,9 +6,10 @@
 # conflict with or override the CI invocation. Keep this file for settings that
 # are genuinely file-scoped and stable across every invocation.
 #
-# #133 wires Trivy in REPORT-ONLY. Do NOT add `severity:` / `exit-code:` here —
-# report-only is enforced by the jobs (they never fail on findings), and a
-# severity/exit-code here would fight the workflow.
+# Scan POLICY stays in the jobs, NOT here: trivy-fs is report-only; trivy-image
+# is hard-fail + VEX-gated (#84). Do NOT add `severity:` / `exit-code:` here — a
+# value here applies to BOTH jobs and would fight their per-job flags
+# (trivy-image sets TRIVY_SEVERITY / TRIVY_EXIT_CODE; trivy-fs sets neither).
 
 # Skip generated / vendored trees the source scan shouldn't flag. cdk.out is
 # synthesized CloudFormation (already covered by checkov/cfn-lint); node_modules
@@ -18,6 +19,11 @@ scan:
     - node_modules
     - cdk.out
 
-# NOTE: the OpenVEX `vulnerability.vex:` list (VEX-based finding suppression) is
-# DEFERRED to #84 (dual-scanner OpenVEX hard-fail gate). It is intentionally
-# absent here — #133 stops at report-only and adds no VEX records or suppression.
+# OpenVEX finding suppression (#84): the per-CVE `.vex/*.openvex.json`
+# `not_affected` records are NOT listed here. Trivy's `--vex` takes explicit
+# file paths (it rejects a bare directory) and the set is enumerated at runtime
+# from the `.vex/` glob, so the trivy-image job feeds the comma-separated list
+# via the `TRIVY_VEX` env instead of hard-coding 50 paths in this file (which
+# would also wrongly apply VEX to the report-only trivy-fs source scan). Keeping
+# the list in the job means a new/removed `.vex/` file is picked up with no edit
+# here. See .vex/README.md and docs/SECURITY-TOOLING.md.
