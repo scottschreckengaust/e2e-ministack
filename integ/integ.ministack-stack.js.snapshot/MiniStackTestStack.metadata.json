@@ -1,0 +1,365 @@
+{
+  "/MiniStackTestStack/LogBucket": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "bucketName": "*",
+        "enforceSSL": true,
+        "encryption": "S3_MANAGED",
+        "blockPublicAccess": "*",
+        "versioned": true,
+        "serverAccessLogsPrefix": "*",
+        "lifecycleRules": [
+          {
+            "id": "*",
+            "noncurrentVersionsToRetain": "*",
+            "abortIncompleteMultipartUploadAfter": "*"
+          },
+          {
+            "id": "*",
+            "prefix": "*"
+          }
+        ],
+        "removalPolicy": "destroy"
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addLifecycleRule": [
+          {
+            "id": "*",
+            "noncurrentVersionsToRetain": "*",
+            "abortIncompleteMultipartUploadAfter": "*"
+          },
+          "*",
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addLifecycleRule": [
+          {
+            "id": "*",
+            "prefix": "*"
+          },
+          "*",
+          "*"
+        ]
+      }
+    }
+  ],
+  "/MiniStackTestStack/DataBucket": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "bucketName": "*",
+        "enforceSSL": true,
+        "encryption": "S3_MANAGED",
+        "blockPublicAccess": "*",
+        "versioned": true,
+        "serverAccessLogsBucket": "*",
+        "serverAccessLogsPrefix": "*",
+        "lifecycleRules": [
+          {
+            "id": "*",
+            "noncurrentVersionsToRetain": "*",
+            "abortIncompleteMultipartUploadAfter": "*"
+          }
+        ],
+        "removalPolicy": "destroy"
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addLifecycleRule": [
+          {
+            "id": "*",
+            "noncurrentVersionsToRetain": "*",
+            "abortIncompleteMultipartUploadAfter": "*"
+          },
+          "*",
+          "*"
+        ]
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerLogKey": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "enableKeyRotation": true,
+        "removalPolicy": "destroy"
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerLogGroup": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "logGroupName": "*",
+        "retention": 7,
+        "encryptionKey": "*",
+        "removalPolicy": "destroy"
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerRole": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "assumedBy": {
+          "principalAccount": "*",
+          "assumeRoleAction": "*"
+        }
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addToPrincipalPolicy": [
+          {}
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachInlinePolicy": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachInlinePolicy": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addToPrincipalPolicy": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlqKey": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "enableKeyRotation": true,
+        "removalPolicy": "destroy"
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlq": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "encryption": "KMS",
+        "encryptionMasterKey": "*",
+        "enforceSSL": true,
+        "removalPolicy": "destroy"
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlqDepthAlarm": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "alarmName": "*",
+        "alarmDescription": "*",
+        "metric": {
+          "warnings": "*",
+          "warningsV2": "*"
+        },
+        "threshold": "*",
+        "comparisonOperator": "*",
+        "evaluationPeriods": "*",
+        "treatMissingData": "notBreaching"
+      }
+    }
+  ],
+  "/MiniStackTestStack/Doubler": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "functionName": "*",
+        "runtime": "*",
+        "handler": "*",
+        "code": "*",
+        "role": "*",
+        "logGroup": "*",
+        "deadLetterQueue": "*",
+        "reservedConcurrentExecutions": "*"
+      }
+    }
+  ],
+  "/MiniStackTestStack/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    }
+  ],
+  "/MiniStackTestStack/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    }
+  ],
+  "/MiniStackTestStack/LogBucket/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LogBucketCC3B17E8"
+    }
+  ],
+  "/MiniStackTestStack/LogBucket/Policy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "bucket": "*"
+      }
+    }
+  ],
+  "/MiniStackTestStack/DataBucket/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DataBucketE3889A50"
+    }
+  ],
+  "/MiniStackTestStack/DataBucket/Policy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "bucket": "*"
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerLogKey/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerLogKey2772D20E"
+    }
+  ],
+  "/MiniStackTestStack/DoublerLogGroup/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerLogGroup78866AB5"
+    }
+  ],
+  "/MiniStackTestStack/DoublerRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerRoleEB777A54"
+    }
+  ],
+  "/MiniStackTestStack/DoublerRole/DefaultPolicy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": "*"
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachToRole": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "attachToRole": [
+          "*"
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addStatements": [
+          {}
+        ]
+      }
+    },
+    {
+      "type": "aws:cdk:analytics:method",
+      "data": {
+        "addStatements": [
+          {}
+        ]
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlqKey/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerDlqKeyEA61CA01"
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlq/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerDlq3080075A"
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlq/Policy": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": {
+        "queues": [
+          "*"
+        ]
+      }
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlqDepthAlarm/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerDlqDepthAlarm0EAB09A2"
+    }
+  ],
+  "/MiniStackTestStack/Doubler/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "Doubler90AA16BC"
+    }
+  ],
+  "/MiniStackTestStack/LogBucket/Policy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "LogBucketPolicy900DBE48"
+    }
+  ],
+  "/MiniStackTestStack/DataBucket/Policy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DataBucketPolicy3231C704"
+    }
+  ],
+  "/MiniStackTestStack/DoublerRole/DefaultPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerRoleDefaultPolicy00CF2DA5"
+    }
+  ],
+  "/MiniStackTestStack/DoublerDlq/Policy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DoublerDlqPolicy9F72791F"
+    }
+  ],
+  "/MiniStackTestStack/Doubler/Code/AssetBucket": [
+    {
+      "type": "aws:cdk:analytics:construct",
+      "data": "*"
+    }
+  ]
+}

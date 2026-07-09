@@ -1,0 +1,26 @@
+{
+  "version": "54.0.0",
+  "testCases": {
+    "MiniStackSnapshot/DefaultTest": {
+      "stacks": [
+        "MiniStackTestStack"
+      ],
+      "diffAssets": true,
+      "cdkCommandOptions": {
+        "deploy": {
+          "args": {
+            "requireApproval": "never"
+          }
+        },
+        "destroy": {
+          "args": {
+            "force": true
+          }
+        }
+      },
+      "assertionStack": "MiniStackSnapshot/DefaultTest/DeployAssert",
+      "assertionStackName": "MiniStackSnapshotDefaultTestDeployAssertFE003E49"
+    }
+  },
+  "minimumCliVersion": "2.1128.0"
+}

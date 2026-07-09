@@ -28,21 +28,22 @@ unless its **Status** says **Implemented**.
 
 ## Matrix
 
-| Dimension                         | Tier / Tool                                                                                         | What it gates                                                                                                                                                                                                                                      | Status                                            |
-| --------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Functional — logic                | unit tier — Jest (`test/unit/lambda.test.ts`)                                                       | Pure `lambda/index.js` handler logic (doubles `event.n`, returns `process.version`)                                                                                                                                                                | **Implemented**                                   |
-| Functional — infra                | unit tier — Jest + CDK `Template` (`test/unit/stack.test.ts`)                                       | Fine-grained CDK assertions (security/structural intent), a **full-template `toMatchSnapshot`** (volatile Lambda asset hash masked, #42), **and** a fast-tier cdk-nag `AwsSolutions` assertion via `validateScope(stack)`; synth-only, no emulator | **Implemented**                                   |
-| Functional — properties           | unit tier — fast-check (`@fast-check/jest`)                                                         | Property tests over the handler; **seed pinned** in `test/setup.fast-check.ts` for reproducible gates                                                                                                                                              | **Implemented**                                   |
-| Functional — robustness           | mutation — Stryker (`npm run test:mutation`)                                                        | Mutates `lambda/index.js` against the unit tier; CI breaks under **80%** (currently 100%)                                                                                                                                                          | **Implemented**                                   |
-| Functional — robustness           | fuzz regression — corpus replay (`fuzz/handler.regression.test.js`, `npm run test:fuzz-regression`) | Replays the committed `fuzz/corpus/` seeds through the handler as plain Jest tests (same invariants); emits `reports/junit/fuzz.xml`. Runs in the **PR-gating unit path**; a pinned crash input fails the tier. Plain Jest (no native addon)       | **Implemented**                                   |
-| Functional — robustness           | fuzzing — jazzer.js (`fuzz/handler.fuzz.js`, `npm run fuzz`)                                        | Coverage-guided fuzz: handler never throws, never returns a non-finite `doubled`. **Exploratory**, schedule / `workflow_dispatch` only; needs GLIBC ≥ 2.38                                                                                         | **Implemented**                                   |
-| Functional — integration          | integration tier — Jest + AWS SDK v3 (`test/integration/`)                                          | Exercises deployed MiniStack resources via `AWS_ENDPOINT_URL`; assumes `cdk deploy` already ran                                                                                                                                                    | **Implemented**                                   |
-| Security — IaC / SAST             | cdk-nag, checkov, cfn-lint, Semgrep, CodeQL, Gitleaks, OSV-Scanner, Grype, `npm audit`              | Synthesized template + source/supply-chain scans (see `CLAUDE.md` "Security checks")                                                                                                                                                               | **Implemented**                                   |
-| Performance / Load                | Apache JMeter via **jmeter-java-dsl** (Apache-2.0)                                                  | Lambda Invoke API on MiniStack (dummy SigV4); hard-gate p50/p95/p99 + error-rate SLOs; later Phase-2 SPC/control-chart for latency drift                                                                                                           | **Planned** (issue #73; lint sub-issue #74)       |
-| Acceptance (UAT) / functional E2E | Playwright (Apache-2.0; multi-engine incl. WebKit; video/screenshot/trace)                          | Real-account functional + visual E2E of any user-facing surface                                                                                                                                                                                    | **TBD**                                           |
-| Cross-platform / Mobile           | Appium (+ simulators/emulators or a device cloud)                                                   | Real iOS/Android OS coverage                                                                                                                                                                                                                       | **TBD**                                           |
-| Security — runtime / pentest      | Penetration testing; CSPM (ScoutSuite/Prowler)                                                      | Live-account posture (needs a real AWS account; see `CLAUDE.md`)                                                                                                                                                                                   | **TBD**                                           |
-| Functional — real account E2E     | e2e tier — Jest (`test/e2e/e2e.test.ts`)                                                            | Deploy to a real account and assert on live resources                                                                                                                                                                                              | **TBD** — currently a `describe.skip` placeholder |
+| Dimension                         | Tier / Tool                                                                                         | What it gates                                                                                                                                                                                                                                | Status                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Functional — logic                | unit tier — Jest (`test/unit/lambda.test.ts`)                                                       | Pure `lambda/index.js` handler logic (doubles `event.n`, returns `process.version`)                                                                                                                                                          | **Implemented**                                   |
+| Functional — infra                | unit tier — Jest + CDK `Template` (`test/unit/stack.test.ts`)                                       | Fine-grained CDK assertions (security/structural intent) **and** a fast-tier cdk-nag `AwsSolutions` assertion via `validateScope(stack)`; synth-only, no emulator                                                                            | **Implemented**                                   |
+| Functional — infra snapshot       | integ — `@aws-cdk/integ-runner` (`integ/integ.ministack-stack.ts`)                                  | Cloud-assembly snapshot baseline in `integ/*.js.snapshot/`; synth-only PR gate via `npm run test:integ-snapshot`; refresh with `npm run test:integ-snapshot:update` on MiniStack (#168)                                                      | **Implemented**                                   |
+| Functional — properties           | unit tier — fast-check (`@fast-check/jest`)                                                         | Property tests over the handler; **seed pinned** in `test/setup.fast-check.ts` for reproducible gates                                                                                                                                        | **Implemented**                                   |
+| Functional — robustness           | mutation — Stryker (`npm run test:mutation`)                                                        | Mutates `lambda/index.js` against the unit tier; CI breaks under **80%** (currently 100%)                                                                                                                                                    | **Implemented**                                   |
+| Functional — robustness           | fuzz regression — corpus replay (`fuzz/handler.regression.test.js`, `npm run test:fuzz-regression`) | Replays the committed `fuzz/corpus/` seeds through the handler as plain Jest tests (same invariants); emits `reports/junit/fuzz.xml`. Runs in the **PR-gating unit path**; a pinned crash input fails the tier. Plain Jest (no native addon) | **Implemented**                                   |
+| Functional — robustness           | fuzzing — jazzer.js (`fuzz/handler.fuzz.js`, `npm run fuzz`)                                        | Coverage-guided fuzz: handler never throws, never returns a non-finite `doubled`. **Exploratory**, schedule / `workflow_dispatch` only; needs GLIBC ≥ 2.38                                                                                   | **Implemented**                                   |
+| Functional — integration          | integration tier — Jest + AWS SDK v3 (`test/integration/`)                                          | Exercises deployed MiniStack resources via `AWS_ENDPOINT_URL`; assumes `cdk deploy` already ran                                                                                                                                              | **Implemented**                                   |
+| Security — IaC / SAST             | cdk-nag, checkov, cfn-lint, Semgrep, CodeQL, Gitleaks, OSV-Scanner, Grype, `npm audit`              | Synthesized template + source/supply-chain scans (see [`AGENTS.md`](../AGENTS.md) Security checks)                                                                                                                                           | **Implemented**                                   |
+| Performance / Load                | Apache JMeter via **jmeter-java-dsl** (Apache-2.0)                                                  | Lambda Invoke API on MiniStack (dummy SigV4); hard-gate p50/p95/p99 + error-rate SLOs; later Phase-2 SPC/control-chart for latency drift                                                                                                     | **Planned** (issue #73; lint sub-issue #74)       |
+| Acceptance (UAT) / functional E2E | Playwright (Apache-2.0; multi-engine incl. WebKit; video/screenshot/trace)                          | Real-account functional + visual E2E of any user-facing surface                                                                                                                                                                              | **TBD**                                           |
+| Cross-platform / Mobile           | Appium (+ simulators/emulators or a device cloud)                                                   | Real iOS/Android OS coverage                                                                                                                                                                                                                 | **TBD**                                           |
+| Security — runtime / pentest      | Penetration testing; CSPM (ScoutSuite/Prowler)                                                      | Live-account posture (needs a real AWS account; see [`AGENTS.md`](../AGENTS.md))                                                                                                                                                             | **TBD**                                           |
+| Functional — real account E2E     | e2e tier — Jest (`test/e2e/e2e.test.ts`)                                                            | Deploy to a real account and assert on live resources                                                                                                                                                                                        | **TBD** — currently a `describe.skip` placeholder |
 
 ## Implemented today
 
@@ -51,14 +52,16 @@ The functional and security dimensions are real and gating in CI
 for the scanners). `jest.config.js` selects a tier directory via the
 `JEST_TIER` env var, set by the npm scripts:
 
-- `npm run test:unit` — logic + CDK fine-grained assertions + full-template
-  snapshot + fast-tier cdk-nag assertion + fast-check properties (no
-  emulator/Docker). The snapshot baseline lives in `test/unit/__snapshots__/`
-  and is updated with `npm run test:unit -- -u` after an intended template
-  change. The script passes `--coverage`, so every run also collects Istanbul
-  coverage into `reports/coverage/` (`lcov` + `json-summary` + text) and
-  enforces the **100% `coverageThreshold` gate** (see "Coverage reporting
-  pipeline" below).
+- `npm run test:unit` — logic + CDK fine-grained assertions + fast-tier cdk-nag
+  assertion + fast-check properties (no emulator/Docker). The script passes
+  `--coverage`, so every run also collects Istanbul coverage into
+  `reports/coverage/` (`lcov` + `json-summary` + text) and enforces the **100%
+  `coverageThreshold` gate** (see "Coverage reporting pipeline" below).
+- `npm run test:integ-snapshot` — `@aws-cdk/integ-runner` synth-only snapshot
+  diff against `integ/*.js.snapshot/` (no emulator). Runs in the **unit
+  job** after `npm run build`. Refresh baselines with
+  `npm run test:integ-snapshot:update` against MiniStack (see
+  [`CONTRIBUTING.md`](../CONTRIBUTING.md)).
 - `npm run test:integration` — AWS SDK v3 against deployed MiniStack resources.
 - `npm run test:mutation` — Stryker over the Lambda logic (≥ 80% gate).
 - `npm run test:fuzz-regression` — replays the committed `fuzz/corpus/` seed
@@ -77,18 +80,17 @@ for the scanners). `jest.config.js` selects a tier directory via the
 
 Mutation testing is scoped to `lambda/index.js` only; the CDK stack is
 declarative config Stryker can't tie to synth output, so the infra is covered
-by cdk-nag/checkov plus the fine-grained CDK `Template` assertions and the
-full-template snapshot instead.
+by cdk-nag/checkov, fine-grained CDK `Template` assertions, and the
+`@aws-cdk/integ-runner` snapshot baseline instead.
 
-> **Two senses of "snapshot."** The infra snapshot above is a **Jest
-> fine-grained / full-template snapshot** — `Template.fromStack(...).toJSON()`
-> compared via `toMatchSnapshot`, the assertion-style technique in the
-> [CDK testing guide](https://docs.aws.amazon.com/cdk/v2/guide/testing.html).
-> It is **synth-only** (no deploy). This is distinct from the
+> **Two senses of "snapshot."** The infra snapshot here is the **`@aws-cdk/integ-runner`
+> cloud-assembly baseline** — committed under `integ/*.js.snapshot/`, compared
+> on every PR via synth-only `npm run test:integ-snapshot`. It is **not** the old
+> Jest `toMatchSnapshot` baseline (removed in #66). This is distinct from the
 > [`@aws-cdk/integ-tests-alpha` `IntegTest`](https://github.com/aws-samples/aws-cdk-examples/blob/main/SNAPSHOT_TESTING.md)
-> harness, which **deploys** a stack and snapshots the result — that
-> deploy-and-compare style is **not** used here (it would belong to the
-> real-account E2E dimension, currently TBD).
+> **deploy-and-assert** workflow (`--update-on-failed`), which we use only when
+> refreshing the baseline against MiniStack. That deploy style is still **not** a
+> real-account E2E dimension (currently TBD).
 
 ## Coverage reporting pipeline
 

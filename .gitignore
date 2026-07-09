@@ -17,6 +17,8 @@ node_modules/
 
 # CDK
 cdk.out/
+# integ-runner temporary synth output (committed baseline is *.js.snapshot/)
+integ/cdk-integ.out.*/
 # Compiled TS output (sources are .ts; emit is transient). Scoped to the
 # compiled locations so hand-written declarations like lambda/index.d.ts stay
 # tracked.
@@ -24,6 +26,9 @@ bin/*.js
 bin/*.d.ts
 lib/*.js
 lib/*.d.ts
+integ/*.js
+integ/*.d.ts
+!integ/*.js.snapshot/**/*
 test/**/*.js
 test/**/*.d.ts
 # services/ (MiniStack compat harness, #135): .ts sources compile in place; the

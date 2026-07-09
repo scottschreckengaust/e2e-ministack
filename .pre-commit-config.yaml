@@ -25,6 +25,7 @@ repos:
       - id: check-shebang-scripts-are-executable
       - id: check-vcs-permalinks
       - id: end-of-file-fixer
+        exclude: ^integ/.*\.js\.snapshot/
       - id: trailing-whitespace
       - id: mixed-line-ending
         args: ['--fix=lf']
@@ -32,8 +33,9 @@ repos:
         exclude: ^tsconfig\.json$ # JSONC (has comments) — not strict JSON
       - id: check-yaml # validates the workflow files
       - id: detect-private-key # committed PEM/SSH keys
-      - id: detect-aws-credentials
-        args: ['--allow-missing-credentials']
+      # detect-aws-credentials removed: false-positives on @aws-cdk/* package
+      # names, test/** gitignore lines, and CDK snapshot metadata (checkSecretUsage).
+      # gitleaks + detect-private-key cover real credential leaks.
       - id: forbid-submodules
 
   # ── Secrets ────────────────────────────────────────────────────────────

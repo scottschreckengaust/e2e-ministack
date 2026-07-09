@@ -1,0 +1,36 @@
+{
+  "version": "54.0.0",
+  "files": {
+    "ccbd738dbdac9d2adef815c28d9b8cb9e8af76dc17e324689fc7deac412a0afa": {
+      "displayName": "Doubler/Code",
+      "source": {
+        "path": "asset.ccbd738dbdac9d2adef815c28d9b8cb9e8af76dc17e324689fc7deac412a0afa",
+        "packaging": "zip"
+      },
+      "destinations": {
+        "000000000000-us-east-1-bf5335ec": {
+          "bucketName": "cdk-hnb659fds-assets-000000000000-us-east-1",
+          "objectKey": "ccbd738dbdac9d2adef815c28d9b8cb9e8af76dc17e324689fc7deac412a0afa.zip",
+          "region": "us-east-1",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::000000000000:role/cdk-hnb659fds-file-publishing-role-000000000000-us-east-1"
+        }
+      }
+    },
+    "1bb6395dcc5cf35a9eb64d167b900401fbf283ce2290b96257890ff0509a6e25": {
+      "displayName": "MiniStackTestStack Template",
+      "source": {
+        "path": "MiniStackTestStack.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "000000000000-us-east-1-f9a5e0c8": {
+          "bucketName": "cdk-hnb659fds-assets-000000000000-us-east-1",
+          "objectKey": "1bb6395dcc5cf35a9eb64d167b900401fbf283ce2290b96257890ff0509a6e25.json",
+          "region": "us-east-1",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::000000000000:role/cdk-hnb659fds-file-publishing-role-000000000000-us-east-1"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}

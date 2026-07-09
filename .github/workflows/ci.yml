@@ -48,6 +48,7 @@ jobs:
             code:
               - 'bin/**'
               - 'lib/**'
+              - 'integ/**'
               - 'lambda/**'
               - 'services/**'
               - 'test/**'
@@ -70,6 +71,8 @@ jobs:
               - '.mcp.json'
               - '.cursor/**'
               - 'scripts/check-mcp-parity.sh'
+              - 'scripts/run-integ-snapshot.sh'
+              - 'scripts/run-integ-snapshot-update.sh'
 
   # Fast, synth-only tier. Gates the expensive integration job below.
   unit:
@@ -106,7 +109,10 @@ jobs:
         run: npm run check:mcp-parity
       - name: Build
         run: npm run build
-      - name: Unit tests (logic + CDK assertions/snapshot)
+      - name: CDK integ snapshot gate (@aws-cdk/integ-runner)
+        # Synth-only: diffs integ/*.js against committed *.js.snapshot/ baselines.
+        run: npm run test:integ-snapshot
+      - name: Unit tests (logic + CDK assertions)
         # Writes reports/junit/unit.xml and reports/coverage/ (the npm script
         # passes --coverage; the 100% coverageThreshold gate fails this step
         # if any scoped file drops below 100%). Upload both even on failure.

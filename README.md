@@ -83,17 +83,18 @@ PASS test/integration/integration.test.ts
 
 ## 📦 npm scripts
 
-| Script                     | Does                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------ |
-| `npm run build`            | `tsc` compile                                                                  |
-| `npm run bootstrap`        | `cdk bootstrap` the `CDKToolkit` stack into MiniStack                          |
-| `npm run deploy`           | `cdk deploy --require-approval never`                                          |
-| `npm run test:unit`        | Fast: Lambda logic + CDK assertions/snapshot (no emulator); coverage gate 100% |
-| `npm run test:integration` | Jest + AWS SDK against deployed MiniStack resources                            |
-| `npm run test:e2e`         | Placeholder for a real-account stage (skipped)                                 |
-| `npm run test:mutation`    | Stryker mutation testing of the Lambda logic (gate: >=80%)                     |
-| `npm run fuzz`             | jazzer.js coverage-guided fuzzing (see `fuzz/README.md`)                       |
-| `npm run destroy`          | `cdk destroy --force`                                                          |
+| Script                        | Does                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `npm run build`               | `tsc` compile                                                                      |
+| `npm run bootstrap`           | `cdk bootstrap` the `CDKToolkit` stack into MiniStack                              |
+| `npm run deploy`              | `cdk deploy --require-approval never`                                              |
+| `npm run test:unit`           | Fast: Lambda logic + CDK fine-grained assertions (no emulator); coverage gate 100% |
+| `npm run test:integ-snapshot` | `@aws-cdk/integ-runner` cloud-assembly snapshot diff (synth-only; no emulator)     |
+| `npm run test:integration`    | Jest + AWS SDK against deployed MiniStack resources                                |
+| `npm run test:e2e`            | Placeholder for a real-account stage (skipped)                                     |
+| `npm run test:mutation`       | Stryker mutation testing of the Lambda logic (gate: >=80%)                         |
+| `npm run fuzz`                | jazzer.js coverage-guided fuzzing (see `fuzz/README.md`)                           |
+| `npm run destroy`             | `cdk destroy --force`                                                              |
 
 Reset MiniStack state between runs (cheaper than restarting): `curl -X POST http://localhost:4566/_ministack/reset`
 
@@ -103,7 +104,8 @@ Reset MiniStack state between runs (cheaper than restarting): `curl -X POST http
 bin/app.ts                 # CDK entrypoint (fixed account/region)
 lib/ministack-stack.ts     # the stack: two S3 buckets (data + access-log) + Lambda
 lambda/index.js            # function under test (doubles event.n)
-test/unit/                 # Lambda logic + CDK assertions/snapshot (no emulator)
+test/unit/                 # Lambda logic + CDK fine-grained assertions (no emulator)
+integ/                     # @aws-cdk/integ-runner snapshot baseline (*.js.snapshot/)
 test/integration/          # Jest + AWS SDK v3, points at AWS_ENDPOINT_URL
 test/e2e/                  # placeholder for a real-account stage
 .github/workflows/         # CI: unit → bootstrap → deploy → integration loop
@@ -111,11 +113,12 @@ test/e2e/                  # placeholder for a real-account stage
 
 ### 🧪 Test pyramid
 
-| Tier            | Needs                      | Speed   | Here                                                                |
-| --------------- | -------------------------- | ------- | ------------------------------------------------------------------- |
-| **Unit**        | nothing (pure synth)       | ms      | Lambda logic + CDK fine-grained assertions + full-template snapshot |
-| **Integration** | MiniStack (local emulator) | seconds | AWS SDK against deployed resources                                  |
-| **E2E**         | a real AWS account         | minutes | placeholder (skipped) — real deploy + smoke/CSPM                    |
+| Tier               | Needs                      | Speed   | Here                                                                |
+| ------------------ | -------------------------- | ------- | ------------------------------------------------------------------- |
+| **Unit**           | nothing (pure synth)       | ms      | Lambda logic + CDK fine-grained assertions + cdk-nag fast-tier gate |
+| **Integ snapshot** | nothing (pure synth)       | ms      | `@aws-cdk/integ-runner` cloud-assembly baseline                     |
+| **Integration**    | MiniStack (local emulator) | seconds | AWS SDK against deployed resources                                  |
+| **E2E**            | a real AWS account         | minutes | placeholder (skipped) — real deploy + smoke/CSPM                    |
 
 ## ⚠️ Gotchas worth knowing
 
