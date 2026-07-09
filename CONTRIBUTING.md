@@ -47,7 +47,8 @@ This repo follows a test pyramid; `JEST_TIER` selects the tier:
 ```bash
 npm run build              # tsc compile
 npm run lint               # ESLint (flat config, typescript-eslint)
-npm run test:unit          # fast: Lambda logic + CDK assertions/snapshot (NO emulator)
+npm run test:unit          # fast: Lambda logic + CDK fine-grained assertions (NO emulator)
+npm run test:integ-snapshot  # @aws-cdk/integ-runner snapshot diff (synth-only; NO emulator)
 npm test                   # alias for test:unit
 npm run test:integration   # AWS SDK tests against deployed MiniStack resources
 npm run test:mutation      # Stryker mutation testing of the Lambda logic (gate: >=80%)
@@ -64,18 +65,37 @@ Run a single test by setting the tier so Jest looks in the right directory:
 JEST_TIER=integration npx jest -t "invokes the deployed Lambda"
 ```
 
-## Regenerating the CDK snapshot
+## Regenerating the CDK integ snapshot
 
-`test/unit/stack.test.ts` includes a **full-template snapshot** (baseline in
-`test/unit/__snapshots__/`). If you make an intended change to the stack, the
-snapshot will go stale and the unit tier will fail until you regenerate it:
+`integ/integ.ministack-stack.ts` is an **`@aws-cdk/integ-tests-alpha`**
+integration test exercised by **`@aws-cdk/integ-runner`**. The committed baseline
+lives in `integ/integ.ministack-stack.js.snapshot/`.
+
+**PR gate (synth-only):** after `npm run build`, run:
 
 ```bash
-npm run test:unit -- -u
+npm run test:integ-snapshot
 ```
 
-Review the snapshot diff before committing — it's your confirmation that the
-template changed exactly as you expected, and nothing else.
+No MiniStack required — this only synths and diffs against the baseline.
+
+**After an intentional stack change**, refresh the baseline against a running
+MiniStack (same env vars as `cdk deploy` — see README Quickstart). Reset emulator
+state first if you already deployed the demo stack (`curl -X POST
+http://localhost:4566/_ministack/reset`):
+
+```bash
+export AWS_ENDPOINT_URL=http://localhost:4566 AWS_ENDPOINT_URL_S3=http://localhost:4566 \
+  AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
+  AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1 \
+  CDK_DEFAULT_ACCOUNT=000000000000 CDK_DEFAULT_REGION=us-east-1
+
+npm run bootstrap   # once per fresh MiniStack
+npm run test:integ-snapshot:update
+```
+
+Review the snapshot diff before committing — it is your confirmation that the
+cloud assembly changed exactly as you expected, and nothing else.
 
 ## Pre-commit hooks
 
@@ -105,8 +125,9 @@ Run the local gates that mirror CI so you don't bounce off a red build:
 1. `npm ci` (clean install from the lockfile)
 2. `npm run build`
 3. `npm run lint`
-4. `npm run test:unit` — and if you changed the stack, regenerate the snapshot
-   (see above) and commit it.
+4. `npm run test:unit` and `npm run test:integ-snapshot` — and if you changed the
+   stack, regenerate the integ snapshot (see above) and commit the updated
+   `integ/*.js.snapshot/` tree.
 5. If you touched the integration path, run the MiniStack loop locally
    (`bootstrap` → `deploy` → `test:integration`).
 

@@ -7,6 +7,8 @@ package-lock.json
 .remember/
 # Jest snapshots (generated; exact bytes matter)
 test/**/__snapshots__/
+# CDK integ-runner cloud-assembly snapshots (committed baseline; exact bytes matter)
+integ/*.js.snapshot/
 # CHANGELOG is generated + force-pushed by release-please (issue #91); its format
 # is the generator's and is regenerated each release — Prettier must not fight it.
 CHANGELOG.md

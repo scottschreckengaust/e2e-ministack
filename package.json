@@ -28,9 +28,13 @@
     "test:e2e": "JEST_TIER=e2e jest",
     "test:mutation": "JEST_TIER=unit stryker run",
     "test:fuzz-regression": "jest --config jest.fuzz.config.js",
+    "test:integ-snapshot": "scripts/run-integ-snapshot.sh",
+    "test:integ-snapshot:update": "scripts/run-integ-snapshot-update.sh",
     "fuzz": "mkdir -p .fuzz-corpus && jazzer fuzz/handler.fuzz .fuzz-corpus --sync=false -- -max_total_time=60"
   },
   "devDependencies": {
+    "@aws-cdk/integ-runner": "2.202.1",
+    "@aws-cdk/integ-tests-alpha": "2.260.0-alpha.0",
     "@eslint/js": "^10.0.1",
     "@fast-check/jest": "^2.2.0",
     "@jazzer.js/core": "^4.0.0",
