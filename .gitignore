@@ -50,6 +50,9 @@ crash-*
 *.sarif
 *.outcome
 cfn-lint.txt
+# Trivy human-readable table reports (SARIF/outcome already covered above)
+trivy-fs.txt
+trivy-image.txt
 npm-audit.json
 sbom.cdx.json
 # CI-downloaded scanner binaries

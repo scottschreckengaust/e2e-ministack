@@ -24,6 +24,8 @@ Security tab.
 | OSV-Scanner           | security.yml | lockfile advisories                     | hard-fail      |
 | Grype (FS)            | security.yml | filesystem vuln scan                    | hard-fail      |
 | Grype (MiniStack img) | security.yml | third-party emulator image by digest    | report-only    |
+| Trivy (FS)            | security.yml | filesystem vuln scan (2nd DB vs Grype)  | report-only    |
+| Trivy (MiniStack img) | security.yml | third-party emulator image by digest    | report-only    |
 | **dependency-review** | security.yml | PR dep-diff: vulns + **license policy** | hard-fail (PR) |
 | **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree              | informational  |
 | Gitleaks              | security.yml | secrets (full history)                  | hard-fail      |
@@ -143,8 +145,10 @@ Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
 - **Undetected/unlicensed dependencies pass `dependency-review` silently** —
   per the action's docs, _"if we can't detect the license… the action won't
   fail."_ This is true in both allow- and deny-list modes. **Trivy's license
-  scan is the intended full-tree backstop** for the `UNKNOWN` case (separate
-  follow-up, tracked under #77).
+  scan is the intended full-tree backstop** for the `UNKNOWN` case. Trivy is now
+  wired (#133) as a report-only **vuln** scanner (see "Trivy" above); enabling
+  its **license** scan as the enforced UNKNOWN backstop is part of the #84
+  dual-scanner accept-set work (#77 scope).
   - **"Could not detect a license" on a _brand-new_ release is usually harvest
     lag, not a license problem.** GitHub sources PyPI license data from
     [ClearlyDefined](https://clearlydefined.io), whose scan of a
@@ -213,6 +217,53 @@ artifact. It is **informational** (no enforce step). Artifact-only for now;
 attaching to releases is deferred until a release process exists. The SBOM can
 also feed Grype/Trivy for consistent component coverage.
 
+## Trivy (second vuln scanner, report-only) — #133
+
+Trivy ([Aqua Security](https://github.com/aquasecurity/trivy)) runs as a
+**report-only** second vulnerability scanner alongside Grype, wired in #133 as
+the foundation for the #84 dual-scanner OpenVEX hard-fail gate. Two jobs in
+`security.yml`, mirroring the Grype pair:
+
+- **`trivy-fs`** — `trivy fs .` filesystem scan (Trivy analog of the Grype FS
+  job).
+- **`trivy-image`** — vuln scan of the **pinned MiniStack emulator image by
+  digest** (Trivy analog of the report-only `ministack-image` Grype job); the
+  digest is kept in sync across `ci.yml` + both Grype/Trivy jobs.
+
+Both follow the repo's **produce → always-upload → enforce** shape, but the
+enforce step is **report-only**: it logs the scan outcome and never fails the
+job (mirroring the report-only Grype `ministack-image` job). Each emits SARIF to
+the **Security tab** (distinct categories `trivy-fs` / `trivy-image`) plus a
+table artifact.
+
+**Why a second scanner (deliberate overlap with Grype).** Grype and Trivy use
+**different vulnerability databases**, so they surface **different CVEs** on the
+same target — running both widens coverage rather than duplicating it. Trivy is
+also the **intended full-tree backstop** for the license-UNKNOWN / rider gap
+that `dependency-review`'s list mode can't fail closed on (see "Known
+limitations" above; #77 scope). #84 will consume both scanners' SARIF to build a
+union accept-set governed by OpenVEX.
+
+**Report-only rationale.** Like the Grype image job, this stays report-only in
+this PR: no `.vex/` records, no `vulnerability.vex:` list in `trivy.yaml`, and no
+hard-fail flip on either Grype or Trivy. Those all belong to **#84**. The
+Trivy-vs-Grype CVE-count divergence on the MiniStack image (needed for #84's
+union accept-set) is produced by the first CI run's `trivy-image` SARIF
+artifact.
+
+**Governance verdict (tool-adoption).** Trivy (Aqua Security) and its
+`trivy-action` are both **Apache-2.0** — permissive, no copyleft, no
+single-vendor lock-in — so Trivy satisfies the repo's FOSS-only tool-adoption
+line (the same line that rejected k6/AGPL in #73 and Renovate/AGPL in #80). The
+vexctl/OpenVEX tooling #84 will add is likewise Apache-2.0.
+
+**`trivy-config` (cdk.out misconfig) — deferred as checkov-redundant (YAGNI).**
+A Trivy config/IaC scan of the synthesized `cdk.out` templates was
+**deliberately omitted**: that surface is already the REQUIRED `iac` gate
+(checkov + cfn-lint), so a Trivy config job would duplicate IaC coverage for no
+new signal here. #133 scope is vuln scanning (FS + image); add `trivy-config`
+later only if a concrete gap in checkov's CloudFormation coverage is identified.
+
 ## Intentional local ↔ remote (pre-commit) gap
 
 Per CLAUDE.md, pre-commit is a **fast convenience tier**, not a mirror of CI —
@@ -261,4 +312,7 @@ All scanner tools are pinned (action SHA / binary checksum / pinned version) per
 [PINNING.md](PINNING.md). The two actions added for the supply-chain work
 (`dependency-review-action` v5.0.0, `sbom-action` v0.24.0) are SHA-pinned like
 every other `uses:` and are registered as future targets of the #78 pin-sync
-updater.
+updater. `trivy-action` (v0.36.0, added in #133) is likewise SHA-pinned and is
+also a #78 pin-sync target; its vuln **database floats** by design (like
+Grype's), so newly disclosed CVEs are caught without a repo change — the DB is
+cached across runs via `actions/cache` (see PINNING.md).

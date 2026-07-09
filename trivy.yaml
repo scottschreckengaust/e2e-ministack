@@ -1,0 +1,23 @@
+# Trivy configuration (auto-discovered when trivy runs in this directory).
+#
+# Deliberately MINIMAL. Scan POLICY — severity gating, exit codes, scanners,
+# output format — lives in the workflow flags (.github/workflows/security.yml,
+# trivy-fs / trivy-image jobs), NOT here, so a config value can't silently
+# conflict with or override the CI invocation. Keep this file for settings that
+# are genuinely file-scoped and stable across every invocation.
+#
+# #133 wires Trivy in REPORT-ONLY. Do NOT add `severity:` / `exit-code:` here —
+# report-only is enforced by the jobs (they never fail on findings), and a
+# severity/exit-code here would fight the workflow.
+
+# Skip generated / vendored trees the source scan shouldn't flag. cdk.out is
+# synthesized CloudFormation (already covered by checkov/cfn-lint); node_modules
+# is the dependency tree (already covered by the lockfile scanners).
+scan:
+  skip-dirs:
+    - node_modules
+    - cdk.out
+
+# NOTE: the OpenVEX `vulnerability.vex:` list (VEX-based finding suppression) is
+# DEFERRED to #84 (dual-scanner OpenVEX hard-fail gate). It is intentionally
+# absent here — #133 stops at report-only and adds no VEX records or suppression.

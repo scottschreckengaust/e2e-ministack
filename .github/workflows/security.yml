@@ -400,6 +400,194 @@ jobs:
           path: ${{ steps.grype.outputs.sarif }}
           if-no-files-found: warn
 
+  # ── Trivy (second vuln scanner, alongside Grype) ────────────────────────
+  # Trivy (Aqua Security, Apache-2.0) runs as a REPORT-ONLY second vuln scanner
+  # next to the Grype jobs above. It is a deliberate DUAL-SCANNER overlap:
+  # Grype and Trivy use DIFFERENT vulnerability databases, so they surface
+  # different CVEs on the same target — running both widens coverage. Trivy is
+  # also the intended full-tree backstop for the license-UNKNOWN / rider gap
+  # that dependency-review's list mode can't fail closed on (docs/SECURITY-
+  # TOOLING.md, #77 scope). This wiring is the FOUNDATION for #84 (dual-scanner
+  # OpenVEX hard-fail gate): #133 stays report-only — NO .vex/ records, NO
+  # `vulnerability.vex:` list, NO hard-fail flip; those belong to #84.
+  #
+  # The Trivy vuln DB FLOATS by design (like Grype's DB) so newly-disclosed
+  # CVEs are caught without a repo change; it is cached across runs via
+  # actions/cache (rolling github.run_id key, mirroring the mutation/fuzz
+  # caches in ci.yml) so runs don't re-download it every time. The trivy-action
+  # is SHA-pinned; the floating DB is documented in docs/PINNING.md.
+  #
+  # Trivy auto-discovers the committed trivy.yaml (repo root); scan policy stays
+  # in the workflow flags below, not in that file.
+  #
+  # Report-only wiring: the trivy-action only fails the step when you set
+  # `exit-code`; we deliberately DON'T set it, so a scan with findings still
+  # succeeds. We still follow the produce → always-upload → ENFORCE(log) shape:
+  # run the action with `continue-on-error: true`, persist the step's outcome to
+  # a `*.outcome` file, always-upload SARIF (artifact + Security tab), then a
+  # final `if: always()` step sources the outcome and only LOGS it (never fails
+  # — that mirrors the report-only Grype ministack-image job). #84 owns the flip
+  # to a real enforce (`test "$outcome" = "success"`).
+
+  # trivy-fs — filesystem vuln scan of the repo source (Trivy analog of the
+  # Grype FS job).
+  trivy-fs:
+    name: Trivy FS scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      # Cache the (floating) Trivy vuln DB across runs. Rolling run_id key so the
+      # post-job save always persists a fresh DB; restore-keys prefix-matches the
+      # most recent prior cache (same pattern as the mutation/fuzz caches).
+      - name: Cache Trivy DB
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-
+      - id: trivy
+        name: Run Trivy FS (SARIF; report-only)
+        continue-on-error: true # report-only: never fail the job on this step
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: '.'
+          format: sarif
+          output: trivy-fs.sarif
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+      - name: Record outcome
+        if: always()
+        # Pass the (trusted, enum-valued) step outcome via env rather than inline
+        # interpolation, per the repo's zizmor-clean / no-template-injection rule.
+        env:
+          TRIVY_OUTCOME: ${{ steps.trivy.outcome }}
+        run: echo "outcome=$TRIVY_OUTCOME" > trivy-fs.outcome
+      - name: Emit human-readable table (report artifact)
+        if: always()
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: '.'
+          format: table
+          output: trivy-fs.txt
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+          skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+      - name: Upload Trivy FS reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-fs-reports
+          path: |
+            trivy-fs.sarif
+            trivy-fs.txt
+          if-no-files-found: warn
+      - name: Report Trivy FS outcome (report-only — never fails)
+        if: always()
+        run: |
+          # Report-only: LOG the outcome, do NOT fail the job (mirrors the
+          # report-only Grype ministack-image job, which has no enforce step).
+          # The hard-fail flip (test "$outcome" = "success") is deferred to #84.
+          source trivy-fs.outcome
+          echo "trivy-fs step outcome=$outcome (report-only — not enforced; #84 owns the hard-fail flip)"
+
+  # trivy-image — vuln scan of the pinned MiniStack emulator image by digest
+  # (Trivy analog of the report-only Grype `ministack-image` job). The image is
+  # third-party and pinned by digest, so we can't remediate CVEs inside it by
+  # editing this repo — always emit + upload SARIF instead.
+  trivy-image:
+    name: Trivy MiniStack image scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Cache Trivy DB
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-
+      # NOTE: this digest MUST match the image pinned in ci.yml and the Grype
+      # ministack-image job above (ministackorg/ministack:full@sha256:dd2cf4d...).
+      # Keep all three in sync; if ci.yml bumps the digest, bump it here too.
+      - id: trivy
+        name: Run Trivy image (SARIF; report-only)
+        continue-on-error: true # report-only: never fail the job on this step
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
+          format: sarif
+          output: trivy-image.sarif
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+      - name: Record outcome
+        if: always()
+        # Pass the (trusted, enum-valued) step outcome via env rather than inline
+        # interpolation, per the repo's zizmor-clean / no-template-injection rule.
+        env:
+          TRIVY_OUTCOME: ${{ steps.trivy.outcome }}
+        run: echo "outcome=$TRIVY_OUTCOME" > trivy-image.outcome
+      - name: Emit human-readable table (report artifact)
+        if: always()
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
+          format: table
+          output: trivy-image.txt
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+          skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+      - name: Upload Trivy image reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-image-reports
+          path: |
+            trivy-image.sarif
+            trivy-image.txt
+          if-no-files-found: warn
+      - name: Report Trivy image outcome (report-only — never fails)
+        if: always()
+        run: |
+          # Report-only (mirrors the Grype ministack-image job): LOG, never fail.
+          source trivy-image.outcome
+          echo "trivy-image step outcome=$outcome (report-only — not enforced; #84 owns the hard-fail flip)"
+
+  # trivy-config (cdk.out misconfig scan) — DELIBERATELY OMITTED for #133.
+  # Decision (recorded per acceptance criterion): DEFER as checkov-redundant
+  # (YAGNI). The synthesized CloudFormation in cdk.out is already scanned by the
+  # `iac` job (checkov + cfn-lint), which is the REQUIRED code-scanning gate in
+  # the main-branch ruleset. Adding trivy config would duplicate that IaC
+  # coverage for no new signal here. #133 scope is vuln scanning (FS + image);
+  # add trivy-config later only if a concrete gap in checkov's CFN coverage is
+  # identified. Recorded in docs/SECURITY-TOOLING.md.
+
   # ── Software Bill of Materials ──────────────────────────────────────────
   # Syft generates a CycloneDX SBOM of the dependency tree (#77). Unlike the
   # vuln scanners this is INFORMATIONAL — there is no enforce step; it just
