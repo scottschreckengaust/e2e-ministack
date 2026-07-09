@@ -5,26 +5,29 @@ supply-chain safety. This file is the authoritative inventory.
 
 ## Pinned
 
-| What                          | Where                                | Pin form                                                               |
-| ----------------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
-| GitHub Actions (all `uses:`)  | `.github/workflows/*.yml`            | commit SHA (`# vX` comment)                                            |
-| npm dependencies (transitive) | `package-lock.json` + `npm ci`       | exact, lockfile-resolved                                               |
-| `aws-cdk`, `aws-cdk-lib`      | `package.json`                       | exact (`2.1128.0`, `2.260.0`)                                          |
-| Node.js                       | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                                                |
-| npm (via Corepack)            | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                                                  |
-| MiniStack image               | `ci.yml`                             | digest (`@sha256:dd2cf4d…`)                                            |
-| CodeQL analyzer bundle        | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                                                |
-| Semgrep                       | `security.yml`                       | `==1.167.0`                                                            |
-| cfn-lint / checkov            | `security.yml`                       | `==1.52.0` / `==3.3.2`                                                 |
-| OSV-Scanner                   | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**                                          |
-| Trivy (`trivy-action`)        | `security.yml`                       | commit SHA `ed142fd…` (`# v0.36.0`); vuln **DB floats** (cached)       |
-| actionlint                    | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies)                               |
-| shellcheck                    | `ci.yml`, pre-commit                 | `v0.11.0` **+ SHA-256 verify** (CI) / `shellcheck-py v0.11.0.1` (hook) |
-| gitleaks, pre-commit-hooks    | `.pre-commit-config.yaml`            | `rev:` tags                                                            |
-| threat-composer-ai (uvx)      | `.mcp.json`, `.cursor/mcp.json`      | git commit SHA (same pin in both; `npm run check:mcp-parity`)          |
-| Prettier, markdownlint-cli2   | `package.json` + lockfile            | exact, lockfile-resolved                                               |
-| Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                                               |
-| fast-check, jazzer.js (fuzz)  | `package.json` + lockfile            | exact, lockfile-resolved                                               |
+| What                          | Where                                | Pin form                                                                   |
+| ----------------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
+| GitHub Actions (all `uses:`)  | `.github/workflows/*.yml`            | commit SHA (`# vX` comment)                                                |
+| npm dependencies (transitive) | `package-lock.json` + `npm ci`       | exact, lockfile-resolved                                                   |
+| `aws-cdk`, `aws-cdk-lib`      | `package.json`                       | exact (`2.1128.0`, `2.260.0`)                                              |
+| Node.js                       | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                                                    |
+| npm (via Corepack)            | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                                                      |
+| MiniStack image               | `ci.yml`                             | digest (`@sha256:dd2cf4d…`)                                                |
+| ClamAV image                  | `security.yml` (`clamav` service)    | digest (`@sha256:6f4a9e7d…`); **signature DB floats** (freshclam)          |
+| SonarQube image               | `security.yml` (`sonarqube` service) | digest (`@sha256:160bd2f6…`)                                               |
+| SonarSource actions           | `security.yml`                       | commit SHA (`sonarqube-scan-action` v8.2.0, `-quality-gate-action` v1.2.0) |
+| CodeQL analyzer bundle        | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                                                    |
+| Semgrep                       | `security.yml`                       | `==1.167.0`                                                                |
+| cfn-lint / checkov            | `security.yml`                       | `==1.52.0` / `==3.3.2`                                                     |
+| OSV-Scanner                   | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**                                              |
+| Trivy (`trivy-action`)        | `security.yml`                       | commit SHA `ed142fd…` (`# v0.36.0`); vuln **DB floats** (cached)           |
+| actionlint                    | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies)                                   |
+| shellcheck                    | `ci.yml`, pre-commit                 | `v0.11.0` **+ SHA-256 verify** (CI) / `shellcheck-py v0.11.0.1` (hook)     |
+| gitleaks, pre-commit-hooks    | `.pre-commit-config.yaml`            | `rev:` tags                                                                |
+| threat-composer-ai (uvx)      | `.mcp.json`, `.cursor/mcp.json`      | git commit SHA (same pin in both; `npm run check:mcp-parity`)              |
+| Prettier, markdownlint-cli2   | `package.json` + lockfile            | exact, lockfile-resolved                                                   |
+| Stryker (mutation testing)    | `package.json` + lockfile            | exact, lockfile-resolved                                                   |
+| fast-check, jazzer.js (fuzz)  | `package.json` + lockfile            | exact, lockfile-resolved                                                   |
 
 > **Scope of "exact" above.** Only `aws-cdk` and `aws-cdk-lib` are pinned to a
 > bare exact version _string_ in `package.json`. The other direct runtime deps
@@ -73,6 +76,13 @@ supply-chain safety. This file is the authoritative inventory.
   signal, resolved by VEX-accepting it under `.vex/` (or bumping the digest once
   MiniStack ships a fix). The weekly `security.yml` cron surfaces such drift even
   absent a push.
+- **ClamAV virus signature database** — the `clamav/clamav` image is pinned by
+  digest, but its signature CVDs are refreshed by `freshclam` at container start
+  (floating by design, same rationale as the Trivy/Grype vuln DBs above): pinning
+  signatures would defeat the scan's purpose of catching newly-catalogued
+  malware. The `clamav`/`sonarqube` service images and the two SonarSource
+  actions are all SHA/digest-pinned (see the Pinned table) and are #78 pin-sync
+  targets like every other `uses:`/image.
 - **`ubuntu-latest` runner image** — GitHub-managed; floats by design. Pin to
   `ubuntu-24.04` if you need the OS image fixed.
 - **Homebrew tool versions (local dev only)** — `pre-commit`, scanners

@@ -16,22 +16,24 @@ gate follows the **produce → always-upload → enforce** pattern so its report
 artifact exists even when the job fails; SARIF-capable gates also upload to the
 Security tab.
 
-| Gate                  | Workflow     | Scope                                   | Failure policy        |
-| --------------------- | ------------ | --------------------------------------- | --------------------- |
-| CodeQL (JS/TS)        | security.yml | SAST over source                        | hard-fail             |
-| Semgrep               | security.yml | SAST over source                        | hard-fail             |
-| npm audit             | security.yml | npm advisories (`--audit-level=high`)   | hard-fail             |
-| OSV-Scanner           | security.yml | lockfile advisories                     | hard-fail             |
-| Grype (FS)            | security.yml | filesystem vuln scan                    | hard-fail             |
-| Grype (MiniStack img) | security.yml | third-party emulator image by digest    | hard-fail (VEX-gated) |
-| Trivy (FS)            | security.yml | filesystem vuln scan (2nd DB vs Grype)  | report-only           |
-| Trivy (MiniStack img) | security.yml | third-party emulator image by digest    | hard-fail (VEX-gated) |
-| **dependency-review** | security.yml | PR dep-diff: vulns + **license policy** | hard-fail (PR)        |
-| **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree              | informational         |
-| Gitleaks              | security.yml | secrets (full history)                  | hard-fail             |
-| checkov + cfn-lint    | security.yml | synthesized CloudFormation              | hard-fail             |
-| Threat model          | security.yml | `threat-model.tc.json` parses/sections  | hard-fail             |
-| actionlint + zizmor   | security.yml | workflow correctness + security         | hard-fail             |
+| Gate                  | Workflow     | Scope                                       | Failure policy        |
+| --------------------- | ------------ | ------------------------------------------- | --------------------- |
+| CodeQL (JS/TS)        | security.yml | SAST over source                            | hard-fail             |
+| Semgrep               | security.yml | SAST over source                            | hard-fail             |
+| npm audit             | security.yml | npm advisories (`--audit-level=high`)       | hard-fail             |
+| OSV-Scanner           | security.yml | lockfile advisories                         | hard-fail             |
+| Grype (FS)            | security.yml | filesystem vuln scan                        | hard-fail             |
+| Grype (MiniStack img) | security.yml | third-party emulator image by digest        | hard-fail (VEX-gated) |
+| Trivy (FS)            | security.yml | filesystem vuln scan (2nd DB vs Grype)      | report-only           |
+| Trivy (MiniStack img) | security.yml | third-party emulator image by digest        | hard-fail (VEX-gated) |
+| **dependency-review** | security.yml | PR dep-diff: vulns + **license policy**     | hard-fail (PR)        |
+| **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree                  | informational         |
+| ClamAV                | security.yml | working-tree virus/malware signature scan   | hard-fail             |
+| SonarQube             | security.yml | code quality + security (Community edition) | report-only           |
+| Gitleaks              | security.yml | secrets (full history)                      | hard-fail             |
+| checkov + cfn-lint    | security.yml | synthesized CloudFormation                  | hard-fail             |
+| Threat model          | security.yml | `threat-model.tc.json` parses/sections      | hard-fail             |
+| actionlint + zizmor   | security.yml | workflow correctness + security             | hard-fail             |
 
 ## Remediating a scanner finding — fix it properly, don't suppress it
 
@@ -252,6 +254,118 @@ line (the same line that rejected k6/AGPL in #73 and Renovate/AGPL in #80). #84
 adds **no new tool**: the OpenVEX records are **hand-authored JSON** consumed by
 the already-adopted Grype/Trivy `--vex` inputs (no `vexctl` binary), so it clears
 the tool-adoption gate without a new dependency.
+
+## ClamAV virus scan (#149)
+
+The `clamav` job runs [ClamAV](https://www.clamav.net/) (Cisco Talos, GPLv2) as
+a signature-based malware scan of the working tree. ClamAV is invoked as an
+**external scanner** — a `clamav/clamav` Docker service container plus the apt
+`clamdscan` client over loopback TCP — never linked or redistributed into repo
+output, the identical carve-out that clears **shellcheck (GPLv3)**. So it adds
+no copyleft dependency and needs no tool-adoption exception.
+
+- **Signatures float by design.** The pinned `clamav/clamav` image runs
+  `freshclam` at container start, pulling the current virus CVDs before clamd
+  reports healthy — so every run scans with up-to-date signatures. This mirrors
+  the Trivy/Grype floating-vuln-DB rationale: the image is pinned by **digest**
+  (reproducible engine), the signature **data** floats (fresh coverage). No
+  signature DB is committed.
+- **SARIF.** clamdscan has no machine-readable output, so
+  `.github/scripts/clamav-to-sarif.mjs` parses its text log (`PATH: SIG FOUND`
+  lines) into SARIF 2.1.0 (category `clamav`). A virus-signature match is
+  unambiguously critical, so every finding maps to `level: error` /
+  `security-severity: 10.0`. A clean tree yields a valid empty-results SARIF.
+- **Hard-fail** via produce → always-upload → enforce: `clamdscan` exits
+  non-zero on any detection; the SARIF + text log always upload first, then the
+  enforce step fails the job.
+- **Verifying detection (EICAR).** A green run only proves no false-positive. To
+  prove the gate FIRES, use the
+  [EICAR test file](https://www.eicar.org/download-anti-malware-testfile/) — a
+  harmless 68-byte string every AV flags as `Win.Test.EICAR_HDB-1`. Write it to
+  a **throwaway/ignored** path and confirm clamdscan exits non-zero and the
+  converter emits one `error` result. **Never commit EICAR** to a tracked path —
+  the job scans `.`, so a committed sample makes CI permanently red. The
+  converter's parser is unit-tested against captured log text instead
+  (`clamav-to-sarif.test.mjs`, run with `node --test`).
+
+## SonarQube analysis (#150) — governance exception
+
+The `sonarqube` job runs **SonarQube Community** fully credential-free against a
+service container (self-generates a scanner token via the first-boot admin API —
+`admin/admin`, SonarQube's documented default for a fresh instance, passed via
+env so it is not a literal `-u user:pass` the gitleaks `curl-auth-user` rule
+flags), then derives SARIF from the analysis results.
+
+**Governance — a maintainer-approved exception.** The two SonarSource actions
+(`sonarqube-scan-action`, `sonarqube-quality-gate-action`) are **LGPL-3.0**, and
+SonarQube is a **single-vendor** SonarSource product. Two separable concerns:
+
+1. **Copyleft.** Mitigated by the same **CI-only external-invocation carve-out**
+   as ClamAV/shellcheck: these are `uses:` actions invoked in the pipeline, never
+   linked or redistributed into repo output, so their copyleft terms don't reach
+   it. The `dependency-review` gate (which sees the action as a dependency)
+   exempts it via `allow-dependencies-licenses` with a purl (#161).
+2. **Single-vendor.** SonarQube is a SonarSource product — the genuine deviation
+   from the single-vendor line that rejected k6 (#73) and Renovate (#80),
+   accepted here as a **deliberate, documented exception** by the maintainer,
+   recorded on the PR. Not a silent override.
+
+- **SARIF is derived by an in-repo converter, NOT `okorach/sonar-tools`.** The
+  obvious native exporter (`sonar-tools --format sarif`) was **rejected on
+  governance grounds**: `sonar-tools==3.21` hard-requires `levenshtein`
+  (**GPL-2.0-or-later**, strong copyleft) in its `requires_dist` — beyond the
+  LGPL exception above and a _new_ copyleft piece the maintainer did not approve.
+  Instead `.github/scripts/sonar-to-sarif.mjs` re-shapes the `api/issues/search`
+  JSON the job already fetches into SARIF (category `sonarqube`): **zero new
+  dependencies, zero copyleft, no Python step.** It maps Sonar severity (legacy
+  `BLOCKER…INFO` and the newer `impacts[]` HIGH/MEDIUM/LOW) to SARIF
+  `error/warning/note`, resolves file paths via the response `components[]`, and
+  converts 0-based `textRange` offsets to 1-based SARIF columns. Unit-tested with
+  `node --test` (`sonar-to-sarif.test.mjs`).
+- **Failure policy: report-only.** The default "Sonar way" quality gate is tuned
+  for application repos and would be noisy on first run, so the enforce step
+  **logs** the gate status and never fails the job — exactly mirroring the
+  `trivy-fs` report-only posture. **Ratchet:** a follow-up flips it to
+  `test "$QG_STATUS" = "PASSED"` once the baseline is triaged / the quality
+  profile is tuned.
+- **Semgrep false-positive (maintainer-approved, TEMPORARY rule exclude).** The
+  generic secrets rule `generic.secrets.security.detected-sonarqube-docs-api-key`
+  matches `sonar…<40-hex>`, which the pinned image **digest** and the two
+  commit-**SHA** action pins unavoidably are (SHA-pinning SonarSource's own
+  actions is required by the repo's pinning rules). These are public, required
+  pins — not API keys. Cleared with a single **`--exclude-rule`** on the semgrep
+  invocation, **not** inline `# nosemgrep`. Why `--exclude-rule` and not
+  `nosemgrep`: `# nosemgrep` marks the finding `suppressions:[{inSource}]` but
+  **leaves the result in the SARIF**, and GitHub Code Scanning still ingests and
+  surfaces it — reddening the `Semgrep OSS` check that consumes our uploaded
+  SARIF. `--exclude-rule` drops the rule entirely (0 results), clearing both the
+  gate and the Code Scanning alert. Scoped to this ONE rule, so every other
+  secret/SAST rule still runs on the whole tree (including `docs/`). This is a
+  genuinely-unfixable true-false-positive with the maintainer sign-off the
+  "Remediating a scanner finding" section requires, and it is **temporary**:
+  **remove the `--exclude-rule` once the upstream fix
+  ([semgrep/semgrep-rules#3994](https://github.com/semgrep/semgrep-rules/pull/3994))
+  lands in `r/all`** — tracked by #163, and folded into the vendored ruleset
+  under #79. Until a Semgrep pre-commit hook exists (#79), the exclude lives only
+  in CI; when that hook is added it must carry the same `--exclude-rule`.
+
+### dependency-review `allow-dependencies-licenses` (#161)
+
+`#161` evaluated whether the awslabs `config-file` / `allow-dependencies-licenses`
+pattern could replace the bespoke license machinery. **Finding:** `config-file`
+is a PR-time policy-location change and is **orthogonal** to
+`license-review-poller.yml`, which is the _post-merge_ enforcement for the
+ClearlyDefined harvest-lag hole (#127 Leg B) — so adopting awslabs wholesale
+would DELETE that enforcement, not simplify it. **Decision: Option A** — keep the
+inline `allow-licenses` allow-list and the poller unchanged, and adopt ONLY the
+per-dependency `allow-dependencies-licenses` exemption for the LGPL SonarQube
+action. **#161 Q1 (match semantics) — RESOLVED:** verified against the pinned
+action's `src/purl.ts` that `purlsMatch` compares `type` + `namespace/name` and
+**ignores the version** — so `allow-dependencies-licenses` matches **by name
+only**. The `@<sha>` in the exemption purl is cosmetic; a future SHA/version bump
+does **not** re-trigger the license review (contradicting the awslabs example's
+comment). That is acceptable here — the action is LGPL at every version, so it is
+intentionally permanently exempt while in use.
 
 ## MiniStack image scan — hard-fail, VEX-gated (#84)
 

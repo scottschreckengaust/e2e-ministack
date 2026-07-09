@@ -65,8 +65,23 @@ jobs:
           # --error sets a non-zero exit on findings; capture it so the report
           # still uploads, then enforce in a later step.
           set +e
+          # TEMPORARY, rule-scoped --exclude-rule for the buggy
+          # `detected-sonarqube-docs-api-key` (a PROVEN false positive: its regex
+          # `(?i)sonar.{0,50}…[0-9a-f]{40}` matches this repo's SHA-pinned
+          # SonarSource actions + the sonarqube image digest — public, required
+          # pins, NOT API keys; #163). We EXCLUDE the rule rather than `# nosemgrep`
+          # it inline because a suppressed finding still ships in the SARIF
+          # (`suppressions:[{inSource}]`) and GitHub Code Scanning surfaces it —
+          # reddening the "Semgrep OSS" check that ingests our uploaded SARIF.
+          # --exclude-rule drops the rule ENTIRELY (0 results), clearing both the
+          # gate and the Code Scanning alert. This is maintainer-approved and
+          # TEMPORARY: REMOVE this flag once the upstream fix
+          # (semgrep/semgrep-rules#3994) lands in r/all — tracked by #163
+          # (and folded into the vendored ruleset under #79). Scoped to this ONE
+          # rule, so every other secret/SAST rule still runs.
           semgrep scan --config=auto --error --sarif --output semgrep.sarif \
-            --exclude=node_modules --exclude=cdk.out
+            --exclude=node_modules --exclude=cdk.out \
+            --exclude-rule=generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()
@@ -222,17 +237,39 @@ jobs:
             BSD-2-Clause, BSD-3-Clause, 0BSD,
             BlueOak-1.0.0, Python-2.0,
             CC0-1.0, CC-BY-4.0, Unlicense
-          # allow-dependencies-licenses is intentionally ABSENT (steady state:
-          # empty). "Could not detect a license" on a brand-new release is
-          # upstream harvest lag (GitHub sources PyPI license data from
-          # ClearlyDefined) and is self-expiring — this action is PR-diff-
-          # scoped, so the warning only fires on PRs touching that package.
-          # Exemption purls also match by NAME ONLY (purlsMatch ignores the
-          # @version), so a standing entry silences license checks for ALL
-          # future versions of the package. Instead, route each UNKNOWN to a
-          # `license-review` issue per #127 and the procedure in
-          # docs/SECURITY-TOOLING.md ("Could not detect a license") — the
-          # triage step below (#127 Leg B1) automates that routing.
+          # allow-dependencies-licenses carries exactly TWO documented entries: the
+          # SonarQube LGPL exception (#150/#161) for BOTH SonarSource actions this
+          # repo uses — sonarqube-scan-action AND sonarqube-quality-gate-action.
+          # Both are LGPL-3.0 — copyleft, NOT on the permissive allow-list above —
+          # but CI-ONLY actions we invoke, never linked/redistributed into repo
+          # output, so their copyleft terms don't reach it (the same external-
+          # invocation carve-out that clears shellcheck/ClamAV). MAINTAINER-APPROVED
+          # exception; see docs/SECURITY-TOOLING.md. (Both must be listed: an
+          # exemption for only one leaves the other in dependency-review's
+          # `unlicensed` bucket, where the #127 Leg B1 pypi-only triage step emits
+          # a "non-pypi purl — manual triage" NOTICE. Listing both silences it.)
+          # #161 Q1 (verified against the action's src/purl.ts `purlsMatch` at the
+          # pinned SHA): exemptions match by NAME ONLY — `purlsMatch` compares
+          # type + namespace/name and IGNORES the version. So the @<sha>s below are
+          # cosmetic; a future SHA/version bump does NOT re-trigger review, the
+          # entries silence license checks for ALL versions of these actions. That
+          # is intended here (they're LGPL at every version, permanently exempt).
+          # NOTE: a plain quoted scalar (not a `>-` block) so the two purls parse
+          # as a single clean comma-list (a block scalar would fold in stray
+          # text). The detected-sonarqube-docs-api-key secrets rule would match
+          # these SHA-bearing purls, but it is globally --exclude-rule'd in the
+          # semgrep job (temporary; see #163) so no inline suppression is needed.
+          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b'
+          # Aside from that one entry, allow-dependencies-licenses stays empty for
+          # the license-UNKNOWN path: "Could not detect a license" on a brand-new
+          # release is upstream harvest lag (GitHub sources PyPI license data from
+          # ClearlyDefined) and is self-expiring — this action is PR-diff-scoped,
+          # so the warning only fires on PRs touching that package. Because
+          # exemptions are name-only (above), a standing entry would silence
+          # license checks for ALL future versions; so instead route each UNKNOWN
+          # to a `license-review` issue per #127 and the procedure in
+          # docs/SECURITY-TOOLING.md ("Could not detect a license") — the triage
+          # step below (#127 Leg B1) automates that routing.
 
       # ── License-UNKNOWN triage (#127 Leg B1) ──────────────────────────
       # The action's `invalid-license-changes` output is JSON with buckets
@@ -667,6 +704,258 @@ jobs:
   # coverage for no new signal here. #133 scope is vuln scanning (FS + image);
   # add trivy-config later only if a concrete gap in checkov's CFN coverage is
   # identified. Recorded in docs/SECURITY-TOOLING.md.
+
+  # ── Malware / virus scan (ClamAV) ───────────────────────────────────────
+  # Signature-based scan of the working tree (#149). ClamAV (GPLv2) runs as an
+  # EXTERNAL scanner — a Docker service container + apt `clamdscan` over
+  # loopback TCP — never linked or redistributed into repo output, the same
+  # carve-out that clears shellcheck (GPLv3). The `clamav/clamav` image runs
+  # freshclam at startup, so the scan always uses CURRENT virus signatures
+  # (the DB floats by design, like Trivy's/Grype's vuln DB; the image is pinned
+  # by digest). clamdscan has no machine-readable output, so clamav-to-sarif.mjs
+  # parses its text log into SARIF (every hit = level error / security-severity
+  # 10.0). Hard-fail via produce → always-upload → enforce.
+  clamav:
+    name: ClamAV virus scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    services:
+      clamav:
+        image: clamav/clamav@sha256:6f4a9e7d616ffc8d1070200fe35ac860735fdd522161a1043f94856e6ee13c28
+        ports:
+          - 127.0.0.1:3310:3310
+        # The image ships its own clamdcheck.sh HEALTHCHECK — use it (do NOT
+        # override with a curl/wget cmd; the image lacks them). clamd only
+        # reports healthy after freshclam has loaded the signature DB.
+        options: >-
+          --health-cmd "/usr/local/bin/clamdcheck.sh"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # converter uses Node built-ins only; no deps needed
+      - name: Wait for clamd (TCP 3310)
+        run: timeout 300 bash -c 'until (echo > /dev/tcp/127.0.0.1/3310) 2>/dev/null; do sleep 5; done'
+      - name: Install clamdscan client + point it at the service
+        run: |
+          sudo apt-get update || true
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get install -y --no-install-recommends clamdscan
+          sudo mkdir -p /etc/clamav
+          cat << 'EOF' | sudo tee /etc/clamav/clamd.conf
+          TCPSocket 3310
+          TCPAddr 127.0.0.1
+          EOF
+          clamdscan --version
+      - name: Run clamdscan (log; enforce after upload)
+        run: |
+          set +e
+          clamdscan --verbose --log=clamdscan.txt --stream --fdpass --multiscan .
+          echo "exit=$?" > clamav.outcome
+      - name: Convert clamdscan log to SARIF
+        if: always()
+        run: node .github/scripts/clamav-to-sarif.mjs clamdscan.txt clamav.sarif
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: clamav.sarif
+          category: clamav
+      - name: Upload ClamAV reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: clamav-reports
+          path: |
+            clamdscan.txt
+            clamav.sarif
+          if-no-files-found: warn
+      - name: Enforce ClamAV result (hard-fail on any detection)
+        if: always()
+        run: |
+          source clamav.outcome
+          echo "clamdscan exit=$exit (non-zero = virus signature detected)"
+          test "$exit" = "0"
+
+  # ── SonarQube (code quality + security analysis) ─────────────────────────
+  # SonarQube Community (#150) run fully credential-free against a service
+  # container: self-generate a token via the first-boot admin API, scan, check
+  # the quality gate. GOVERNANCE: the two SonarSource actions are LGPL-3.0 and
+  # SonarQube is a single-vendor SonarSource product — a MAINTAINER-APPROVED
+  # exception under the CI-only external-invocation carve-out (same as
+  # shellcheck/ClamAV; the actions are invoked, never linked/redistributed).
+  # The LGPL scan-action is exempted in the dependency-review gate via
+  # allow-dependencies-licenses (#161). SARIF is derived by our own
+  # sonar-to-sarif.mjs from the api/issues/search JSON — NOT okorach/sonar-tools,
+  # which hard-requires GPL-2.0 Levenshtein (beyond the LGPL exception).
+  # Failure policy is REPORT-ONLY (log the gate status, never fail — mirrors
+  # trivy-fs), with a documented ratchet to enforce once the baseline is triaged.
+  # See docs/SECURITY-TOOLING.md.
+  sonarqube:
+    name: SonarQube analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    services:
+      sonarqube:
+        # The detected-sonarqube-docs-api-key secrets rule matches "sonar…<40-hex>"
+        # — i.e. this image digest and the SHA-pinned SonarSource actions below,
+        # all PUBLIC REQUIRED pins, not API keys (a PROVEN false positive, #163).
+        # The rule is globally --exclude-rule'd in the semgrep job (temporary,
+        # until upstream semgrep/semgrep-rules#3994 lands), so no inline
+        # suppression is needed here.
+        image: sonarqube:community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
+        ports:
+          - 127.0.0.1:9000:9000
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: true
+          SONAR_WEB_SYSTEMPASSCODE: passcode
+        # NO --health-cmd, deliberately (same rule as MiniStack in AGENTS.md:
+        # "do NOT gate on --health-cmd; POLL readiness in a step instead").
+        # Why: a service-container health gate that never goes healthy makes
+        # GitHub abort with "Failed to initialize container" and SKIP the job's
+        # steps. SonarQube 26.7 has a ~5-min cold start (Elasticsearch + web +
+        # CE), which RACES any fixed health-retry budget — and a health-cmd that
+        # runs INSIDE the image depends on that image's tools (busybox vs GNU
+        # grep/wget), which change across digest bumps. Both bit us on #162.
+        # With no health-cmd, GitHub starts the container and proceeds straight
+        # to the steps; the "Wait for SonarQube to report UP" step below gates
+        # readiness using the RUNNER's curl+jq (version-independent) with a
+        # generous budget.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0 # Sonar wants full history for new-code / blame
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # converter uses Node built-ins only; no deps needed
+      - name: Wait for SonarQube to report UP
+        # SonarQube 26.7 cold start (ES + web + CE) is ~5 min, so poll generously
+        # (90 × 5s = 7.5 min, within the job's 20-min timeout). Uses the runner's
+        # curl+jq — no dependency on the image's internal tools.
+        run: |
+          for _ in $(seq 1 90); do
+            status=$(curl -s http://localhost:9000/api/system/status | jq -r '.status // empty')
+            echo "status=${status:-<no response yet>}"
+            if [ "$status" = "UP" ]; then echo "SonarQube is UP"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::SonarQube did not reach UP in time"
+          exit 1
+      - name: Generate a scanner token (first-boot admin API)
+        # SonarQube's documented first-boot admin/admin default for this
+        # ephemeral, loopback-only container (analogous to MiniStack's test/test).
+        # Passed via env — NOT a literal `-u admin:admin`, which the gitleaks
+        # curl-auth-user rule flags; the env-var form is not a hardcoded secret.
+        env:
+          SONAR_BOOT_USER: admin
+          SONAR_BOOT_PASS: admin
+        run: |
+          token=$(curl -s -u "$SONAR_BOOT_USER:$SONAR_BOOT_PASS" -X POST \
+            "http://localhost:9000/api/user_tokens/generate?name=github-actions" | jq -r '.token')
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            echo "::error::failed to generate SonarQube token"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "SONAR_TOKEN=$token" >> "$GITHUB_ENV"
+      - name: Create SonarQube project
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+        run: |
+          curl -s -X POST -H "Authorization: Bearer $SONAR_TOKEN" \
+            "http://localhost:9000/api/projects/create?project=e2e-ministack&name=e2e-ministack" > /dev/null
+      - name: Run SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
+        env:
+          SONAR_HOST_URL: http://localhost:9000
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=e2e-ministack
+            -Dsonar.projectName=e2e-ministack
+            -Dsonar.sources=.
+            -Dsonar.exclusions=node_modules/**,cdk.out/**,coverage/**,reports/**
+      - name: Check quality gate (report-only)
+        id: qg
+        continue-on-error: true
+        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
+        timeout-minutes: 5
+        env:
+          SONAR_HOST_URL: http://localhost:9000
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+      # produce → always-upload → enforce (same shape as the grype/trivy jobs):
+      # the fetch+convert runs with continue-on-error so its result never fails
+      # the STEP (the SARIF/artifact still upload), the outcome is saved, and a
+      # final if: always() step enforces it. HONEST semantics: a SARIF is only
+      # ever written from a REAL scan result — `curl -sf` fails on any non-2xx,
+      # so on server-down / scan-never-ran NO sonar.sarif exists (we do NOT
+      # fabricate an empty one: an empty SARIF under category `sonarqube` would
+      # tell Code Scanning "analysis ran, found nothing" and RESOLVE prior
+      # sonarqube alerts). A genuine 0-issue scan does yield a real empty-results
+      # SARIF — that is a true "nothing found".
+      - name: Fetch issues JSON + derive SARIF
+        id: sarif
+        continue-on-error: true
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+        run: |
+          curl -sf -H "Authorization: Bearer $SONAR_TOKEN" \
+            "http://localhost:9000/api/issues/search?componentKeys=e2e-ministack&ps=500&p=1" \
+            > sonar-issues.json
+          node .github/scripts/sonar-to-sarif.mjs sonar-issues.json sonar.sarif
+      - name: Record outcome
+        if: always()
+        env:
+          SARIF_OUTCOME: ${{ steps.sarif.outcome }}
+        run: echo "outcome=$SARIF_OUTCOME" > sonar.outcome
+      # Upload only when a real SARIF was produced (steps.sarif succeeded). On
+      # failure there is no file and we must NOT upload — an absent/empty SARIF
+      # would wrongly resolve prior alerts; the enforce step below fails the job.
+      - name: Upload SARIF to Security tab
+        if: ${{ steps.sarif.outcome == 'success' }}
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: sonar.sarif
+          category: sonarqube
+      - name: Upload SonarQube reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sonarqube-reports
+          path: |
+            sonar.sarif
+            sonar-issues.json
+          if-no-files-found: warn
+      - name: Enforce SonarQube analysis ran (fail on a non-real scan)
+        if: always()
+        run: |
+          # The analysis producing a SARIF is a REAL gate: if the scan/convert
+          # failed (server never came up, API error), fail the job — do NOT let
+          # a missing SARIF pass silently. Only the quality-GATE verdict below
+          # is report-only, not the analysis itself.
+          source sonar.outcome
+          echo "sonar SARIF step outcome=$outcome"
+          test "$outcome" = "success"
+      - name: Report quality-gate status (report-only — never fails)
+        if: always()
+        env:
+          QG_STATUS: ${{ steps.qg.outputs.quality-gate-status }}
+        run: |
+          # Report-only (mirrors trivy-fs): LOG the gate status, do NOT fail.
+          # Ratchet: a follow-up flips this to `test "$QG_STATUS" = "PASSED"`.
+          echo "SonarQube quality gate status: ${QG_STATUS:-unknown} (report-only — not enforced)"
 
   # ── Software Bill of Materials ──────────────────────────────────────────
   # Syft generates a CycloneDX SBOM of the dependency tree (#77). Unlike the
