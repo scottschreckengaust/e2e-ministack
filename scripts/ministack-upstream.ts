@@ -145,9 +145,9 @@ export function draftCommentBody(row: RegistryRow, digest: string): string {
  */
 export function formatPostCommand(ref: string, body: string): string {
   // Single-quote the body for a POSIX shell so the maintainer can paste it
-  // verbatim; escape embedded single quotes the standard way.
-  const quoted = `'${String(body).replace(/'/g, `'\\''`)}'`;
-  return `gh issue comment ${ref} --repo ${UPSTREAM_REPO} --body ${quoted}`;
+  // verbatim; escape embedded single quotes the standard way (' → '\'').
+  const escaped = String(body).replaceAll("'", String.raw`'\''`);
+  return `gh issue comment ${ref} --repo ${UPSTREAM_REPO} --body '${escaped}'`;
 }
 
 /**

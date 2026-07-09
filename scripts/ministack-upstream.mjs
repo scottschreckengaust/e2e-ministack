@@ -49,7 +49,6 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AUTO_POST_UPSTREAM,
   UPSTREAM_REPO,
   draftCommentBody,
   formatOneClickUrl,
@@ -61,7 +60,7 @@ import {
 
 // Re-export the single gate so importers that read it via the .mjs still see it
 // (the value lives in the tested .ts module).
-export { AUTO_POST_UPSTREAM };
+export { AUTO_POST_UPSTREAM } from './ministack-upstream.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
