@@ -887,32 +887,36 @@ jobs:
         env:
           SONAR_HOST_URL: http://localhost:9000
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+      # produce → always-upload → enforce (same shape as the grype/trivy jobs):
+      # the fetch+convert runs with continue-on-error so its result never fails
+      # the STEP (the SARIF/artifact still upload), the outcome is saved, and a
+      # final if: always() step enforces it. HONEST semantics: a SARIF is only
+      # ever written from a REAL scan result — `curl -sf` fails on any non-2xx,
+      # so on server-down / scan-never-ran NO sonar.sarif exists (we do NOT
+      # fabricate an empty one: an empty SARIF under category `sonarqube` would
+      # tell Code Scanning "analysis ran, found nothing" and RESOLVE prior
+      # sonarqube alerts). A genuine 0-issue scan does yield a real empty-results
+      # SARIF — that is a true "nothing found".
       - name: Fetch issues JSON + derive SARIF
-        # HONEST failure semantics (do NOT fabricate an empty SARIF): an empty
-        # SARIF uploaded under category `sonarqube` tells Code Scanning "this
-        # analysis ran and found nothing", which RESOLVES any previously-open
-        # sonarqube alerts. So we only ever produce a SARIF from a REAL scan
-        # result. `curl -sf` fails the step on any non-2xx (server down / scan
-        # never ran); the converter must exist (with the healthcheck fixed,
-        # checkout is never skipped). A genuine 0-issue scan legitimately yields
-        # an empty-results SARIF — that IS a real "nothing found". Note:
-        # report-only applies to the quality-GATE verdict only (below); an
-        # analysis/infra failure here is a real job failure.
+        id: sarif
+        continue-on-error: true
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
         run: |
           curl -sf -H "Authorization: Bearer $SONAR_TOKEN" \
             "http://localhost:9000/api/issues/search?componentKeys=e2e-ministack&ps=500&p=1" \
             > sonar-issues.json
           node .github/scripts/sonar-to-sarif.mjs sonar-issues.json sonar.sarif
+      - name: Record outcome
+        if: always()
         env:
-          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
-      # Upload the SARIF ONLY when the scan actually produced one. Guarding on
-      # hashFiles keeps the honest semantics: if the analysis failed (no
-      # sonar.sarif), we must NOT upload — an empty/absent SARIF under this
-      # category would wrongly resolve prior sonarqube alerts. The job already
-      # failed at the fetch step in that case; this just avoids a misleading
-      # second error.
+          SARIF_OUTCOME: ${{ steps.sarif.outcome }}
+        run: echo "outcome=$SARIF_OUTCOME" > sonar.outcome
+      # Upload only when a real SARIF was produced (steps.sarif succeeded). On
+      # failure there is no file and we must NOT upload — an absent/empty SARIF
+      # would wrongly resolve prior alerts; the enforce step below fails the job.
       - name: Upload SARIF to Security tab
-        if: ${{ hashFiles('sonar.sarif') != '' }}
+        if: ${{ steps.sarif.outcome == 'success' }}
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: sonar.sarif
@@ -926,6 +930,16 @@ jobs:
             sonar.sarif
             sonar-issues.json
           if-no-files-found: warn
+      - name: Enforce SonarQube analysis ran (fail on a non-real scan)
+        if: always()
+        run: |
+          # The analysis producing a SARIF is a REAL gate: if the scan/convert
+          # failed (server never came up, API error), fail the job — do NOT let
+          # a missing SARIF pass silently. Only the quality-GATE verdict below
+          # is report-only, not the analysis itself.
+          source sonar.outcome
+          echo "sonar SARIF step outcome=$outcome"
+          test "$outcome" = "success"
       - name: Report quality-gate status (report-only — never fails)
         if: always()
         env:
