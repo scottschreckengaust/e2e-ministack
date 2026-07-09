@@ -222,17 +222,36 @@ jobs:
             BSD-2-Clause, BSD-3-Clause, 0BSD,
             BlueOak-1.0.0, Python-2.0,
             CC0-1.0, CC-BY-4.0, Unlicense
-          # allow-dependencies-licenses is intentionally ABSENT (steady state:
-          # empty). "Could not detect a license" on a brand-new release is
-          # upstream harvest lag (GitHub sources PyPI license data from
-          # ClearlyDefined) and is self-expiring — this action is PR-diff-
-          # scoped, so the warning only fires on PRs touching that package.
-          # Exemption purls also match by NAME ONLY (purlsMatch ignores the
-          # @version), so a standing entry silences license checks for ALL
-          # future versions of the package. Instead, route each UNKNOWN to a
-          # `license-review` issue per #127 and the procedure in
-          # docs/SECURITY-TOOLING.md ("Could not detect a license") — the
-          # triage step below (#127 Leg B1) automates that routing.
+          # allow-dependencies-licenses carries exactly ONE documented entry: the
+          # SonarQube LGPL exception (#150/#161). SonarSource/sonarqube-scan-action
+          # is LGPL-3.0 — copyleft, NOT on the permissive allow-list above — but a
+          # CI-ONLY action we invoke, never linked/redistributed into repo output,
+          # so its copyleft terms don't reach it (the same external-invocation
+          # carve-out that clears shellcheck/ClamAV). This is a MAINTAINER-APPROVED
+          # exception; see docs/SECURITY-TOOLING.md.
+          # #161 Q1 (verified against the action's src/purl.ts `purlsMatch` at the
+          # pinned SHA): exemptions match by NAME ONLY — `purlsMatch` compares
+          # type + namespace/name and IGNORES the version. So the @<sha> below is
+          # cosmetic; a future SHA/version bump does NOT re-trigger review, the
+          # entry silences license checks for ALL versions of this action. That is
+          # intended here (it's LGPL at every version, permanently exempt while used).
+          # nosemgrep (maintainer-approved, same proven false positive as the
+          # sonarqube job's pins): the exemption purl carries the action's
+          # 40-char commit SHA, tripping the "sonar…<40-hex>" secrets heuristic.
+          # NOTE: a plain quoted scalar (not a `>-` block) so the trailing
+          # `# nosemgrep` is a real YAML comment — inside a block scalar it would
+          # be literal text and corrupt the purl (breaking the exemption).
+          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e' # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+          # Aside from that one entry, allow-dependencies-licenses stays empty for
+          # the license-UNKNOWN path: "Could not detect a license" on a brand-new
+          # release is upstream harvest lag (GitHub sources PyPI license data from
+          # ClearlyDefined) and is self-expiring — this action is PR-diff-scoped,
+          # so the warning only fires on PRs touching that package. Because
+          # exemptions are name-only (above), a standing entry would silence
+          # license checks for ALL future versions; so instead route each UNKNOWN
+          # to a `license-review` issue per #127 and the procedure in
+          # docs/SECURITY-TOOLING.md ("Could not detect a license") — the triage
+          # step below (#127 Leg B1) automates that routing.
 
       # ── License-UNKNOWN triage (#127 Leg B1) ──────────────────────────
       # The action's `invalid-license-changes` output is JSON with buckets
