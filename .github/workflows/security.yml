@@ -230,26 +230,30 @@ jobs:
             BSD-2-Clause, BSD-3-Clause, 0BSD,
             BlueOak-1.0.0, Python-2.0,
             CC0-1.0, CC-BY-4.0, Unlicense
-          # allow-dependencies-licenses carries exactly ONE documented entry: the
-          # SonarQube LGPL exception (#150/#161). SonarSource/sonarqube-scan-action
-          # is LGPL-3.0 — copyleft, NOT on the permissive allow-list above — but a
-          # CI-ONLY action we invoke, never linked/redistributed into repo output,
-          # so its copyleft terms don't reach it (the same external-invocation
-          # carve-out that clears shellcheck/ClamAV). This is a MAINTAINER-APPROVED
-          # exception; see docs/SECURITY-TOOLING.md.
+          # allow-dependencies-licenses carries exactly TWO documented entries: the
+          # SonarQube LGPL exception (#150/#161) for BOTH SonarSource actions this
+          # repo uses — sonarqube-scan-action AND sonarqube-quality-gate-action.
+          # Both are LGPL-3.0 — copyleft, NOT on the permissive allow-list above —
+          # but CI-ONLY actions we invoke, never linked/redistributed into repo
+          # output, so their copyleft terms don't reach it (the same external-
+          # invocation carve-out that clears shellcheck/ClamAV). MAINTAINER-APPROVED
+          # exception; see docs/SECURITY-TOOLING.md. (Both must be listed: an
+          # exemption for only one leaves the other in dependency-review's
+          # `unlicensed` bucket, where the #127 Leg B1 pypi-only triage step emits
+          # a "non-pypi purl — manual triage" NOTICE. Listing both silences it.)
           # #161 Q1 (verified against the action's src/purl.ts `purlsMatch` at the
           # pinned SHA): exemptions match by NAME ONLY — `purlsMatch` compares
-          # type + namespace/name and IGNORES the version. So the @<sha> below is
+          # type + namespace/name and IGNORES the version. So the @<sha>s below are
           # cosmetic; a future SHA/version bump does NOT re-trigger review, the
-          # entry silences license checks for ALL versions of this action. That is
-          # intended here (it's LGPL at every version, permanently exempt while used).
+          # entries silence license checks for ALL versions of these actions. That
+          # is intended here (they're LGPL at every version, permanently exempt).
           # nosemgrep (maintainer-approved, same proven false positive as the
-          # sonarqube job's pins): the exemption purl carries the action's
-          # 40-char commit SHA, tripping the "sonar…<40-hex>" secrets heuristic.
+          # sonarqube job's pins): the exemption purls carry the actions'
+          # 40-char commit SHAs, tripping the "sonar…<40-hex>" secrets heuristic.
           # NOTE: a plain quoted scalar (not a `>-` block) so the trailing
           # `# nosemgrep` is a real YAML comment — inside a block scalar it would
-          # be literal text and corrupt the purl (breaking the exemption).
-          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e' # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+          # be literal text and corrupt the purls (breaking the exemption).
+          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b' # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
           # Aside from that one entry, allow-dependencies-licenses stays empty for
           # the license-UNKNOWN path: "Could not detect a license" on a brand-new
           # release is upstream harvest lag (GitHub sources PyPI license data from
