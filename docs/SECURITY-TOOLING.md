@@ -290,12 +290,29 @@ finding" above). The 7 fixed-upstream python CVEs carry a distinct "awaiting a
 MiniStack image rebuild" note plus an upstream advisory link and are dropped the
 moment a rebuilt digest ships patched python.
 
-**How the records are fed.** Grype's `--vex` and Trivy's `--vex` both take
-explicit **file paths** (neither accepts a bare directory). The jobs gather the
-`.vex/*.openvex.json` glob into a comma-separated list at runtime and pass it via
-each scanner's env (`GRYPE_VEX_DOCUMENTS` / `TRIVY_VEX`) — so adding or removing a
-`.vex/` file needs no workflow edit, and the list can't drift out of sync with the
-directory. See `.vex/README.md`.
+**How the records are fed (the channels differ per scanner — this is a real
+gotcha).** Both scanners' `--vex` takes explicit **file paths** (neither accepts a
+bare directory or globs), but the two CI actions surface it differently:
+
+- **Grype** — the `ministack-image` job gathers `.vex/CVE-*.openvex.json` into a
+  comma-separated list at runtime and passes it via the **`GRYPE_VEX_DOCUMENTS`
+  env**, which the `anchore/scan-action` forwards to grype natively (grype reads
+  its whole config from env). Verified working in CI.
+- **Trivy** — the `aquasecurity/trivy-action` v0.36.0 has **no `vex` input and
+  does NOT forward a `TRIVY_VEX` env** to trivy's `--vex` flag (its entrypoint
+  runs `trivy <type> <ref>` with no extra flags), so the env route silently loads
+  **zero** VEX docs and the gate wrongly fires. The working channel is the
+  committed **`trivy.yaml`'s `vulnerability.vex` list** (the 50 image CVE file
+  paths), which trivy **auto-discovers from the CWD** regardless of the action.
+  Because `trivy.yaml` is shared with the report-only `trivy-fs` job, the records
+  are image-package purls that don't match any source-tree component, so they're
+  inert there. (Also: the action UNSETS `TRIVY_SEVERITY` for SARIF output, so the
+  `trivy-image` job sets the floor + `exit-code` via the action's
+  `severity`/`exit-code`/`limit-severities-for-sarif` **inputs**, not env.)
+
+Either way the `.vex/CVE-*` set is the single source of truth; a new/removed CVE
+record means one line added/removed in `trivy.yaml` (the grype side is glob-driven
+and needs no edit). See `.vex/README.md`.
 
 **Severity-cutoff ratchet plan.** The image gate starts at `severity-cutoff: high`
 (Grype) / `TRIVY_SEVERITY: HIGH,CRITICAL` (Trivy) — the smallest acceptable

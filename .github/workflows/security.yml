@@ -388,12 +388,14 @@ jobs:
         with:
           persist-credentials: false
       # Grype's `--vex` takes individual files, not a directory, and the
-      # scan-action `vex` input only forwards ONE path — so gather every
-      # `.vex/*.openvex.json` into the comma-separated list Grype's
-      # GRYPE_VEX_DOCUMENTS env accepts (verified: comma works, space does not).
+      # scan-action `vex` input only forwards ONE path — so gather the image
+      # CVE records (`.vex/CVE-*.openvex.json`) into the comma-separated list
+      # Grype's GRYPE_VEX_DOCUMENTS env accepts (verified: comma works, space
+      # does not). The `ecdsa` record is excluded (it targets a pypi purl on a
+      # different surface, not the image) — matching trivy.yaml's `vulnerability.vex`.
       - name: Gather VEX documents
         id: vex
-        run: echo "docs=$(printf '%s,' .vex/*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
+        run: echo "docs=$(printf '%s,' .vex/CVE-*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
       # NOTE: this digest MUST match the image pinned in ci.yml
       # (ministackorg/ministack:full@sha256:dd2cf4d...). Keep them in sync;
       # if ci.yml bumps the digest, bump it here too.
@@ -548,22 +550,31 @@ jobs:
       - name: Report Trivy FS outcome (report-only — never fails)
         if: always()
         run: |
-          # Report-only: LOG the outcome, do NOT fail the job (mirrors the
-          # report-only Grype ministack-image job, which has no enforce step).
-          # The hard-fail flip (test "$outcome" = "success") is deferred to #84.
+          # Report-only: LOG the outcome, do NOT fail the job. Only the IMAGE
+          # jobs hard-fail (#84); the filesystem source scan stays report-only.
           source trivy-fs.outcome
-          echo "trivy-fs step outcome=$outcome (report-only — not enforced; #84 owns the hard-fail flip)"
+          echo "trivy-fs step outcome=$outcome (report-only — not enforced)"
 
   # trivy-image — vuln scan of the pinned MiniStack emulator image by digest
   # (Trivy analog of the flipped Grype `ministack-image` job). HARD-FAIL,
   # VEX-gated (#84): the image is third-party and pinned by digest, so we can't
   # patch CVEs inside it — the ~50 unfixable base-image high+ CVEs are accepted
-  # via the same `.vex/` OpenVEX `not_affected` records the Grype job uses, fed
-  # to Trivy through the `TRIVY_VEX` env (a comma-separated file list; Trivy's
-  # `--vex` takes files, not a directory). `exit-code: 1` makes Trivy fail on any
-  # remaining (uncovered) high+ CVE; `continue-on-error: true` keeps that off the
-  # STEP so the SARIF always uploads, and the final `if: always()` step enforces
-  # the saved outcome (produce → always-upload → enforce).
+  # via the same `.vex/` OpenVEX `not_affected` records the Grype job uses.
+  #
+  # HOW VEX REACHES TRIVY: through the committed `trivy.yaml`'s `vulnerability.vex`
+  # list, which Trivy auto-discovers from the CWD. The trivy-action (v0.36.0) has
+  # NO `vex` input and does NOT forward a `TRIVY_VEX` env to Trivy's `--vex` flag
+  # (verified against its entrypoint — it runs `trivy <type> <ref>` with no extra
+  # flags), so the env route silently loaded ZERO VEX docs and the gate wrongly
+  # fired; the `trivy.yaml` route is what actually loads them. See trivy.yaml.
+  #
+  # SEVERITY + EXIT via the action's INPUTS (not env): the action UNSETS
+  # TRIVY_SEVERITY for SARIF output unless `limit-severities-for-sarif: true`, so
+  # severity/exit-code are passed as `severity`/`exit-code` inputs with
+  # `limit-severities-for-sarif: true` to keep the HIGH,CRITICAL floor. `exit-code:
+  # 1` fails Trivy on any UNCOVERED high+ CVE; `continue-on-error: true` keeps that
+  # off the STEP so the SARIF always uploads, and the final `if: always()` step
+  # enforces the saved outcome (produce → always-upload → enforce).
   trivy-image:
     name: Trivy MiniStack image scan
     runs-on: ubuntu-latest
@@ -582,23 +593,13 @@ jobs:
           key: trivy-db-${{ github.run_id }}
           restore-keys: |
             trivy-db-
-      # Gather every `.vex/*.openvex.json` into the comma-separated list Trivy's
-      # `--vex` / TRIVY_VEX env accepts (Trivy rejects a bare directory).
-      - name: Gather VEX documents
-        id: vex
-        run: echo "docs=$(printf '%s,' .vex/*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
+      # VEX comes from the committed trivy.yaml (auto-discovered), NOT a flag/env.
       # NOTE: this digest MUST match the image pinned in ci.yml and the Grype
       # ministack-image job above (ministackorg/ministack:full@sha256:dd2cf4d...).
       # Keep all three in sync; if ci.yml bumps the digest, bump it here too.
       - id: trivy
         name: Run Trivy image (SARIF; hard-fail, VEX-gated)
         continue-on-error: true # keep failure OFF the step so SARIF always uploads; enforced below
-        env:
-          # VEX-accept the base-image CVEs (comma-separated .vex/ file list) and
-          # fail (exit-code 1) on any HIGH,CRITICAL that remains uncovered.
-          TRIVY_VEX: ${{ steps.vex.outputs.docs }}
-          TRIVY_SEVERITY: HIGH,CRITICAL
-          TRIVY_EXIT_CODE: '1'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
@@ -606,6 +607,11 @@ jobs:
           format: sarif
           output: trivy-image.sarif
           cache-dir: ${{ github.workspace }}/.cache/trivy
+          # Severity floor + hard-fail via inputs; limit-severities-for-sarif keeps
+          # the action from unsetting the severity filter on SARIF output.
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          limit-severities-for-sarif: 'true'
       - name: Record outcome
         if: always()
         # Pass the (trusted, enum-valued) step outcome via env rather than inline
@@ -616,13 +622,6 @@ jobs:
       - name: Emit human-readable table (report artifact)
         if: always()
         continue-on-error: true
-        env:
-          # Same VEX set + severity floor so the human-readable table reflects
-          # the gated view (suppressed rows shown as such). No exit-code here —
-          # this step is display-only; enforcement is off the SARIF step's
-          # outcome below.
-          TRIVY_VEX: ${{ steps.vex.outputs.docs }}
-          TRIVY_SEVERITY: HIGH,CRITICAL
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
@@ -630,6 +629,10 @@ jobs:
           format: table
           output: trivy-image.txt
           cache-dir: ${{ github.workspace }}/.cache/trivy
+          # Same severity floor so the table reflects the gated view; no exit-code
+          # (display-only — enforcement is off the SARIF step's outcome). VEX is
+          # auto-loaded from trivy.yaml. `table` isn't SARIF, so severity isn't unset.
+          severity: 'HIGH,CRITICAL'
           skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
       - name: Upload SARIF to Security tab
         if: always()

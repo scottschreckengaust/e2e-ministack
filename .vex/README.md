@@ -8,12 +8,18 @@ of leaving it as permanent red noise.
 
 As of **#84** these records are **live**: the `security.yml` `ministack-image`
 (Grype) and `trivy-image` (Trivy) jobs are **hard-fail, VEX-gated** and consume
-the `.vex/*.openvex.json` set via each scanner's `--vex` input (Grype through
-`GRYPE_VEX_DOCUMENTS`, Trivy through `TRIVY_VEX` — both a comma-separated file
-list; neither `--vex` accepts a bare directory). The image gate now fails on any
+the `.vex/CVE-*.openvex.json` set. The feed channel differs per scanner (neither
+`--vex` accepts a bare directory): **Grype** reads them via the
+`GRYPE_VEX_DOCUMENTS` env (a comma-separated file list the `anchore/scan-action`
+forwards natively); **Trivy** reads them from the committed `trivy.yaml`
+`vulnerability.vex` list, which trivy auto-discovers from the CWD — the
+`aquasecurity/trivy-action` v0.36.0 has no `vex` input and does not forward a
+`TRIVY_VEX` env, so the config file is the channel that actually loads them (see
+`docs/SECURITY-TOOLING.md` § MiniStack image scan). The image gate fails on any
 **new** high+ CVE not covered by a record here, and passes on the accepted set.
 The `ecdsa` record targets a filesystem/lockfile surface not yet wired to a
-`--vex` consumer, so it remains staged (see its note below).
+`--vex` consumer, so it remains staged (see its note below) and is excluded from
+both image-gate feeds.
 
 ## Why `not_affected` (not `affected`)
 
