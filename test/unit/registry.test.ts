@@ -168,7 +168,7 @@ describe('MiniStack compatibility registries — unit schema gate', () => {
         deploy: 'maybe', // not in pass|fail|skipped
         oracles: { sdk: 'pass', cli: 'pass' },
         lastVerifiedDigest:
-          'sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3',
+          'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
         notes: '',
       };
       expect(validateProvisioning({ results: [badRow] })).toBe(false);
@@ -182,7 +182,7 @@ describe('MiniStack compatibility registries — unit schema gate', () => {
         deploy: 'pass',
         oracles: { sdk: 'pass', cli: 'pass' },
         lastVerifiedDigest:
-          'sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3',
+          'sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
         notes: '',
       };
       expect(validateProvisioning({ results: [goodRow] })).toBe(true);

@@ -16,7 +16,7 @@ Node is pinned to 24 via `mise.toml` (`mise install` to set up). MiniStack must 
 docker run -d --name ministack --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e LAMBDA_EXECUTOR=docker -e MINISTACK_RDS_PUBLIC_ENDPOINT=1 -e MINISTACK_HOST=localhost \
-  ministackorg/ministack:full@sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3
+  ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815
 
 # 2. Point the AWS toolchain at MiniStack (BOTH endpoint vars are required):
 export AWS_ENDPOINT_URL=http://localhost:4566 AWS_ENDPOINT_URL_S3=http://localhost:4566 \

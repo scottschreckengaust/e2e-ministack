@@ -12,7 +12,7 @@ supply-chain safety. This file is the authoritative inventory.
 | `aws-cdk`, `aws-cdk-lib`      | `package.json`                       | exact (`2.1128.0`, `2.260.0`)                                          |
 | Node.js                       | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                                                |
 | npm (via Corepack)            | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                                                  |
-| MiniStack image               | `ci.yml`                             | digest (`@sha256:c5ce466…`)                                            |
+| MiniStack image               | `ci.yml`                             | digest (`@sha256:dd2cf4d…`)                                            |
 | CodeQL analyzer bundle        | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                                                |
 | Semgrep                       | `security.yml`                       | `==1.167.0`                                                            |
 | cfn-lint / checkov            | `security.yml`                       | `==1.52.0` / `==3.3.2`                                                 |
