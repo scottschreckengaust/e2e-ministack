@@ -55,6 +55,9 @@ trivy-fs.txt
 trivy-image.txt
 npm-audit.json
 sbom.cdx.json
+# ClamAV + SonarQube report files (SARIF/outcome already covered above)
+clamdscan.txt
+sonar-issues.json
 # CI-downloaded scanner binaries
 /gitleaks
 /osv-scanner

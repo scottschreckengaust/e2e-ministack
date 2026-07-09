@@ -241,7 +241,7 @@ Expected: exit 0, ~24 packages resolved.
 
 Add these comment lines at the very top of `.github/scanner-requirements/sonar-tools.txt` (above the uv autogenerate banner), matching the `semgrep.txt` style:
 
-```
+```text
 # Content-pinned (hash-verified) requirements for the SonarQube SARIF exporter.
 # Consumed by .github/workflows/security.yml (sonarqube job) via
 # `pip install --require-hashes`. Top-level pin: sonar-tools==3.21
@@ -625,14 +625,14 @@ The existing block says `allow-dependencies-licenses is intentionally ABSENT (st
 
 Change the opening line of that comment from:
 
-```
+```text
           # allow-dependencies-licenses is intentionally ABSENT (steady state:
           # empty). "Could not detect a license" on a brand-new release is
 ```
 
 to:
 
-```
+```text
           # allow-dependencies-licenses carries exactly ONE documented entry —
           # the SonarQube LGPL exception above (#150/#161). It is otherwise kept
           # empty for the license-UNKNOWN path: "Could not detect a license" on
@@ -675,14 +675,14 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 In `.gitignore`, in the "CI scan reports / outcome files" block (after `trivy-image.txt`), add:
 
-```
+```text
 clamdscan.txt
 sonar-issues.json
 ```
 
 In `.prettierignore`, in the "CI-generated scan reports / artifacts" block (after `trivy-image.txt`), add:
 
-```
+```text
 clamdscan.txt
 sonar-issues.json
 ```
@@ -693,7 +693,7 @@ sonar-issues.json
 
 In the `## Gate inventory` table, add two rows (keep column alignment):
 
-```
+```text
 | ClamAV                | security.yml | working-tree virus/malware signature scan | hard-fail             |
 | SonarQube             | security.yml | code quality + security analysis (Community) | report-only        |
 ```

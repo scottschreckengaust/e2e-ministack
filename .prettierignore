@@ -19,5 +19,7 @@ cfn-lint.txt
 trivy-fs.txt
 trivy-image.txt
 npm-audit.json
+clamdscan.txt
+sonar-issues.json
 reports/
 .fuzz-corpus/
