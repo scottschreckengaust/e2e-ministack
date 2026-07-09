@@ -27,3 +27,18 @@ regexes = [
   # CDK bootstrap asset bucket name: cdk-<qualifier hex>-assets-<account>-<region>.
   '''^cdk-[a-f0-9]{8,}-assets-[0-9]{12}-[a-z0-9-]+$''',
 ]
+
+# SonarQube's DOCUMENTED first-boot default credential (admin/admin) appears in
+# the #150/#161 design/plan docs and, historically, in a workflow example.
+# curl-auth-user flags the literal `-u admin:admin`. This is a public, fixed
+# default for an ephemeral loopback-only CI container (analogous to MiniStack's
+# test/test) — not a real credential. Scoped to the exact `admin:admin` value
+# (regex, NOT path, per the note above) so any OTHER `-u user:pass` leak is still
+# caught. The live workflow uses the env-var form (no literal); this allowlist
+# covers the documented default wherever it is written out.
+[[allowlists]]
+description = "SonarQube documented first-boot admin/admin default is not a secret"
+regexTarget = "secret"
+regexes = [
+  '''^admin:admin$''',
+]

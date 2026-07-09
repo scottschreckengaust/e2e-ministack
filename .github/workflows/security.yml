@@ -65,8 +65,16 @@ jobs:
           # --error sets a non-zero exit on findings; capture it so the report
           # still uploads, then enforce in a later step.
           set +e
+          # --exclude=docs/superpowers: the brainstorming spec/plan artifacts
+          # (#150/#161) write out this repo's SHA/digest PINS in prose + code
+          # fences, which the generic `detected-sonarqube-docs-api-key` rule
+          # matches ("sonar…<40-hex>"). Those are public, required pins in
+          # non-shippable design docs — a proven false positive (same rule the
+          # sonarqube job's inline nosemgrep addresses), excluded at the
+          # directory level here since per-line nosemgrep in markdown prose is
+          # impractical. Does NOT blind semgrep to any executable code.
           semgrep scan --config=auto --error --sarif --output semgrep.sarif \
-            --exclude=node_modules --exclude=cdk.out
+            --exclude=node_modules --exclude=cdk.out --exclude=docs/superpowers
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()

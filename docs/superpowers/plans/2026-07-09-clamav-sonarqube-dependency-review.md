@@ -473,8 +473,12 @@ sonarqube:
         done
         echo "::error::SonarQube did not reach UP in time"; exit 1
     - name: Generate a scanner token (first-boot admin API)
+      # admin/admin via env, not a literal `-u user:pass` (gitleaks curl-auth-user).
+      env:
+        SONAR_BOOT_USER: admin
+        SONAR_BOOT_PASS: admin
       run: |
-        token=$(curl -s -u admin:admin -X POST \
+        token=$(curl -s -u "$SONAR_BOOT_USER:$SONAR_BOOT_PASS" -X POST \
           "http://localhost:9000/api/user_tokens/generate?name=github-actions" | jq -r '.token')
         if [ -z "$token" ] || [ "$token" = "null" ]; then
           echo "::error::failed to generate SonarQube token"; exit 1
