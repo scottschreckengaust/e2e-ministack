@@ -357,13 +357,25 @@ jobs:
   # image BY ITS PINNED DIGEST so a newly-disclosed CVE in the emulator is
   # surfaced even though we can't patch a third-party image.
   #
-  # Failure policy: REPORT-ONLY (fail-build: false). The image is third-party
-  # and pinned by digest; we cannot remediate CVEs inside it by editing this
-  # repo, so hard-failing CI on its findings would only block work on issues
-  # we can't fix. Instead we always emit + upload SARIF (artifact + Security
-  # tab) so findings stay visible and actionable (e.g. bumping the pinned
-  # digest once MiniStack ships a fix). The weekly schedule above keeps this
-  # current as new CVEs are disclosed.
+  # Failure policy: HARD-FAIL, VEX-gated (#84). The image is third-party and
+  # pinned by digest — we can't patch CVEs inside it — but a naive hard-fail
+  # would be permanently red on ~50 unfixable base-image high+ CVEs. Instead
+  # every accepted CVE is recorded as an individual, honest OpenVEX
+  # `status: not_affected` record under `.vex/` (one file per CVE), which Grype
+  # consumes via `GRYPE_VEX_DOCUMENTS` (a comma-separated list) and moves to the
+  # ignored set. The gate then fails ONLY on a NEW high+ CVE not yet covered by
+  # a `.vex/` record — the actionable signal (VEX-accept it or bump the digest).
+  #
+  # WHY not_affected (not affected): Grype's OpenVEX only suppresses
+  # `not_affected`/`fixed` (grype/vex/openvex/implementation.go `FilterMatches`);
+  # `affected` AUGMENTS (re-surfaces) matches — proven in PR #160. The
+  # `not_affected` justification is `vulnerable_code_cannot_be_controlled_by_adversary`
+  # — a genuine adversary-reachability claim for this local-only, loopback-bound,
+  # ephemeral CI emulator (see each `.vex/` record's impact_statement + docs).
+  #
+  # Keeps the produce → always-upload → ENFORCE shape: `fail-build: false` so
+  # the action never fails the step itself (the SARIF must always upload); the
+  # step's own outcome is captured and enforced in the final `if: always()` step.
   ministack-image:
     name: Grype MiniStack image scan
     runs-on: ubuntu-latest
@@ -375,17 +387,45 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+      # Grype's `--vex` takes individual files, not a directory, and the
+      # scan-action `vex` input only forwards ONE path — so gather the image
+      # CVE records (`.vex/CVE-*.openvex.json`) into the comma-separated list
+      # Grype's GRYPE_VEX_DOCUMENTS env accepts (verified: comma works, space
+      # does not). The `ecdsa` record is excluded (it targets a pypi purl on a
+      # different surface, not the image) — matching trivy.yaml's `vulnerability.vex`.
+      - name: Gather VEX documents
+        id: vex
+        run: echo "docs=$(printf '%s,' .vex/CVE-*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
       # NOTE: this digest MUST match the image pinned in ci.yml
       # (ministackorg/ministack:full@sha256:dd2cf4d...). Keep them in sync;
       # if ci.yml bumps the digest, bump it here too.
       - id: grype
+        # continue-on-error so an UNCOVERED high+ finding fails the STEP (records
+        # outcome=failure) WITHOUT stopping the job — the SARIF must still upload.
+        # Enforcement is off the saved outcome (produce → always-upload → enforce).
+        continue-on-error: true
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        env:
+          # Grype reads its config from env too; feed the whole `.vex/` set.
+          GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
           image: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
-          # Report-only: third-party image we can't patch (see comment above).
-          fail-build: false
+          # fail-build:true so the action calls core.setFailed (→ step outcome
+          # `failure`) on any high+ CVE left after VEX; with `fail-build:false`
+          # it only WARNS (outcome stays `success`) and the gate wouldn't fire.
+          # Severity floor stays `high` (ratchets down to medium/low over time —
+          # each step its own PR; see docs).
+          fail-build: true
           severity-cutoff: high
           output-format: sarif
+      # Capture the step's real outcome (success = no UNCOVERED high+ CVE, since
+      # VEX-accepted ones are ignored). Passed via env, not inline interpolation,
+      # per the repo's zizmor-clean / no-template-injection rule.
+      - name: Record outcome
+        if: always()
+        env:
+          GRYPE_OUTCOME: ${{ steps.grype.outcome }}
+        run: echo "outcome=$GRYPE_OUTCOME" > grype-image.outcome
       - name: Upload SARIF to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
@@ -399,17 +439,31 @@ jobs:
           name: grype-ministack-image-sarif
           path: ${{ steps.grype.outputs.sarif }}
           if-no-files-found: warn
+      - name: Enforce Grype image result (hard-fail on any uncovered high+ CVE)
+        if: always()
+        run: |
+          source grype-image.outcome
+          echo "grype ministack-image step outcome=$outcome (fails on any high+ CVE not covered by a .vex/ record)"
+          test "$outcome" = "success"
 
   # ── Trivy (second vuln scanner, alongside Grype) ────────────────────────
-  # Trivy (Aqua Security, Apache-2.0) runs as a REPORT-ONLY second vuln scanner
-  # next to the Grype jobs above. It is a deliberate DUAL-SCANNER overlap:
-  # Grype and Trivy use DIFFERENT vulnerability databases, so they surface
-  # different CVEs on the same target — running both widens coverage. Trivy is
-  # also the intended full-tree backstop for the license-UNKNOWN / rider gap
-  # that dependency-review's list mode can't fail closed on (docs/SECURITY-
-  # TOOLING.md, #77 scope). This wiring is the FOUNDATION for #84 (dual-scanner
-  # OpenVEX hard-fail gate): #133 stays report-only — NO .vex/ records, NO
-  # `vulnerability.vex:` list, NO hard-fail flip; those belong to #84.
+  # Trivy (Aqua Security, Apache-2.0) runs as a second vuln scanner next to the
+  # Grype jobs above. It is a deliberate DUAL-SCANNER overlap: Grype and Trivy
+  # use DIFFERENT vulnerability databases, so they surface different CVEs on the
+  # same target — running both widens coverage (on the pinned image the high+
+  # sets diverge: 47 grype ∪ 27 trivy = 50 union). Trivy is also the intended
+  # full-tree backstop for the license-UNKNOWN / rider gap that
+  # dependency-review's list mode can't fail closed on (docs/SECURITY-TOOLING.md,
+  # #77 scope).
+  #
+  # Failure policy is SPLIT (#84):
+  #   * trivy-fs   — REPORT-ONLY (source tree; mirrors the report-only Grype FS
+  #                  job's posture for filesystem scanning — no VEX, no flip).
+  #   * trivy-image — HARD-FAIL, VEX-gated (mirrors the flipped Grype
+  #                  `ministack-image` job): the same `.vex/` OpenVEX
+  #                  `not_affected` records gate it via Trivy's `--vex`
+  #                  (fed through the `TRIVY_VEX` env, a comma-separated file
+  #                  list — Trivy's `--vex` takes files, not a directory).
   #
   # The Trivy vuln DB FLOATS by design (like Grype's DB) so newly-disclosed
   # CVEs are caught without a repo change; it is cached across runs via
@@ -420,14 +474,12 @@ jobs:
   # Trivy auto-discovers the committed trivy.yaml (repo root); scan policy stays
   # in the workflow flags below, not in that file.
   #
-  # Report-only wiring: the trivy-action only fails the step when you set
-  # `exit-code`; we deliberately DON'T set it, so a scan with findings still
-  # succeeds. We still follow the produce → always-upload → ENFORCE(log) shape:
-  # run the action with `continue-on-error: true`, persist the step's outcome to
-  # a `*.outcome` file, always-upload SARIF (artifact + Security tab), then a
-  # final `if: always()` step sources the outcome and only LOGS it (never fails
-  # — that mirrors the report-only Grype ministack-image job). #84 owns the flip
-  # to a real enforce (`test "$outcome" = "success"`).
+  # Both jobs keep the produce → always-upload → ENFORCE shape: run the action
+  # with `continue-on-error: true` (so a finding never fails the STEP and the
+  # SARIF always uploads), persist the step's outcome to a `*.outcome` file,
+  # always-upload SARIF (artifact + Security tab), then a final `if: always()`
+  # step sources the outcome. trivy-fs only LOGS it (report-only); trivy-image
+  # ENFORCES it (`test "$outcome" = "success"`).
 
   # trivy-fs — filesystem vuln scan of the repo source (Trivy analog of the
   # Grype FS job).
@@ -498,16 +550,31 @@ jobs:
       - name: Report Trivy FS outcome (report-only — never fails)
         if: always()
         run: |
-          # Report-only: LOG the outcome, do NOT fail the job (mirrors the
-          # report-only Grype ministack-image job, which has no enforce step).
-          # The hard-fail flip (test "$outcome" = "success") is deferred to #84.
+          # Report-only: LOG the outcome, do NOT fail the job. Only the IMAGE
+          # jobs hard-fail (#84); the filesystem source scan stays report-only.
           source trivy-fs.outcome
-          echo "trivy-fs step outcome=$outcome (report-only — not enforced; #84 owns the hard-fail flip)"
+          echo "trivy-fs step outcome=$outcome (report-only — not enforced)"
 
   # trivy-image — vuln scan of the pinned MiniStack emulator image by digest
-  # (Trivy analog of the report-only Grype `ministack-image` job). The image is
-  # third-party and pinned by digest, so we can't remediate CVEs inside it by
-  # editing this repo — always emit + upload SARIF instead.
+  # (Trivy analog of the flipped Grype `ministack-image` job). HARD-FAIL,
+  # VEX-gated (#84): the image is third-party and pinned by digest, so we can't
+  # patch CVEs inside it — the ~50 unfixable base-image high+ CVEs are accepted
+  # via the same `.vex/` OpenVEX `not_affected` records the Grype job uses.
+  #
+  # HOW VEX REACHES TRIVY: through the committed `trivy.yaml`'s `vulnerability.vex`
+  # list, which Trivy auto-discovers from the CWD. The trivy-action (v0.36.0) has
+  # NO `vex` input and does NOT forward a `TRIVY_VEX` env to Trivy's `--vex` flag
+  # (verified against its entrypoint — it runs `trivy <type> <ref>` with no extra
+  # flags), so the env route silently loaded ZERO VEX docs and the gate wrongly
+  # fired; the `trivy.yaml` route is what actually loads them. See trivy.yaml.
+  #
+  # SEVERITY + EXIT via the action's INPUTS (not env): the action UNSETS
+  # TRIVY_SEVERITY for SARIF output unless `limit-severities-for-sarif: true`, so
+  # severity/exit-code are passed as `severity`/`exit-code` inputs with
+  # `limit-severities-for-sarif: true` to keep the HIGH,CRITICAL floor. `exit-code:
+  # 1` fails Trivy on any UNCOVERED high+ CVE; `continue-on-error: true` keeps that
+  # off the STEP so the SARIF always uploads, and the final `if: always()` step
+  # enforces the saved outcome (produce → always-upload → enforce).
   trivy-image:
     name: Trivy MiniStack image scan
     runs-on: ubuntu-latest
@@ -526,12 +593,13 @@ jobs:
           key: trivy-db-${{ github.run_id }}
           restore-keys: |
             trivy-db-
+      # VEX comes from the committed trivy.yaml (auto-discovered), NOT a flag/env.
       # NOTE: this digest MUST match the image pinned in ci.yml and the Grype
       # ministack-image job above (ministackorg/ministack:full@sha256:dd2cf4d...).
       # Keep all three in sync; if ci.yml bumps the digest, bump it here too.
       - id: trivy
-        name: Run Trivy image (SARIF; report-only)
-        continue-on-error: true # report-only: never fail the job on this step
+        name: Run Trivy image (SARIF; hard-fail, VEX-gated)
+        continue-on-error: true # keep failure OFF the step so SARIF always uploads; enforced below
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
@@ -539,6 +607,11 @@ jobs:
           format: sarif
           output: trivy-image.sarif
           cache-dir: ${{ github.workspace }}/.cache/trivy
+          # Severity floor + hard-fail via inputs; limit-severities-for-sarif keeps
+          # the action from unsetting the severity filter on SARIF output.
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          limit-severities-for-sarif: 'true'
       - name: Record outcome
         if: always()
         # Pass the (trusted, enum-valued) step outcome via env rather than inline
@@ -556,6 +629,10 @@ jobs:
           format: table
           output: trivy-image.txt
           cache-dir: ${{ github.workspace }}/.cache/trivy
+          # Same severity floor so the table reflects the gated view; no exit-code
+          # (display-only — enforcement is off the SARIF step's outcome). VEX is
+          # auto-loaded from trivy.yaml. `table` isn't SARIF, so severity isn't unset.
+          severity: 'HIGH,CRITICAL'
           skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
       - name: Upload SARIF to Security tab
         if: always()
@@ -572,12 +649,15 @@ jobs:
             trivy-image.sarif
             trivy-image.txt
           if-no-files-found: warn
-      - name: Report Trivy image outcome (report-only — never fails)
+      - name: Enforce Trivy image result (hard-fail on any uncovered high+ CVE)
         if: always()
         run: |
-          # Report-only (mirrors the Grype ministack-image job): LOG, never fail.
+          # Hard-fail (VEX-gated): the scan step ran with exit-code 1 + TRIVY_VEX,
+          # so its outcome is `failure` iff a HIGH,CRITICAL remains uncovered by a
+          # .vex/ record. Mirrors the flipped Grype ministack-image enforce.
           source trivy-image.outcome
-          echo "trivy-image step outcome=$outcome (report-only — not enforced; #84 owns the hard-fail flip)"
+          echo "trivy-image step outcome=$outcome (fails on any high+ CVE not covered by a .vex/ record)"
+          test "$outcome" = "success"
 
   # trivy-config (cdk.out misconfig scan) — DELIBERATELY OMITTED for #133.
   # Decision (recorded per acceptance criterion): DEFER as checkov-redundant

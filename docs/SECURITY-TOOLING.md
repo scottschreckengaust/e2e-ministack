@@ -16,22 +16,22 @@ gate follows the **produce → always-upload → enforce** pattern so its report
 artifact exists even when the job fails; SARIF-capable gates also upload to the
 Security tab.
 
-| Gate                  | Workflow     | Scope                                   | Failure policy |
-| --------------------- | ------------ | --------------------------------------- | -------------- |
-| CodeQL (JS/TS)        | security.yml | SAST over source                        | hard-fail      |
-| Semgrep               | security.yml | SAST over source                        | hard-fail      |
-| npm audit             | security.yml | npm advisories (`--audit-level=high`)   | hard-fail      |
-| OSV-Scanner           | security.yml | lockfile advisories                     | hard-fail      |
-| Grype (FS)            | security.yml | filesystem vuln scan                    | hard-fail      |
-| Grype (MiniStack img) | security.yml | third-party emulator image by digest    | report-only    |
-| Trivy (FS)            | security.yml | filesystem vuln scan (2nd DB vs Grype)  | report-only    |
-| Trivy (MiniStack img) | security.yml | third-party emulator image by digest    | report-only    |
-| **dependency-review** | security.yml | PR dep-diff: vulns + **license policy** | hard-fail (PR) |
-| **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree              | informational  |
-| Gitleaks              | security.yml | secrets (full history)                  | hard-fail      |
-| checkov + cfn-lint    | security.yml | synthesized CloudFormation              | hard-fail      |
-| Threat model          | security.yml | `threat-model.tc.json` parses/sections  | hard-fail      |
-| actionlint + zizmor   | security.yml | workflow correctness + security         | hard-fail      |
+| Gate                  | Workflow     | Scope                                   | Failure policy        |
+| --------------------- | ------------ | --------------------------------------- | --------------------- |
+| CodeQL (JS/TS)        | security.yml | SAST over source                        | hard-fail             |
+| Semgrep               | security.yml | SAST over source                        | hard-fail             |
+| npm audit             | security.yml | npm advisories (`--audit-level=high`)   | hard-fail             |
+| OSV-Scanner           | security.yml | lockfile advisories                     | hard-fail             |
+| Grype (FS)            | security.yml | filesystem vuln scan                    | hard-fail             |
+| Grype (MiniStack img) | security.yml | third-party emulator image by digest    | hard-fail (VEX-gated) |
+| Trivy (FS)            | security.yml | filesystem vuln scan (2nd DB vs Grype)  | report-only           |
+| Trivy (MiniStack img) | security.yml | third-party emulator image by digest    | hard-fail (VEX-gated) |
+| **dependency-review** | security.yml | PR dep-diff: vulns + **license policy** | hard-fail (PR)        |
+| **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree              | informational         |
+| Gitleaks              | security.yml | secrets (full history)                  | hard-fail             |
+| checkov + cfn-lint    | security.yml | synthesized CloudFormation              | hard-fail             |
+| Threat model          | security.yml | `threat-model.tc.json` parses/sections  | hard-fail             |
+| actionlint + zizmor   | security.yml | workflow correctness + security         | hard-fail             |
 
 ## Remediating a scanner finding — fix it properly, don't suppress it
 
@@ -145,10 +145,10 @@ Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
 - **Undetected/unlicensed dependencies pass `dependency-review` silently** —
   per the action's docs, _"if we can't detect the license… the action won't
   fail."_ This is true in both allow- and deny-list modes. **Trivy's license
-  scan is the intended full-tree backstop** for the `UNKNOWN` case. Trivy is now
-  wired (#133) as a report-only **vuln** scanner (see "Trivy" above); enabling
-  its **license** scan as the enforced UNKNOWN backstop is part of the #84
-  dual-scanner accept-set work (#77 scope).
+  scan is the intended full-tree backstop** for the `UNKNOWN` case. Trivy is
+  wired (#133) as a **vuln** scanner (see "Trivy" above — `trivy-fs` report-only,
+  `trivy-image` hard-fail + VEX per #84); enabling its **license** scan as the
+  enforced UNKNOWN backstop is still future work (#77 scope), not covered here.
   - **"Could not detect a license" on a _brand-new_ release is usually harvest
     lag, not a license problem.** GitHub sources PyPI license data from
     [ClearlyDefined](https://clearlydefined.io), whose scan of a
@@ -217,51 +217,143 @@ artifact. It is **informational** (no enforce step). Artifact-only for now;
 attaching to releases is deferred until a release process exists. The SBOM can
 also feed Grype/Trivy for consistent component coverage.
 
-## Trivy (second vuln scanner, report-only) — #133
+## Trivy (second vuln scanner) — #133
 
-Trivy ([Aqua Security](https://github.com/aquasecurity/trivy)) runs as a
-**report-only** second vulnerability scanner alongside Grype, wired in #133 as
-the foundation for the #84 dual-scanner OpenVEX hard-fail gate. Two jobs in
-`security.yml`, mirroring the Grype pair:
+Trivy ([Aqua Security](https://github.com/aquasecurity/trivy)) runs as a second
+vulnerability scanner alongside Grype, wired in #133. Two jobs in `security.yml`,
+mirroring the Grype pair, with a **split failure policy** (set by #84):
 
 - **`trivy-fs`** — `trivy fs .` filesystem scan (Trivy analog of the Grype FS
-  job).
+  job). **Report-only** (mirrors the filesystem posture; no VEX).
 - **`trivy-image`** — vuln scan of the **pinned MiniStack emulator image by
-  digest** (Trivy analog of the report-only `ministack-image` Grype job); the
-  digest is kept in sync across `ci.yml` + both Grype/Trivy jobs.
+  digest** (Trivy analog of the `ministack-image` Grype job); the digest is kept
+  in sync across `ci.yml` + both Grype/Trivy jobs. **Hard-fail, VEX-gated** — see
+  "MiniStack image scan" below.
 
-Both follow the repo's **produce → always-upload → enforce** shape, but the
-enforce step is **report-only**: it logs the scan outcome and never fails the
-job (mirroring the report-only Grype `ministack-image` job). Each emits SARIF to
-the **Security tab** (distinct categories `trivy-fs` / `trivy-image`) plus a
-table artifact.
+Both follow the repo's **produce → always-upload → enforce** shape. `trivy-fs`'s
+enforce step is report-only (logs the outcome, never fails); `trivy-image`'s
+enforces (`test "$outcome" = "success"`). Each emits SARIF to the **Security
+tab** (categories `trivy-fs` / `trivy-image`) plus a table artifact.
 
 **Why a second scanner (deliberate overlap with Grype).** Grype and Trivy use
 **different vulnerability databases**, so they surface **different CVEs** on the
-same target — running both widens coverage rather than duplicating it. Trivy is
-also the **intended full-tree backstop** for the license-UNKNOWN / rider gap
-that `dependency-review`'s list mode can't fail closed on (see "Known
-limitations" above; #77 scope). #84 will consume both scanners' SARIF to build a
-union accept-set governed by OpenVEX.
-
-**Report-only rationale.** Like the Grype image job, this stays report-only in
-this PR: no `.vex/` records, no `vulnerability.vex:` list in `trivy.yaml`, and no
-hard-fail flip on either Grype or Trivy. Those all belong to **#84**. The
-Trivy-vs-Grype CVE-count divergence on the MiniStack image (needed for #84's
-union accept-set) is produced by the first CI run's `trivy-image` SARIF
-artifact.
+same target — running both widens coverage rather than duplicating it. On the
+pinned MiniStack image the high+ sets genuinely diverge: **47 (Grype) ∪ 27
+(Trivy) = 50 union** CVEs (24 in both, 23 Grype-only, 3 Trivy-only) — including
+severity disagreements (Grype rates the glibc CVEs Critical/High that Trivy rates
+Medium/Low). Trivy is also the **intended full-tree backstop** for the
+license-UNKNOWN / rider gap that `dependency-review`'s list mode can't fail
+closed on (see "Known limitations" above; #77 scope).
 
 **Governance verdict (tool-adoption).** Trivy (Aqua Security) and its
 `trivy-action` are both **Apache-2.0** — permissive, no copyleft, no
 single-vendor lock-in — so Trivy satisfies the repo's FOSS-only tool-adoption
-line (the same line that rejected k6/AGPL in #73 and Renovate/AGPL in #80). The
-vexctl/OpenVEX tooling #84 will add is likewise Apache-2.0.
+line (the same line that rejected k6/AGPL in #73 and Renovate/AGPL in #80). #84
+adds **no new tool**: the OpenVEX records are **hand-authored JSON** consumed by
+the already-adopted Grype/Trivy `--vex` inputs (no `vexctl` binary), so it clears
+the tool-adoption gate without a new dependency.
+
+## MiniStack image scan — hard-fail, VEX-gated (#84)
+
+The `ministack-image` (Grype) and `trivy-image` (Trivy) jobs are **hard-fail**:
+they fail CI on any high+ CVE in the pinned emulator image that is **not** covered
+by an OpenVEX record under `.vex/`. The ~50 unfixable base-image CVEs (the Grype
+∪ Trivy union above) are each accepted via an individual
+`.vex/CVE-XXXX.openvex.json` file, so the gate is green today and fails only on a
+**new** CVE — the actionable signal (VEX-accept it, or bump the digest once
+MiniStack ships a fix).
+
+**Why `not_affected`, not `affected`.** The intuitive record for "we accept this
+risk" is `status: affected` + `action_statement`. **Neither Grype nor Trivy will
+suppress an `affected` finding** — proven empirically at the pinned versions in
+**PR #160**:
+
+- Grype v0.110.0 (`anchore/scan-action` v7.4.0): `grype/vex/openvex/`
+  `implementation.go` `FilterMatches` moves only `not_affected`/`fixed` to the
+  ignored set; `AugmentMatches` _re-surfaces_ `affected` matches (the `vex-add`
+  path is "show these", not "hide these"). An `affected` + `vex-add`/`ignore`
+  config left the findings present (`--fail-on high` still exited non-zero).
+- Trivy v0.70.0 (`aquasecurity/trivy-action` v0.36.0): `pkg/vex/openvex.go`
+  `Filter` suppresses only `not_affected`/`fixed`.
+
+So the honest, **working** path is **`status: not_affected`** with a truthful
+justification enum. We use **`vulnerable_code_cannot_be_controlled_by_adversary`**
+— a genuine adversary-reachability claim, not a false "code not present": MiniStack
+is a local-only CI emulator (binds port 4566 on loopback, ephemeral per-run
+container, never network-exposed, exercised only by this repo's own CDK/SDK test
+traffic, not a deployed/production artifact), so no adversary can supply the
+crafted input that would reach the vulnerable code. The full accepted-risk prose
+and fix state live in each record's `impact_statement`. This is an **honest,
+machine-readable, per-CVE risk acceptance** — the sanctioned form, distinct from a
+blanket `nosemgrep`/ignore that asserts false safety (see "Remediating a scanner
+finding" above). The 7 fixed-upstream python CVEs carry a distinct "awaiting a
+MiniStack image rebuild" note plus an upstream advisory link and are dropped the
+moment a rebuilt digest ships patched python.
+
+**How the records are fed (the channels differ per scanner — this is a real
+gotcha).** Both scanners' `--vex` takes explicit **file paths** (neither accepts a
+bare directory or globs), but the two CI actions surface it differently:
+
+- **Grype** — the `ministack-image` job gathers `.vex/CVE-*.openvex.json` into a
+  comma-separated list at runtime and passes it via the **`GRYPE_VEX_DOCUMENTS`
+  env**, which the `anchore/scan-action` forwards to grype natively (grype reads
+  its whole config from env). Verified working in CI.
+- **Trivy** — the `aquasecurity/trivy-action` v0.36.0 has **no `vex` input and
+  does NOT forward a `TRIVY_VEX` env** to trivy's `--vex` flag (its entrypoint
+  runs `trivy <type> <ref>` with no extra flags), so the env route silently loads
+  **zero** VEX docs and the gate wrongly fires. The working channel is the
+  committed **`trivy.yaml`'s `vulnerability.vex` list** (the 50 image CVE file
+  paths), which trivy **auto-discovers from the CWD** regardless of the action.
+  Because `trivy.yaml` is shared with the report-only `trivy-fs` job, the records
+  are image-package purls that don't match any source-tree component, so they're
+  inert there. (Also: the action UNSETS `TRIVY_SEVERITY` for SARIF output, so the
+  `trivy-image` job sets the floor + `exit-code` via the action's
+  `severity`/`exit-code`/`limit-severities-for-sarif` **inputs**, not env.)
+
+Either way the `.vex/CVE-*` set is the single source of truth; a new/removed CVE
+record means one line added/removed in `trivy.yaml` (the grype side is glob-driven
+and needs no edit). See `.vex/README.md`.
+
+**Product PURL structure — qualifier-less, and why (a real cross-scanner gotcha).**
+OpenVEX matching is per-PRODUCT, and [go-vex](https://github.com/openvex/go-vex)
+(used by both scanners) only matches when the statement's product purl equals the
+scanned component's purl, **including qualifiers**. Grype and trivy emit
+**different** purls for the same image package: grype `?arch=amd64&distro=debian-13`,
+trivy `?arch=all&distro=debian-13.5` (trivy also tracks the distro _minor_). So a
+record carrying one scanner's full purl silently fails to match the other — this
+is exactly why the first hard-fail attempt passed grype but the image CVEs came
+through unfiltered in trivy. The fix: each `products[].@id` is a **qualifier-less
+base purl** (`pkg:deb/debian/<name>@<version>`, `pkg:generic/python@<version>`),
+which matches BOTH scanners regardless of arch / distro-minor. Debian **epochs** are
+a second wrinkle — grype keeps the epoch in the version (`name@1:2.41-5`), trivy
+strips it (`name@2.41-5`); those records list **both** version forms as products.
+Verified against grype v0.110.0 (SBOM) and trivy v0.70.0 (`trivy image <digest>`,
+the real CI path): both exit 0, all high+ suppressed. **When adding a record for a
+new CVE, use the qualifier-less purl (and add the epoch-less form if the version has
+an epoch)** — not the raw scanner SARIF purl.
+
+**Severity-cutoff ratchet plan.** The image gate starts at `severity-cutoff: high`
+(Grype) / trivy's `severity: HIGH,CRITICAL` action input (with
+`limit-severities-for-sarif: true`, because the trivy-action otherwise unsets the
+severity filter on SARIF output) — the smallest acceptable starting set. The end state is "fail on **any** new CVE at the configured floor,
+with every accepted one explicitly VEX'd." The floor is a **documented, ratcheting
+value**: once the high+ set is under VEX control and CI is green, progressively
+lower it — **high → medium → low** — VEX-accepting the newly-surfaced
+lower-severity base-image CVEs the same honest way. **Each lowering is its own
+reviewable batch of VEX additions** — do not lower below `high` in the same change
+that introduces the gate. The `.vex/` staleness + the cutoff value are audit
+targets of **#76**.
+
+**`.vex/` drift (#76).** Every record must still match a live finding; resolved
+ones (digest bump drops a CVE, or upstream-fixed python reaches the image) are
+pruned by the #76 drift audit. A new uncovered high+ CVE fails the gate until
+VEX-accepted or the digest is bumped.
 
 **`trivy-config` (cdk.out misconfig) — deferred as checkov-redundant (YAGNI).**
 A Trivy config/IaC scan of the synthesized `cdk.out` templates was
 **deliberately omitted**: that surface is already the REQUIRED `iac` gate
 (checkov + cfn-lint), so a Trivy config job would duplicate IaC coverage for no
-new signal here. #133 scope is vuln scanning (FS + image); add `trivy-config`
+new signal here. #133 scope was vuln scanning (FS + image); add `trivy-config`
 later only if a concrete gap in checkov's CloudFormation coverage is identified.
 
 ## Intentional local ↔ remote (pre-commit) gap

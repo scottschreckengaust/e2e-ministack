@@ -1,14 +1,14 @@
 # Trivy configuration (auto-discovered when trivy runs in this directory).
 #
-# Deliberately MINIMAL. Scan POLICY — severity gating, exit codes, scanners,
-# output format — lives in the workflow flags (.github/workflows/security.yml,
-# trivy-fs / trivy-image jobs), NOT here, so a config value can't silently
-# conflict with or override the CI invocation. Keep this file for settings that
-# are genuinely file-scoped and stable across every invocation.
+# Scan POLICY — severity gating, exit codes, scanners, output format — lives in
+# the workflow flags (.github/workflows/security.yml, trivy-fs / trivy-image
+# jobs), NOT here, so a config value can't silently conflict with the CI
+# invocation. The ONE exception is the VEX list below (see its note).
 #
-# #133 wires Trivy in REPORT-ONLY. Do NOT add `severity:` / `exit-code:` here —
-# report-only is enforced by the jobs (they never fail on findings), and a
-# severity/exit-code here would fight the workflow.
+# Failure policy is set in the jobs: trivy-fs is report-only; trivy-image is
+# hard-fail + VEX-gated (#84). Do NOT add `severity:` / `exit-code:` here — a
+# value here would apply to BOTH jobs; trivy-image sets severity + exit-code via
+# the trivy-action's `severity`/`exit-code`/`limit-severities-for-sarif` inputs.
 
 # Skip generated / vendored trees the source scan shouldn't flag. cdk.out is
 # synthesized CloudFormation (already covered by checkov/cfn-lint); node_modules
@@ -18,6 +18,68 @@ scan:
     - node_modules
     - cdk.out
 
-# NOTE: the OpenVEX `vulnerability.vex:` list (VEX-based finding suppression) is
-# DEFERRED to #84 (dual-scanner OpenVEX hard-fail gate). It is intentionally
-# absent here — #133 stops at report-only and adds no VEX records or suppression.
+# OpenVEX finding suppression (#84). Trivy reads this file NATIVELY from the CWD
+# (the trivy-action invokes `trivy <type> <ref>` with no explicit flags and does
+# NOT forward the `--vex` flag / `TRIVY_VEX` env — verified against
+# trivy-action v0.36.0's entrypoint), so the VEX file list MUST live here, not in
+# a workflow env, to actually reach trivy. `vulnerability.vex` takes explicit
+# FILE paths (it rejects a bare directory and does not glob), so the 50 accepted
+# MiniStack-image CVE records are enumerated below. These are the `ministack-image`
+# / `trivy-image` accept-set; they target deb/generic image-package purls, so they
+# are inert for the report-only `trivy-fs` source scan (no matching components).
+# The `ecdsa` record is intentionally NOT listed — it targets a pypi purl on a
+# different (lockfile) surface. Keep this list in lockstep with `.vex/CVE-*.json`
+# (add/remove a file -> add/remove a line here); #76 audits the drift. See
+# .vex/README.md and docs/SECURITY-TOOLING.md.
+vulnerability:
+  vex:
+    - .vex/CVE-2025-69720.openvex.json
+    - .vex/CVE-2026-11822.openvex.json
+    - .vex/CVE-2026-11824.openvex.json
+    - .vex/CVE-2026-11940.openvex.json
+    - .vex/CVE-2026-11972.openvex.json
+    - .vex/CVE-2026-12087.openvex.json
+    - .vex/CVE-2026-12151.openvex.json
+    - .vex/CVE-2026-13149.openvex.json
+    - .vex/CVE-2026-1525.openvex.json
+    - .vex/CVE-2026-1526.openvex.json
+    - .vex/CVE-2026-1528.openvex.json
+    - .vex/CVE-2026-22036.openvex.json
+    - .vex/CVE-2026-2229.openvex.json
+    - .vex/CVE-2026-25547.openvex.json
+    - .vex/CVE-2026-26996.openvex.json
+    - .vex/CVE-2026-27903.openvex.json
+    - .vex/CVE-2026-27904.openvex.json
+    - .vex/CVE-2026-3298.openvex.json
+    - .vex/CVE-2026-33750.openvex.json
+    - .vex/CVE-2026-3644.openvex.json
+    - .vex/CVE-2026-41992.openvex.json
+    - .vex/CVE-2026-4224.openvex.json
+    - .vex/CVE-2026-42496.openvex.json
+    - .vex/CVE-2026-42497.openvex.json
+    - .vex/CVE-2026-45149.openvex.json
+    - .vex/CVE-2026-4786.openvex.json
+    - .vex/CVE-2026-48615.openvex.json
+    - .vex/CVE-2026-48617.openvex.json
+    - .vex/CVE-2026-48619.openvex.json
+    - .vex/CVE-2026-48930.openvex.json
+    - .vex/CVE-2026-48933.openvex.json
+    - .vex/CVE-2026-48937.openvex.json
+    - .vex/CVE-2026-48959.openvex.json
+    - .vex/CVE-2026-48961.openvex.json
+    - .vex/CVE-2026-48962.openvex.json
+    - .vex/CVE-2026-53615.openvex.json
+    - .vex/CVE-2026-5435.openvex.json
+    - .vex/CVE-2026-54369.openvex.json
+    - .vex/CVE-2026-54370.openvex.json
+    - .vex/CVE-2026-54371.openvex.json
+    - .vex/CVE-2026-5450.openvex.json
+    - .vex/CVE-2026-5928.openvex.json
+    - .vex/CVE-2026-6100.openvex.json
+    - .vex/CVE-2026-6734.openvex.json
+    - .vex/CVE-2026-7017.openvex.json
+    - .vex/CVE-2026-7210.openvex.json
+    - .vex/CVE-2026-8376.openvex.json
+    - .vex/CVE-2026-9538.openvex.json
+    - .vex/CVE-2026-9669.openvex.json
+    - .vex/CVE-2026-9697.openvex.json
