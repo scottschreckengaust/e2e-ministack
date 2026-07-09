@@ -809,12 +809,20 @@ jobs:
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: true
           SONAR_WEB_SYSTEMPASSCODE: passcode
+        # Health-cmd copied VERBATIM from the proven awslabs/agent-plugins
+        # reference (which runs this repeatedly). It parses api/system/status and
+        # tests status == UP, so Docker marks the container healthy only when
+        # SonarQube is truly ready. NOTE: uses BusyBox-compatible `wget -qO-`
+        # (the image ships BusyBox wget) — do NOT "simplify" to GNU long-options
+        # like `--no-verbose`/`--spider`: the image's wget rejects them, the
+        # health-cmd errors every cycle, the container never goes healthy, and
+        # GitHub then SKIPS checkout/setup — cascading into a confusing
+        # "module not found" downstream (observed on the first #162 run).
         options: >-
-          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:9000/api/system/status || exit 1"
-          --health-interval 15s
-          --health-timeout 10s
+          --health-cmd "status=$(wget -qO- http://localhost:9000/api/system/status | grep -oP '(?<=status\":\").*' | sed -e 's|\"}||' | tr -d '\n'); echo -n \"$status\"; test \"$status\" = \"UP\""
+          --health-interval 10s
+          --health-timeout 5s
           --health-retries 30
-          --health-start-period 60s
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -880,16 +888,31 @@ jobs:
           SONAR_HOST_URL: http://localhost:9000
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
       - name: Fetch issues JSON + derive SARIF
-        if: always()
+        # HONEST failure semantics (do NOT fabricate an empty SARIF): an empty
+        # SARIF uploaded under category `sonarqube` tells Code Scanning "this
+        # analysis ran and found nothing", which RESOLVES any previously-open
+        # sonarqube alerts. So we only ever produce a SARIF from a REAL scan
+        # result. `curl -sf` fails the step on any non-2xx (server down / scan
+        # never ran); the converter must exist (with the healthcheck fixed,
+        # checkout is never skipped). A genuine 0-issue scan legitimately yields
+        # an empty-results SARIF — that IS a real "nothing found". Note:
+        # report-only applies to the quality-GATE verdict only (below); an
+        # analysis/infra failure here is a real job failure.
+        run: |
+          curl -sf -H "Authorization: Bearer $SONAR_TOKEN" \
+            "http://localhost:9000/api/issues/search?componentKeys=e2e-ministack&ps=500&p=1" \
+            > sonar-issues.json
+          node .github/scripts/sonar-to-sarif.mjs sonar-issues.json sonar.sarif
         env:
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
-        run: |
-          curl -s -H "Authorization: Bearer $SONAR_TOKEN" \
-            "http://localhost:9000/api/issues/search?componentKeys=e2e-ministack&ps=500&p=1" \
-            > sonar-issues.json || echo '{"issues":[],"components":[]}' > sonar-issues.json
-          node .github/scripts/sonar-to-sarif.mjs sonar-issues.json sonar.sarif
+      # Upload the SARIF ONLY when the scan actually produced one. Guarding on
+      # hashFiles keeps the honest semantics: if the analysis failed (no
+      # sonar.sarif), we must NOT upload — an empty/absent SARIF under this
+      # category would wrongly resolve prior sonarqube alerts. The job already
+      # failed at the fetch step in that case; this just avoids a misleading
+      # second error.
       - name: Upload SARIF to Security tab
-        if: always()
+        if: ${{ hashFiles('sonar.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: sonar.sarif
