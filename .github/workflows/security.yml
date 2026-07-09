@@ -31,14 +31,14 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           languages: javascript-typescript
           # Pin the analyzer bundle so the CodeQL engine/queries are reproducible
           # (otherwise the action auto-updates to the latest bundle).
           tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.25.6/codeql-bundle.tar.gz
       # CodeQL uploads its own SARIF to the Security tab natively.
-      - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
 
   semgrep:
     name: Semgrep SAST
@@ -70,7 +70,7 @@ jobs:
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -145,7 +145,7 @@ jobs:
           ./osv-scanner scan source --lockfile=package-lock.json # human-readable
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: osv.sarif
           category: osv-scanner
@@ -337,7 +337,7 @@ jobs:
           output-format: sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
@@ -388,7 +388,7 @@ jobs:
           output-format: sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype-ministack-image
@@ -523,7 +523,7 @@ jobs:
           checkov -d cdk.out --framework cloudformation --compact # human-readable
       - name: Upload checkov SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: results_sarif.sarif
           category: checkov
