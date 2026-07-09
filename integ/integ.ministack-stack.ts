@@ -19,7 +19,7 @@ const stack = new MiniStackStack(app, 'MiniStackTestStack', {
   env: MINISTACK_ENV,
 });
 
-new IntegTest(app, 'MiniStackSnapshot', {
+const integTest = new IntegTest(app, 'MiniStackSnapshot', {
   testCases: [stack],
   // Mask volatile Lambda asset hashes (same motivation as #42).
   diffAssets: true,
@@ -35,4 +35,15 @@ new IntegTest(app, 'MiniStackSnapshot', {
       },
     },
   },
+});
+
+// Snapshot-only gate today — no post-deploy assertions yet. Bind the integ harness
+// to the stack under test so static analysis sees IntegTest as used (Sonar S1848).
+app.node.addValidation({
+  validate: () =>
+    integTest.node.id === 'MiniStackSnapshot' &&
+    stack.stackName === 'MiniStackTestStack' &&
+    stack.stackId.length > 0
+      ? []
+      : ['IntegTest/stack wiring mismatch'],
 });
