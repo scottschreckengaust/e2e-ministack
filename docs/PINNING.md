@@ -100,8 +100,11 @@ A toolchain-drift audit (issue #83) checked every pin above against its upstream
 latest release. PR #86 bumped the safe, independent subset (`actions/cache` v6,
 `zizmor-action` v0.5.7, cfn-lint 1.52.0, checkov 3.3.2). A follow-up re-audit
 found **no further independently-actionable drift**: every pinned Action and
-scanner above is at its current latest release, and the CodeQL `v4` action tag
-peels to the already-pinned commit (so it is not behind). The only residual is
+scanner above is at its current latest release. (The CodeQL `v4` action tag has
+since advanced past the previously-pinned commit; #154 repinned all 7
+`github/codeql-action/*` refs to the current release's peeled SHA
+`99df26d…` with an exact `# v4.37.0` comment, closing the zizmor
+`ref-version-mismatch` alerts.) The only residual is
 **Semgrep**, which is intentionally _not_ bumped in isolation — its binary
 version is coupled to the pre-commit rev and the vendored ruleset (tracked in
 issue #79). The coupled pre-commit↔CI pairs (gitleaks, actionlint, OSV-Scanner,
