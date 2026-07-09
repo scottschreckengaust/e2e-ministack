@@ -809,20 +809,18 @@ jobs:
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: true
           SONAR_WEB_SYSTEMPASSCODE: passcode
-        # Health-cmd copied VERBATIM from the proven awslabs/agent-plugins
-        # reference (which runs this repeatedly). It parses api/system/status and
-        # tests status == UP, so Docker marks the container healthy only when
-        # SonarQube is truly ready. NOTE: uses BusyBox-compatible `wget -qO-`
-        # (the image ships BusyBox wget) — do NOT "simplify" to GNU long-options
-        # like `--no-verbose`/`--spider`: the image's wget rejects them, the
-        # health-cmd errors every cycle, the container never goes healthy, and
-        # GitHub then SKIPS checkout/setup — cascading into a confusing
-        # "module not found" downstream (observed on the first #162 run).
-        options: >-
-          --health-cmd "status=$(wget -qO- http://localhost:9000/api/system/status | grep -oP '(?<=status\":\").*' | sed -e 's|\"}||' | tr -d '\n'); echo -n \"$status\"; test \"$status\" = \"UP\""
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 30
+        # NO --health-cmd, deliberately (same rule as MiniStack in AGENTS.md:
+        # "do NOT gate on --health-cmd; POLL readiness in a step instead").
+        # Why: a service-container health gate that never goes healthy makes
+        # GitHub abort with "Failed to initialize container" and SKIP the job's
+        # steps. SonarQube 26.7 has a ~5-min cold start (Elasticsearch + web +
+        # CE), which RACES any fixed health-retry budget — and a health-cmd that
+        # runs INSIDE the image depends on that image's tools (busybox vs GNU
+        # grep/wget), which change across digest bumps. Both bit us on #162.
+        # With no health-cmd, GitHub starts the container and proceeds straight
+        # to the steps; the "Wait for SonarQube to report UP" step below gates
+        # readiness using the RUNNER's curl+jq (version-independent) with a
+        # generous budget.
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -832,11 +830,14 @@ jobs:
         with:
           npm-ci: 'false' # converter uses Node built-ins only; no deps needed
       - name: Wait for SonarQube to report UP
+        # SonarQube 26.7 cold start (ES + web + CE) is ~5 min, so poll generously
+        # (90 × 5s = 7.5 min, within the job's 20-min timeout). Uses the runner's
+        # curl+jq — no dependency on the image's internal tools.
         run: |
-          for _ in $(seq 1 60); do
+          for _ in $(seq 1 90); do
             status=$(curl -s http://localhost:9000/api/system/status | jq -r '.status // empty')
-            echo "status=$status"
-            if [ "$status" = "UP" ]; then exit 0; fi
+            echo "status=${status:-<no response yet>}"
+            if [ "$status" = "UP" ]; then echo "SonarQube is UP"; exit 0; fi
             sleep 5
           done
           echo "::error::SonarQube did not reach UP in time"
