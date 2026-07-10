@@ -41,8 +41,16 @@ export class CompatLambdaStack extends CompatStack {
   ) {
     super(scope, id, props);
 
-    new DoublerFunction(this, 'Doubler', {
+    const doubler = new DoublerFunction(this, 'Doubler', {
       functionName: COMPAT_LAMBDA_FUNCTION_NAME,
+    });
+
+    // Export the provisioned function name. This also gives the construct
+    // instance a downstream consumer so static analysis sees it as used
+    // (Sonar S1848) — instantiating a CDK construct registers it into the
+    // stack's scope as a side effect the rule can't see.
+    new cdk.CfnOutput(this, 'DoublerFunctionName', {
+      value: doubler.fn.functionName,
     });
   }
 }
