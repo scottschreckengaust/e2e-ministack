@@ -23,6 +23,21 @@ const lambda = new LambdaClient({ endpoint, region });
 const s3 = new S3Client({ endpoint, region, forcePathStyle: true });
 
 describe('MiniStack CDK integration', () => {
+  // Track every object we write so the afterEach hook can delete it, keeping
+  // each run idempotent against a long-lived/reused emulator (issue #10):
+  // no test depends on (or is polluted by) an object left over from a prior
+  // run, and the bucket isn't required to start empty.
+  const Bucket = 'cdk-demo-bucket';
+  const writtenKeys: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      writtenKeys
+        .splice(0)
+        .map((Key) => s3.send(new DeleteObjectCommand({ Bucket, Key }))),
+    );
+  });
+
   it('invokes the deployed Lambda and gets the doubled value', async () => {
     const res = await lambda.send(
       new InvokeCommand({
@@ -60,21 +75,6 @@ describe('MiniStack CDK integration', () => {
     expect(res.StatusCode).toBe(200);
     const payload = JSON.parse(Buffer.from(res.Payload!).toString());
     expect(payload.statusCode).toBe(400);
-  });
-
-  // Track every object we write so the afterEach hook can delete it, keeping
-  // each run idempotent against a long-lived/reused emulator (issue #10):
-  // no test depends on (or is polluted by) an object left over from a prior
-  // run, and the bucket isn't required to start empty.
-  const Bucket = 'cdk-demo-bucket';
-  const writtenKeys: string[] = [];
-
-  afterEach(async () => {
-    await Promise.all(
-      writtenKeys
-        .splice(0)
-        .map((Key) => s3.send(new DeleteObjectCommand({ Bucket, Key }))),
-    );
   });
 
   it('round-trips an object through the deployed S3 bucket', async () => {
