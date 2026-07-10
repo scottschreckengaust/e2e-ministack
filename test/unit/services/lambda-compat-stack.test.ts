@@ -59,7 +59,7 @@ describe('CompatLambdaStack — self-provisioned compat stack', () => {
       Object.keys(template.findResources('AWS::Lambda::Function')).length,
     ).toBeGreaterThan(0);
     // The DLQ that backs the reserved-concurrency hardening.
-    expect(Object.keys(template.findResources('AWS::SQS::Queue')).length).toBe(
+    expect(Object.keys(template.findResources('AWS::SQS::Queue'))).toHaveLength(
       1,
     );
   });

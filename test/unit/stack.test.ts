@@ -19,7 +19,7 @@ describe('MiniStackStack — fine-grained assertions', () => {
     template.resourceCountIs('AWS::S3::Bucket', 2);
     // Companion assertion so SonarQube (S2699) sees an explicit assertion:
     // the CDK matcher above throws on mismatch, this restates the count.
-    expect(Object.keys(template.findResources('AWS::S3::Bucket')).length).toBe(
+    expect(Object.keys(template.findResources('AWS::S3::Bucket'))).toHaveLength(
       2,
     );
   });
