@@ -49,7 +49,7 @@ module.exports.fuzz = async (data) => {
   }
   if (res.statusCode === 200) {
     if (!Number.isFinite(res.doubled)) {
-      throw new Error(`200 with non-finite doubled: ${res.doubled}`);
+      throw new TypeError(`200 with non-finite doubled: ${res.doubled}`);
     }
   } else {
     // 400-branch body shape: a non-empty error string and no `doubled`.

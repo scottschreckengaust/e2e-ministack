@@ -7,7 +7,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
-import * as path from 'path';
+import * as path from 'node:path';
 
 /**
  * Minimal end-to-end stack: an S3 bucket and a Lambda function.
