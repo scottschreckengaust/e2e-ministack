@@ -10,6 +10,19 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.5.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.4.0...v0.5.0) (2026-07-10)
+
+
+### Features
+
+* **security:** add ClamAV + SonarQube scanners; exempt LGPL Sonar action in dependency-review ([#149](https://github.com/scottschreckengaust/e2e-ministack/issues/149), [#150](https://github.com/scottschreckengaust/e2e-ministack/issues/150), [#161](https://github.com/scottschreckengaust/e2e-ministack/issues/161)) ([#162](https://github.com/scottschreckengaust/e2e-ministack/issues/162)) ([afeab57](https://github.com/scottschreckengaust/e2e-ministack/commit/afeab570a0dfea2293e958145a02f0662cdc64ff))
+* **test:** add @cdk/integ-runner snapshot gate for MiniStackStack ([#169](https://github.com/scottschreckengaust/e2e-ministack/issues/169)) ([60e04f7](https://github.com/scottschreckengaust/e2e-ministack/commit/60e04f7358e314ef490282bf30a32648f4b1948e))
+
+
+### Bug Fixes
+
+* **sonar:** use CDK construct instances to satisfy S1848 ([#170](https://github.com/scottschreckengaust/e2e-ministack/issues/170)) ([#172](https://github.com/scottschreckengaust/e2e-ministack/issues/172)) ([23fbe3b](https://github.com/scottschreckengaust/e2e-ministack/commit/23fbe3bbaf20b6779371f8a41a8c59020e93c4c6))
+
 ## [0.4.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.3.0...v0.4.0) (2026-07-09)
 
 
