@@ -55,9 +55,11 @@ in `impact_statement`. See `docs/SECURITY-TOOLING.md` § "MiniStack image scan".
 
 ### MiniStack image base CVEs (`CVE-*.openvex.json`, #84)
 
-50 records — one per accepted high+ CVE on the pinned MiniStack image
+51 records — one per accepted high+ CVE on the pinned MiniStack image
 (`ministackorg/ministack:full@sha256:dd2cf4d…`), the union of Grype's (47) and
-Trivy's (27) high+ findings from the report-only scans they replaced. Each is
+Trivy's (27) high+ findings from the report-only scans they replaced, plus a
+newly-published CVE the Trivy DB surfaced later on the same unchanged digest (a
+`.vex/` staleness add — #76). Each is
 `status: not_affected` with justification
 **`vulnerable_code_cannot_be_controlled_by_adversary`** — a genuine
 adversary-reachability claim: MiniStack is a local-only CI emulator (binds port
@@ -84,6 +86,7 @@ Grouped by package (the record file is named for the CVE):
 - **libacl1** (2): CVE-2026-54369, CVE-2026-54370
 - **libattr1** (1): CVE-2026-54371
 - **libc-bin / libc6 (glibc)** (3): CVE-2026-5435, CVE-2026-5450, CVE-2026-5928
+- **libcares2 (c-ares)** (1): CVE-2026-33630
 - **libncursesw6 (ncurses)** (1): CVE-2025-69720
 - **libnode115 / nodejs** (6): CVE-2026-48615, CVE-2026-48617, CVE-2026-48619,
   CVE-2026-48930, CVE-2026-48933, CVE-2026-48937
