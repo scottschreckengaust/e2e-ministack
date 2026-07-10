@@ -29,6 +29,9 @@ describe('DoublerFunction construct — fine-grained synth assertions', () => {
       Runtime: 'nodejs24.x',
       Handler: 'index.handler',
     });
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')).length,
+    ).toBeGreaterThan(0);
   });
 
   it('hardens the Lambda with a dead-letter queue and reserved concurrency', () => {
@@ -36,6 +39,9 @@ describe('DoublerFunction construct — fine-grained synth assertions', () => {
       DeadLetterConfig: Match.objectLike({ TargetArn: Match.anyValue() }),
       ReservedConcurrentExecutions: 5,
     });
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')).length,
+    ).toBeGreaterThan(0);
   });
 
   it('KMS-encrypts the Lambda log group with a rotated CMK', () => {
@@ -55,6 +61,9 @@ describe('DoublerFunction construct — fine-grained synth assertions', () => {
     template.hasResourceProperties('AWS::SQS::Queue', {
       KmsMasterKeyId: Match.objectLike({ 'Fn::GetAtt': Match.anyValue() }),
     });
+    expect(
+      Object.keys(template.findResources('AWS::SQS::Queue')).length,
+    ).toBeGreaterThan(0);
   });
 
   it('does not attach the AWS-managed AWSLambdaBasicExecutionRole', () => {
@@ -66,9 +75,13 @@ describe('DoublerFunction construct — fine-grained synth assertions', () => {
     const app = new cdk.App();
     const stack = new cdk.Stack(app, 'NamedStack');
     new DoublerFunction(stack, 'Named', { functionName: 'my-doubler' });
-    Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
+    const named = Template.fromStack(stack);
+    named.hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'my-doubler',
     });
+    expect(
+      Object.keys(named.findResources('AWS::Lambda::Function')).length,
+    ).toBeGreaterThan(0);
   });
 
   it('exposes the underlying lambda.Function so callers can wire it up', () => {

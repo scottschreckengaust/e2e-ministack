@@ -34,6 +34,9 @@ describe('CompatLambdaStack — self-provisioned compat stack', () => {
       Runtime: 'nodejs24.x',
       Handler: 'index.handler',
     });
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')).length,
+    ).toBeGreaterThan(0);
   });
 
   it('keeps the compat function name DISTINCT from the demo cdk-doubler (collision guard)', () => {
@@ -52,6 +55,13 @@ describe('CompatLambdaStack — self-provisioned compat stack', () => {
       ReservedConcurrentExecutions: 5,
     });
     template.resourceCountIs('AWS::SQS::Queue', 1);
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')).length,
+    ).toBeGreaterThan(0);
+    // The DLQ that backs the reserved-concurrency hardening.
+    expect(Object.keys(template.findResources('AWS::SQS::Queue'))).toHaveLength(
+      1,
+    );
   });
 
   it('pins the deploy target to the MiniStack account/region unconditionally', () => {
@@ -97,9 +107,13 @@ describe('buildCompatApp — per-vertical CDK app entrypoint', () => {
   it('synthesizes the compat-lambda-doubler function through the app', () => {
     const app = buildCompatApp();
     const stack = app.node.findChild('CompatLambdaStack') as cdk.Stack;
-    Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
+    const template = Template.fromStack(stack);
+    template.hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'compat-lambda-doubler',
     });
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')).length,
+    ).toBeGreaterThan(0);
   });
 
   it('attaches the cdk-nag AwsSolutions pack to the app (so `cdk synth` gates)', () => {
