@@ -45,7 +45,7 @@
 // See docs/MINISTACK-COMPAT.md for the query/comment/watch flow.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -55,6 +55,7 @@ import {
   formatPostCommand,
   formatRef,
   isValidServiceName,
+  resolveGhBin,
   selectBestMatch,
 } from './ministack-upstream.ts';
 
@@ -78,14 +79,18 @@ const PIN_PATH = path.resolve(
 /**
  * Run `gh search {issues,prs}` against the upstream repo for a service and
  * return parsed JSON. Argv array → execFileSync (no shell); the service name
- * is validated by the caller before it reaches here.
+ * is validated by the caller before it reaches here. The `gh` binary is
+ * resolved to an ABSOLUTE path via `resolveGhBin` (no `$PATH` lookup — S4036);
+ * `resolveGhBin`/`existsSync` are the injected-I/O pair keeping the resolution
+ * logic gated in the `.ts` module.
  * @param {string} kind 'issues' | 'prs'
  * @param {string} service
  * @returns {Array<object>}
  */
 function ghSearch(kind, service) {
+  const ghBin = resolveGhBin(process.env, existsSync);
   const out = execFileSync(
-    'gh',
+    ghBin,
     [
       'search',
       kind,

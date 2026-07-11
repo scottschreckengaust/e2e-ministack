@@ -50,6 +50,63 @@ export function isValidServiceName(name: unknown): boolean {
 }
 
 /**
+ * Standard absolute directories a `gh` binary is installed into, in preference
+ * order (apt/dpkg, /usr/local, macOS Homebrew, Homebrew-on-Linux). Deliberately
+ * an ALLOW-LIST of fixed, root-owned locations — NOT `$PATH`.
+ */
+export const GH_BIN_DIRS = [
+  '/usr/bin',
+  '/usr/local/bin',
+  '/opt/homebrew/bin',
+  '/home/linuxbrew/.linuxbrew/bin',
+];
+
+/**
+ * Resolve the `gh` CLI to an ABSOLUTE path WITHOUT consulting `$PATH`
+ * (SonarQube S4036: never let a writable/attacker-influenced PATH entry decide
+ * which binary runs). Resolution order:
+ *
+ *   1. An explicit `GH_BIN` env override — but ONLY if it is an ABSOLUTE path to
+ *      an existing file. A bare name (`gh`) or a relative path is REJECTED,
+ *      because honoring it would re-introduce a `$PATH`/cwd lookup — the exact
+ *      thing this function removes. This is a strictly TIGHTER contract than the
+ *      bare-`gh` default it replaces.
+ *   2. Otherwise the first existing `gh` under the fixed {@link GH_BIN_DIRS}
+ *      allow-list (standard, root-owned install locations).
+ *
+ * Throws a clear, actionable error when `gh` is in none of them (the caller
+ * turns this into an exit-3 "is gh installed/authenticated?" message).
+ *
+ * `fileExists` is injected (the real `existsSync` lives in the `.mjs` shim) so
+ * this stays a PURE, in-process-testable function under the coverage + mutation
+ * gates. `env` is passed in for the same reason.
+ */
+export function resolveGhBin(
+  env: Record<string, string | undefined>,
+  fileExists: (p: string) => boolean,
+): string {
+  const override = env.GH_BIN;
+  // Absolute + existing only. `path.isAbsolute` isn't used to avoid a Node
+  // import in this pure module; a leading '/' is the POSIX absolute marker and
+  // GH_BIN_DIRS are POSIX (this tool is documented Linux/macOS, #117/#137).
+  if (
+    override !== undefined &&
+    override.startsWith('/') &&
+    fileExists(override)
+  ) {
+    return override;
+  }
+  for (const dir of GH_BIN_DIRS) {
+    const candidate = `${dir}/gh`;
+    if (fileExists(candidate)) return candidate;
+  }
+  throw new Error(
+    `gh CLI not found in a standard location (${GH_BIN_DIRS.join(', ')}); ` +
+      `install it or set GH_BIN to the ABSOLUTE path of the gh binary`,
+  );
+}
+
+/**
  * Format a single `gh search` result as an `owner/repo#N` tracking ref, or
  * null when there is no match.
  */

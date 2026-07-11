@@ -2,12 +2,14 @@ import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import {
   AUTO_POST_UPSTREAM,
+  GH_BIN_DIRS,
   UPSTREAM_REPO,
   draftCommentBody,
   formatOneClickUrl,
   formatPostCommand,
   formatRef,
   isValidServiceName,
+  resolveGhBin,
   selectBestMatch,
 } from '../../scripts/ministack-upstream';
 
@@ -341,6 +343,107 @@ describe('ministack-upstream — pure match/format logic (offline, in-process)',
     expect(isValidServiceName('')).toBe(false);
     expect(isValidServiceName(42)).toBe(false); // non-string
     expect(isValidServiceName(undefined)).toBe(false);
+  });
+});
+
+describe('ministack-upstream — resolveGhBin (S4036: never consult $PATH)', () => {
+  // A fake fileExists over a controlled set of "present" absolute paths.
+  const existsIn = (present: string[]) => (p: string) => present.includes(p);
+
+  it('honors an ABSOLUTE, existing GH_BIN override before the allow-list', () => {
+    const seen: string[] = [];
+    const fileExists = (p: string) => {
+      seen.push(p);
+      return p === '/opt/custom/gh';
+    };
+    expect(resolveGhBin({ GH_BIN: '/opt/custom/gh' }, fileExists)).toBe(
+      '/opt/custom/gh',
+    );
+    // The override is checked FIRST and short-circuits — the allow-list dirs
+    // are never probed once it matches.
+    expect(seen).toEqual(['/opt/custom/gh']);
+  });
+
+  it('REJECTS a bare-name GH_BIN EVEN WHEN it "exists" (no $PATH/cwd trust)', () => {
+    // Critical: fileExists returns TRUE for the bare `gh` too. The real code
+    // still rejects it (fails the `startsWith('/')` absolute check) and falls
+    // through to the allow-list. This kills the mutant that weakens the
+    // absolute-path guard to `startsWith('')` (always true), which would
+    // wrongly accept the bare name and re-introduce a $PATH/cwd lookup.
+    const found = resolveGhBin(
+      { GH_BIN: 'gh' },
+      existsIn(['gh', '/usr/bin/gh']),
+    );
+    expect(found).toBe('/usr/bin/gh');
+  });
+
+  it('REJECTS a relative-path GH_BIN EVEN WHEN it "exists" (cwd-plantable)', () => {
+    // Same guard, relative form: `./gh` exists but is not absolute, so it is
+    // ignored in favor of the allow-list.
+    const found = resolveGhBin(
+      { GH_BIN: './gh' },
+      existsIn(['./gh', '/usr/local/bin/gh']),
+    );
+    expect(found).toBe('/usr/local/bin/gh');
+  });
+
+  it('REJECTS an absolute GH_BIN that does NOT exist (falls through)', () => {
+    const found = resolveGhBin(
+      { GH_BIN: '/nope/gh' },
+      existsIn(['/usr/bin/gh']),
+    );
+    expect(found).toBe('/usr/bin/gh');
+  });
+
+  it('falls back to the first existing allow-list dir, in order', () => {
+    // Present in BOTH the 3rd and 4th dirs — must return the EARLIER one,
+    // proving order is honored (kills a loop-order / array-reversal mutant).
+    const found = resolveGhBin(
+      {},
+      existsIn(['/opt/homebrew/bin/gh', '/home/linuxbrew/.linuxbrew/bin/gh']),
+    );
+    expect(found).toBe('/opt/homebrew/bin/gh');
+  });
+
+  it('resolves gh from the Homebrew-on-Linux dir when it is the only one', () => {
+    const found = resolveGhBin(
+      {},
+      existsIn(['/home/linuxbrew/.linuxbrew/bin/gh']),
+    );
+    expect(found).toBe('/home/linuxbrew/.linuxbrew/bin/gh');
+  });
+
+  it('appends /gh to each allow-list dir (probes the exact expected paths)', () => {
+    const seen: string[] = [];
+    expect(() =>
+      resolveGhBin({}, (p) => {
+        seen.push(p);
+        return false;
+      }),
+    ).toThrow();
+    expect(seen).toEqual(GH_BIN_DIRS.map((d) => `${d}/gh`));
+  });
+
+  it('throws a clear, actionable error when gh is nowhere', () => {
+    expect(() => resolveGhBin({}, () => false)).toThrow(/gh CLI not found/);
+    // The message names the escape hatch so the operator knows the fix.
+    expect(() => resolveGhBin({}, () => false)).toThrow(/GH_BIN/);
+    // It lists the probed dirs COMMA-separated (kills the `.join('')` mutant
+    // that would run the dir names together into an unreadable blob).
+    expect(() => resolveGhBin({}, () => false)).toThrow(
+      '/usr/bin, /usr/local/bin',
+    );
+  });
+
+  it('exposes the expected fixed allow-list (no $PATH-derived entries)', () => {
+    expect(GH_BIN_DIRS).toEqual([
+      '/usr/bin',
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+      '/home/linuxbrew/.linuxbrew/bin',
+    ]);
+    // Every entry is an absolute, fixed path.
+    for (const d of GH_BIN_DIRS) expect(d.startsWith('/')).toBe(true);
   });
 });
 
