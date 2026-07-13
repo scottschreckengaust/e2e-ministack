@@ -51,18 +51,22 @@ vulnerability:
     - .vex/CVE-2026-26996.openvex.json
     - .vex/CVE-2026-27903.openvex.json
     - .vex/CVE-2026-27904.openvex.json
+    - .vex/CVE-2026-33630.openvex.json
     - .vex/CVE-2026-33750.openvex.json
     - .vex/CVE-2026-41992.openvex.json
     - .vex/CVE-2026-42496.openvex.json
     - .vex/CVE-2026-42497.openvex.json
     - .vex/CVE-2026-45149.openvex.json
     - .vex/CVE-2026-48615.openvex.json
+    - .vex/CVE-2026-48617.openvex.json
     - .vex/CVE-2026-48619.openvex.json
     - .vex/CVE-2026-48930.openvex.json
     - .vex/CVE-2026-48933.openvex.json
+    - .vex/CVE-2026-48937.openvex.json
     - .vex/CVE-2026-48959.openvex.json
     - .vex/CVE-2026-48961.openvex.json
     - .vex/CVE-2026-48962.openvex.json
+    - .vex/CVE-2026-53615.openvex.json
     - .vex/CVE-2026-5435.openvex.json
     - .vex/CVE-2026-54369.openvex.json
     - .vex/CVE-2026-54370.openvex.json

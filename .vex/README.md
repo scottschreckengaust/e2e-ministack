@@ -83,12 +83,24 @@ list **both** version forms as products.
 so the purl in every affected record no longer matches — **a version-bearing
 record must be repinned to the new version or go-vex silently stops suppressing
 it** (most visible for the interpreter, `pkg:generic/python@<v>`). Procedure:
-scan the new digest, then per surviving high+ finding either repin its record to
-the new purl or, if the CVE is gone/below the `high` floor, delete the record
-(and its `trivy.yaml` line). A CVE the bump fixed should have its record deleted,
-not left dangling; a CVE fixed upstream but not yet in the image stays as a
-record whose `impact_statement` says so and is dropped when a later digest ships
-the fix.
+
+1. Scan the new digest with **every** scanner in the gate — currently **both**
+   grype (`GRYPE_VEX_DOCUMENTS=…`) and trivy (`trivy.yaml` vex, auto-discovered
+   from cwd) — at HIGH+ severity.
+2. For each surviving high+ finding, **repin** its record to the new purl.
+3. **Delete a record ONLY when ALL scanners agree** the CVE is gone or has
+   dropped below the `high` floor on the new image. The gate is the grype ∪
+   trivy **union**, and the two rate the same CVE differently (grype uses
+   distro/vendor qualitative severity — often `low`/`negligible` for Debian
+   no-fix base CVEs — while trivy leans NVD and rates them `HIGH`). Deleting on
+   one scanner's say-so re-opens the gate on the other.
+4. A CVE fixed upstream but not yet in the image stays as a record whose
+   `impact_statement` says so; drop it when a later digest ships the fix.
+5. Keep `.vex/` and `trivy.yaml`'s `vulnerability.vex` list in lockstep (a
+   record count == list count parity check catches drift).
+
+Verify BOTH scanners report **0 uncovered high+** locally before pushing; CI's
+grype + trivy are the final arbiters.
 
 ## Authored date
 
