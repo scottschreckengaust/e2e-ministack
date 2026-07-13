@@ -20,7 +20,8 @@ supply-chain safety. This file is the authoritative inventory.
 | Semgrep                                                | `security.yml`                       | `==1.167.0`                                                                     |
 | cfn-lint / checkov                                     | `security.yml`                       | `==1.52.0` / `==3.3.2`                                                          |
 | OSV-Scanner                                            | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**                                                   |
-| Trivy (`trivy-action`)                                 | `security.yml`                       | commit SHA `ed142fd…` (`# v0.36.0`); vuln **DB floats** (cached)                |
+| Grype (`anchore/scan-action`)                          | `security.yml`                       | action SHA + engine `grype-version:`; vuln **DB floats** (#183)                 |
+| Trivy (`trivy-action`)                                 | `security.yml`                       | action SHA + engine `version:`; vuln **DB floats**, cached (#183)               |
 | actionlint                                             | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies)                                        |
 | shellcheck                                             | `ci.yml`, pre-commit                 | `v0.11.0` **+ SHA-256 verify** (CI) / `shellcheck-py v0.11.0.1` (hook)          |
 | gitleaks, pre-commit-hooks                             | `.pre-commit-config.yaml`            | `rev:` tags                                                                     |
@@ -63,11 +64,16 @@ supply-chain safety. This file is the authoritative inventory.
   environment / GitHub runner image. Their _outputs_ are pinned (the package
   versions above); the launchers are not. Pin via a `setup-uv`/`setup-python`
   action with a fixed version if you need launcher reproducibility too.
-- **Trivy vulnerability database** (and, symmetrically, **Grype's DB**) — the
-  scanner _binary/action_ is pinned (`trivy-action` v0.36.0 by SHA; see the
-  Pinned table), but the **vuln DB it downloads floats by design**: a stale CVE
-  feed would defeat the point of a vuln scanner, so the DB must track upstream
-  disclosures. This is the same intentional-float rationale as Grype's DB. To
+- **Trivy vulnerability database** (and, symmetrically, **Grype's DB**) — for
+  both scanners **two layers are now pinned and one floats by design** (#183):
+  the _action_ is SHA-pinned AND the scanner _engine_ is version-pinned
+  (`trivy-action` `version:`, `anchore/scan-action` `grype-version:`) — the
+  action SHA alone left the engine floating to "latest at runtime", which made
+  local↔CI (and run↔run) findings diverge. Only the **vuln DB floats**: a stale
+  CVE feed would defeat the point of a vuln scanner, so the DB must track
+  upstream disclosures. (Engine pins are input _string values_, which Dependabot
+  cannot bump — refresh them manually as part of the #76 drift audit; they are
+  #78 pin-sync targets.) To
   keep runs fast despite the float, the DB is **cached across runs** with
   `actions/cache` (rolling `github.run_id` key, mirroring the mutation/fuzz
   caches in `ci.yml`), so each run refreshes rather than re-downloads from cold.
