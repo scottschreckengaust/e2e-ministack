@@ -44,6 +44,7 @@ vulnerability:
     - .vex/CVE-2026-1525.openvex.json
     - .vex/CVE-2026-1526.openvex.json
     - .vex/CVE-2026-1528.openvex.json
+    - .vex/CVE-2026-15308.openvex.json
     - .vex/CVE-2026-22036.openvex.json
     - .vex/CVE-2026-2229.openvex.json
     - .vex/CVE-2026-25547.openvex.json

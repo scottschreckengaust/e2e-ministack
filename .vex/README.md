@@ -55,11 +55,12 @@ in `impact_statement`. See `docs/SECURITY-TOOLING.md` § "MiniStack image scan".
 
 ### MiniStack image base CVEs (`CVE-*.openvex.json`, #84)
 
-51 records — one per accepted high+ CVE on the pinned MiniStack image
+52 records — one per accepted high+ CVE on the pinned MiniStack image
 (`ministackorg/ministack:full@sha256:dd2cf4d…`), the union of Grype's (47) and
-Trivy's (27) high+ findings from the report-only scans they replaced, plus a
-newly-published CVE the Trivy DB surfaced later on the same unchanged digest (a
-`.vex/` staleness add — #76). Each is
+Trivy's (27) high+ findings from the report-only scans they replaced, plus
+newly-published CVEs the scanner DBs surface later on the same unchanged digest
+(`.vex/` staleness adds — #76: CVE-2026-33630 via Trivy, CVE-2026-15308 via
+Grype). Each is
 `status: not_affected` with justification
 **`vulnerable_code_cannot_be_controlled_by_adversary`** — a genuine
 adversary-reachability claim: MiniStack is a local-only CI emulator (binds port
@@ -98,12 +99,14 @@ Grouped by package (the record file is named for the CVE):
   CVE-2026-2229, CVE-2026-6734, CVE-2026-9697, CVE-2026-12151, CVE-2026-22036
 - **perl-base** (9): CVE-2026-7017, CVE-2026-8376, CVE-2026-9538, CVE-2026-12087,
   CVE-2026-42496, CVE-2026-42497, CVE-2026-48959, CVE-2026-48961, CVE-2026-48962
-- **python** (9): CVE-2026-11940, CVE-2026-11972 (no upstream fix), plus the 7
+- **python** (10): CVE-2026-11940, CVE-2026-11972 (no upstream fix), plus the 8
   **fixed-upstream** below.
 
-**Fixed-upstream python CVEs (7)** — CVE-2026-3298, CVE-2026-3644,
-CVE-2026-4224, CVE-2026-4786, CVE-2026-6100, CVE-2026-7210, CVE-2026-9669. A fix
-exists upstream (python ≥ 3.13.13/3.13.14) but is **not yet shipped** in the
+**Fixed-upstream python CVEs (8)** — CVE-2026-3298, CVE-2026-3644,
+CVE-2026-4224, CVE-2026-4786, CVE-2026-6100, CVE-2026-7210, CVE-2026-9669,
+CVE-2026-15308. A fix
+exists upstream (python ≥ 3.13.13/3.13.14, or 3.15.0 for CVE-2026-15308) but is
+**not yet shipped** in the
 pinned image (which carries python 3.12.13, `pkg:generic/python@3.12.13`); we
 don't build the image, so we can't remediate by bumping. Their `impact_statement`
 carries the distinct "awaiting a MiniStack image rebuild" note + the upstream
