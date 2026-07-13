@@ -10,6 +10,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.5.1](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.5.0...v0.5.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **sonar:** resolve gh to an absolute path, never via $PATH (S4036, [#170](https://github.com/scottschreckengaust/e2e-ministack/issues/170)) ([#178](https://github.com/scottschreckengaust/e2e-ministack/issues/178)) ([062c936](https://github.com/scottschreckengaust/e2e-ministack/commit/062c9363640c7b3ac65fe185357b60fc9d85e357))
+
 ## [0.5.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.4.0...v0.5.0) (2026-07-10)
 
 
