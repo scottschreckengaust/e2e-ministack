@@ -1,6 +1,7 @@
 {
   "image": "ministackorg/ministack:full",
-  "digest": "sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815",
+  "digest": "sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9",
   "source": "AGENTS.md",
-  "note": "The MiniStack image digest the Axis-1 support registry was verified against. Keep in sync with the pinned digest in AGENTS.md; a bump invalidates the catalog (see services/README.md)."
+  "version": "1.4.2-full",
+  "note": "The MiniStack image digest the Axis-1 support registry was verified against. Keep in sync with the pinned digest in AGENTS.md; a bump invalidates the catalog (see services/README.md) and the .vex/ set (reconcile per .vex/README.md, #76)."
 }

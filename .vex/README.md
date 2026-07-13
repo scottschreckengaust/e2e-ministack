@@ -25,9 +25,9 @@ both image-gate feeds.
 
 The maintainer's first instinct was `status: affected` + `action_statement`
 (an honest "we accept this risk" record). **That does not suppress in either
-scanner** — proven empirically at the pinned versions (Grype v0.110.0 via
-`anchore/scan-action` v7.4.0; Trivy v0.70.0 via `aquasecurity/trivy-action`
-v0.36.0) in **PR #160**: Grype's OpenVEX `FilterMatches` only moves
+scanner** — proven empirically against the pinned Grype (`anchore/scan-action`)
+and Trivy (`aquasecurity/trivy-action`) at the SHAs in `security.yml`: Grype's
+OpenVEX `FilterMatches` only moves
 `not_affected`/`fixed` to the ignored set, and its `AugmentMatches` re-SURFACES
 `affected` matches; Trivy's `pkg/vex/openvex.go` `Filter` likewise suppresses
 only `not_affected`/`fixed`. So the honest, working path is **`status:
@@ -55,21 +55,20 @@ in `impact_statement`. See `docs/SECURITY-TOOLING.md` § "MiniStack image scan".
 
 ### MiniStack image base CVEs (`CVE-*.openvex.json`, #84)
 
-52 records — one per accepted high+ CVE on the pinned MiniStack image
-(`ministackorg/ministack:full@sha256:dd2cf4d…`), the union of Grype's (47) and
-Trivy's (27) high+ findings from the report-only scans they replaced, plus
-newly-published CVEs the scanner DBs surface later on the same unchanged digest
-(`.vex/` staleness adds — #76: CVE-2026-33630 via Trivy, CVE-2026-15308 via
-Grype). Each is
+One record per accepted high+ CVE on the pinned MiniStack image. **The record
+set IS the inventory** — `ls .vex/CVE-*.openvex.json` is the current list; the
+pinned image is in `services/_registry/ministack-pin.json`. Each is
 `status: not_affected` with justification
 **`vulnerable_code_cannot_be_controlled_by_adversary`** — a genuine
 adversary-reachability claim: MiniStack is a local-only CI emulator (binds port
 4566 on loopback, ephemeral per-run container, never network-exposed, exercised
 only by this repo's own CDK/SDK test traffic, not a deployed/production
 artifact), so no adversary can supply crafted input reaching the vulnerable
-code. The full rationale + fix state is in each record's `impact_statement`.
+code. Each record's `impact_statement` carries its own reachability rationale +
+fix state (including any in-flight "awaiting an upstream/image fix" note).
 
-The `products[].@id` are **qualifier-less package purls** (`pkg:deb/debian/<name>@<version>`,
+**Purl-matching method (the non-obvious part).** The `products[].@id` are
+**qualifier-less package purls** (`pkg:deb/debian/<name>@<version>`,
 `pkg:generic/python@<version>`) — NOT the scanner's full purl. This is deliberate:
 grype and trivy emit different qualifiers for the same package (grype
 `?arch=amd64&distro=debian-13`, trivy `?arch=all&distro=debian-13.5`), and
@@ -78,40 +77,18 @@ qualifiers equal the scanned component's. A base purl matches BOTH scanners
 across arch / distro-minor differences. For debian packages carrying an **epoch**,
 grype keeps it in the version (`name@1:2.41-5`) while trivy strips it to a
 qualifier and uses the epoch-less version (`name@2.41-5`); those records therefore
-list **both** version forms as products. Verified against grype v0.110.0 (SBOM)
-and trivy v0.70.0 (`trivy image <digest>`) — see `docs/SECURITY-TOOLING.md`.
-Grouped by package (the record file is named for the CVE):
+list **both** version forms as products.
 
-- **bsdutils** (1): CVE-2026-53615
-- **gzip** (1): CVE-2026-41992
-- **libacl1** (2): CVE-2026-54369, CVE-2026-54370
-- **libattr1** (1): CVE-2026-54371
-- **libc-bin / libc6 (glibc)** (3): CVE-2026-5435, CVE-2026-5450, CVE-2026-5928
-- **libcares2 (c-ares)** (1): CVE-2026-33630
-- **libncursesw6 (ncurses)** (1): CVE-2025-69720
-- **libnode115 / nodejs** (6): CVE-2026-48615, CVE-2026-48617, CVE-2026-48619,
-  CVE-2026-48930, CVE-2026-48933, CVE-2026-48937
-- **libsqlite3-0 (sqlite3)** (2): CVE-2026-11822, CVE-2026-11824
-- **node-brace-expansion** (4): CVE-2026-13149, CVE-2026-25547, CVE-2026-33750,
-  CVE-2026-45149
-- **node-minimatch** (3): CVE-2026-26996, CVE-2026-27903, CVE-2026-27904
-- **node-undici** (8): CVE-2026-1525, CVE-2026-1526, CVE-2026-1528,
-  CVE-2026-2229, CVE-2026-6734, CVE-2026-9697, CVE-2026-12151, CVE-2026-22036
-- **perl-base** (9): CVE-2026-7017, CVE-2026-8376, CVE-2026-9538, CVE-2026-12087,
-  CVE-2026-42496, CVE-2026-42497, CVE-2026-48959, CVE-2026-48961, CVE-2026-48962
-- **python** (10): CVE-2026-11940, CVE-2026-11972 (no upstream fix), plus the 8
-  **fixed-upstream** below.
-
-**Fixed-upstream python CVEs (8)** — CVE-2026-3298, CVE-2026-3644,
-CVE-2026-4224, CVE-2026-4786, CVE-2026-6100, CVE-2026-7210, CVE-2026-9669,
-CVE-2026-15308. A fix
-exists upstream (python ≥ 3.13.13/3.13.14, or 3.15.0 for CVE-2026-15308) but is
-**not yet shipped** in the
-pinned image (which carries python 3.12.13, `pkg:generic/python@3.12.13`); we
-don't build the image, so we can't remediate by bumping. Their `impact_statement`
-carries the distinct "awaiting a MiniStack image rebuild" note + the upstream
-advisory link. **Drop each of these the moment a rebuilt digest ships the
-patched python** (tracked by the drift audit, #76).
+**Reconciling after a digest bump (method).** A bump changes package versions,
+so the purl in every affected record no longer matches — **a version-bearing
+record must be repinned to the new version or go-vex silently stops suppressing
+it** (most visible for the interpreter, `pkg:generic/python@<v>`). Procedure:
+scan the new digest, then per surviving high+ finding either repin its record to
+the new purl or, if the CVE is gone/below the `high` floor, delete the record
+(and its `trivy.yaml` line). A CVE the bump fixed should have its record deleted,
+not left dangling; a CVE fixed upstream but not yet in the image stays as a
+record whose `impact_statement` says so and is dropped when a later digest ships
+the fix.
 
 ## Authored date
 

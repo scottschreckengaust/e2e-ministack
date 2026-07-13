@@ -240,10 +240,10 @@ tab** (categories `trivy-fs` / `trivy-image`) plus a table artifact.
 **Why a second scanner (deliberate overlap with Grype).** Grype and Trivy use
 **different vulnerability databases**, so they surface **different CVEs** on the
 same target — running both widens coverage rather than duplicating it. On the
-pinned MiniStack image the high+ sets genuinely diverge: **47 (Grype) ∪ 27
-(Trivy) = 50 union** CVEs (24 in both, 23 Grype-only, 3 Trivy-only) — including
-severity disagreements (Grype rates the glibc CVEs Critical/High that Trivy rates
-Medium/Low). Trivy is also the **intended full-tree backstop** for the
+pinned MiniStack image the high+ sets genuinely diverge (each scanner's DB
+surfaces CVEs the other misses, plus severity disagreements — e.g. Grype rates
+the glibc CVEs Critical/High that Trivy rates Medium/Low), so the `.vex/` set is
+their union. Trivy is also the **intended full-tree backstop** for the
 license-UNKNOWN / rider gap that `dependency-review`'s list mode can't fail
 closed on (see "Known limitations" above; #77 scope).
 
@@ -371,8 +371,9 @@ intentionally permanently exempt while in use.
 
 The `ministack-image` (Grype) and `trivy-image` (Trivy) jobs are **hard-fail**:
 they fail CI on any high+ CVE in the pinned emulator image that is **not** covered
-by an OpenVEX record under `.vex/`. The ~50 unfixable base-image CVEs (the Grype
-∪ Trivy union above) are each accepted via an individual
+by an OpenVEX record under `.vex/`. The unfixable base-image CVEs (the Grype
+∪ Trivy union above; the current set is `ls .vex/CVE-*.openvex.json`) are each
+accepted via an individual
 `.vex/CVE-XXXX.openvex.json` file, so the gate is green today and fails only on a
 **new** CVE — the actionable signal (VEX-accept it, or bump the digest once
 MiniStack ships a fix).
@@ -382,12 +383,12 @@ risk" is `status: affected` + `action_statement`. **Neither Grype nor Trivy will
 suppress an `affected` finding** — proven empirically at the pinned versions in
 **PR #160**:
 
-- Grype v0.110.0 (`anchore/scan-action` v7.4.0): `grype/vex/openvex/`
+- Grype (`anchore/scan-action`): `grype/vex/openvex/`
   `implementation.go` `FilterMatches` moves only `not_affected`/`fixed` to the
   ignored set; `AugmentMatches` _re-surfaces_ `affected` matches (the `vex-add`
   path is "show these", not "hide these"). An `affected` + `vex-add`/`ignore`
   config left the findings present (`--fail-on high` still exited non-zero).
-- Trivy v0.70.0 (`aquasecurity/trivy-action` v0.36.0): `pkg/vex/openvex.go`
+- Trivy (`aquasecurity/trivy-action`): `pkg/vex/openvex.go`
   `Filter` suppresses only `not_affected`/`fixed`.
 
 So the honest, **working** path is **`status: not_affected`** with a truthful
@@ -441,7 +442,7 @@ base purl** (`pkg:deb/debian/<name>@<version>`, `pkg:generic/python@<version>`),
 which matches BOTH scanners regardless of arch / distro-minor. Debian **epochs** are
 a second wrinkle — grype keeps the epoch in the version (`name@1:2.41-5`), trivy
 strips it (`name@2.41-5`); those records list **both** version forms as products.
-Verified against grype v0.110.0 (SBOM) and trivy v0.70.0 (`trivy image <digest>`,
+Verified against the pinned grype/trivy (SBOM / `trivy image <digest>`,
 the real CI path): both exit 0, all high+ suppressed. **When adding a record for a
 new CVE, use the qualifier-less purl (and add the epoch-less form if the version has
 an epoch)** — not the raw scanner SARIF purl.

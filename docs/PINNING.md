@@ -12,7 +12,7 @@ supply-chain safety. This file is the authoritative inventory.
 | `aws-cdk`, `aws-cdk-lib`                               | `package.json`                       | exact (`2.1128.0`, `2.260.0`)                                                   |
 | Node.js                                                | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                                                         |
 | npm (via Corepack)                                     | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                                                           |
-| MiniStack image                                        | `ci.yml`                             | digest (`@sha256:dd2cf4d…`)                                                     |
+| MiniStack image                                        | `ci.yml`                             | digest (`@sha256:636c4ef5…`)                                                    |
 | ClamAV image                                           | `security.yml` (`clamav` service)    | digest (`@sha256:6f4a9e7d…`); **signature DB floats** (freshclam)               |
 | SonarQube image                                        | `security.yml` (`sonarqube` service) | digest (`@sha256:160bd2f6…`)                                                    |
 | SonarSource actions                                    | `security.yml`                       | commit SHA (`sonarqube-scan-action` v8.2.0, `-quality-gate-action` v1.2.0)      |
