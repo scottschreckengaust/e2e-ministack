@@ -40,6 +40,102 @@ only `not_affected`/`fixed`. So the honest, working path is **`status:
 not_affected`** with a truthful justification enum, and the accepted-risk prose
 in `impact_statement`. See `docs/SECURITY-TOOLING.md` § "MiniStack image scan".
 
+## Status-honesty policy — which status, when (#188)
+
+As the gate's severity floor **ratchets down** (`high` → `medium` → `low` → …),
+more base-image CVEs cross the gate and need a decision. The rule for choosing a
+`status` is dictated by the OpenVEX/CISA spec — it is **not** a preference, and
+it is the guardrail against blanket-suppression:
+
+| The finding is…                                               | Honest `status`                         | Suppresses in grype/trivy? | Use it for                                                                       |
+| ------------------------------------------------------------- | --------------------------------------- | -------------------------- | -------------------------------------------------------------------------------- |
+| present but **adversary-unreachable** in this deployment      | `not_affected` + a `justification` enum | **yes**                    | the MiniStack image CVEs today (loopback-only, ephemeral, never network-exposed) |
+| present, **reachable**, upstream **won't-fix**, risk accepted | `affected` + `action_statement`         | **no** (by design)         | a genuinely-reachable below-floor CVE we tolerate                                |
+| not yet assessed                                              | `under_investigation`                   | no                         | a triage placeholder; convert once assessed                                      |
+| fixed upstream / by a digest bump                             | `fixed` (or delete the record)          | yes                        | pruned by the #76 drift audit                                                    |
+
+The five `not_affected` justification enums (only these are valid, per CISA
+"Status Justifications"): `component_not_present`, `vulnerable_code_not_present`,
+`vulnerable_code_not_in_execute_path`,
+`vulnerable_code_cannot_be_controlled_by_adversary` (ours — CISA notes it is
+"difficult to prove conclusively", so the `impact_statement` must carry the
+reachability argument), `inline_mitigations_already_exist`.
+
+**The guardrail:** never file `not_affected` on a **reachable** finding just to
+silence a scanner — that misrepresents the record. `not_affected` means "no
+remediation required"; each justification is an affirmative _non-exploitability_
+claim. A reachable-but-tolerated item is honestly `affected` — and since grype/
+trivy only suppress `not_affected`/`fixed`, an `affected` record deliberately
+does **not** quiet the scanner. Below the floor that's fine: the record's value
+is being a **durable, machine-readable, reviewable** decision, so we stop
+rediscovering "nothing can be done" on every push — not suppression. CISA frames
+VEX as "not a discussion-ending declaration"; it "does not specify, assume, or
+imply any default status", so leaving a genuinely-open finding open is correct.
+
+**Illustrative `affected` record** (authored only when the floor drops onto a
+reachable, upstream-won't-fix CVE — do **not** commit one before there's a real
+finding to accept; a speculative acceptance is the blanket-VEX anti-pattern):
+
+```jsonc
+{
+  "vulnerability": { "name": "CVE-YYYY-NNNNN" },
+  "products": [{ "@id": "pkg:deb/debian/<name>@<version>" }],
+  "status": "affected",
+  "action_statement": "No upstream fix (vendor won't-fix). Reachable but accepted: <why tolerated>. Revisit on upstream release.",
+  "action_statement_timestamp": "2026-07-14T00:00:00Z",
+}
+```
+
+## Revisit cadence — `revisit_by` (#188)
+
+OpenVEX has **no expiry field** — only `timestamp` (required), `last_updated`,
+and a monotonic `version`, so a record can rot silently. To keep acceptances
+**durable, not forgotten**, each record MUST carry a custom **`revisit_by`**
+date + reason. `MUST`, not `MAY`: the whole point is that an acceptance is never
+open-ended — an optional field would rot exactly like the bare timestamp it
+replaces. This is safe to add: go-vex parses records with the Go stdlib
+`json.Unmarshal` (no `DisallowUnknownFields`), so an unknown top-level key is
+ignored by both scanners while remaining readable by humans and the #76 drift
+audit. The `affected` path also has the spec-native
+`action_statement_timestamp` for the same purpose.
+
+Every record needs an authorable revisit trigger, so `MUST` is a real bar, not
+an aspiration: the `not_affected` **image** CVEs revisit **on the next digest
+bump** (`revisit_by: "wait-for-image-rebuild"`) — when the image changes, the
+reachability claim is re-verified; a genuinely-open `affected` item revisits on
+the upstream fix or a dated review. The **#76** drift audit **enforces presence**
+(a record lacking `revisit_by` is flagged) and keys off `last_updated` /
+`revisit_by` to force periodic re-review and prune resolved records.
+
+Suggested `revisit_by` reason vocabulary (free text, but standardize):
+`wait-for-image-rebuild` · `waiting-on-upstream-issue <url>` ·
+`waiting-for-fix <advisory>` · `revisit <ISO-date>`. (Trivy also honors a
+per-CVE `expired_at` + `statement` in `.trivyignore.yaml`, the only scanner with
+first-class expiry — an option if a tool-enforced expiry is later wanted; grype
+ignore-rules have neither.)
+
+## Vendor-vs-tool severity honesty (#188)
+
+A CVE can be scored very differently by the **vendor/NVD body** and the
+**scanner's gate severity** — e.g. a glibc CVE Debian's tracker rates
+_Negligible_ (driving grype's gate) while NVD scores it _9.8 / Critical_
+(driving the GitHub badge). As the floor drops, these collisions multiply. When
+authoring a record for such an item, the `impact_statement` / `action_statement`
+MUST **state the vendor body's assessment honestly** even when the tool's gate
+severity is lower — e.g. _"NVD CVSS 9.8 (Critical); Debian tracker rates
+Negligible (disputed / not-a-security-bug upstream). Accepted because …"_. Do
+**not** launder a vendor-Critical into a silent low: record both, and say why we
+act on the lower one. This keeps the acceptance auditable and feeds the future
+VEX report (#189) a truthful "vendor vs tool" column.
+
+## Adding a record — the two-feed gotcha
+
+A new `.vex/CVE-*.openvex.json` reaches **grype** automatically (its feed is a
+glob over `.vex/CVE-*.openvex.json`) and the **suppression injector** the same
+way — but **`trivy.yaml`'s `vulnerability.vex` is an explicit file list**, not a
+glob, so a new record MUST be added there in lockstep or trivy's gate won't see
+it. Keep the two feeds in sync (this is the existing #84 convention).
+
 ## Records
 
 ### `ecdsa` (filesystem/lockfile surface — still staged)
