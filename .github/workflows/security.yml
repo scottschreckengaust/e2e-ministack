@@ -368,6 +368,10 @@ jobs:
       - id: grype
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
+          # Pin the grype ENGINE (#183): the action SHA alone leaves grype
+          # floating to "latest at runtime", so local↔CI (and run↔run) diverge.
+          # The vuln DB still floats by design (fresh CVEs). Bump deliberately.
+          grype-version: v0.114.0
           path: '.'
           fail-build: true
           severity-cutoff: high
@@ -434,7 +438,7 @@ jobs:
         id: vex
         run: echo "docs=$(printf '%s,' .vex/CVE-*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
       # NOTE: this digest MUST match the image pinned in ci.yml
-      # (ministackorg/ministack:full@sha256:dd2cf4d...). Keep them in sync;
+      # (ministackorg/ministack:full@sha256:636c4ef5...). Keep them in sync;
       # if ci.yml bumps the digest, bump it here too.
       - id: grype
         # continue-on-error so an UNCOVERED high+ finding fails the STEP (records
@@ -446,7 +450,10 @@ jobs:
           # Grype reads its config from env too; feed the whole `.vex/` set.
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
-          image: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
+          # Pin the grype ENGINE (#183) — see the grype FS job for the rationale
+          # (action SHA alone floats grype to latest; DB still floats by design).
+          grype-version: v0.114.0
+          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
           # fail-build:true so the action calls core.setFailed (→ step outcome
           # `failure`) on any high+ CVE left after VEX; with `fail-build:false`
           # it only WARNS (outcome stays `success`) and the gate wouldn't fire.
@@ -599,6 +606,12 @@ jobs:
         continue-on-error: true # report-only: never fail the job on this step
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Pin the trivy ENGINE (#183) — matches trivy-action v0.36.0's own
+          # default (v0.70.0), made explicit so local↔CI (and run↔run) don't
+          # drift when the action later bumps its bundled default. The vuln DB
+          # still floats by design. This is the step that INSTALLS trivy; the
+          # report-table step below reuses it via skip-setup-trivy.
+          version: v0.70.0
           scan-type: fs
           scan-ref: '.'
           format: sarif
@@ -685,15 +698,19 @@ jobs:
             trivy-db-
       # VEX comes from the committed trivy.yaml (auto-discovered), NOT a flag/env.
       # NOTE: this digest MUST match the image pinned in ci.yml and the Grype
-      # ministack-image job above (ministackorg/ministack:full@sha256:dd2cf4d...).
+      # ministack-image job above (ministackorg/ministack:full@sha256:636c4ef5...).
       # Keep all three in sync; if ci.yml bumps the digest, bump it here too.
       - id: trivy
         name: Run Trivy image (SARIF; hard-fail, VEX-gated)
         continue-on-error: true # keep failure OFF the step so SARIF always uploads; enforced below
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Pin the trivy ENGINE (#183) — see the trivy FS job for rationale
+          # (explicit == the action's own v0.70.0 default; DB still floats). This
+          # step INSTALLS trivy; the report-table step below reuses it.
+          version: v0.70.0
           scan-type: image
-          image-ref: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
+          image-ref: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
           format: sarif
           output: trivy-image.sarif
           cache-dir: ${{ github.workspace }}/.cache/trivy
@@ -715,7 +732,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
+          image-ref: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
           format: table
           output: trivy-image.txt
           cache-dir: ${{ github.workspace }}/.cache/trivy
