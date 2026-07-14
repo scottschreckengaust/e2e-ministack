@@ -1,0 +1,1 @@
+{"vex":[{"cve":"CVE-2099-1","status":"not_affected","revisitBy":"2026-01-01"},{"cve":"CVE-2099-9","status":"not_affected"}],"findings":[{"id":"CVE-2099-1","scanner":"trivy","severity":"HIGH","pkg":"perl-base"},{"id":"CVE-2099-2","scanner":"trivy","severity":"CRITICAL","pkg":"openssl"},{"id":"TEMP-1-ABC","scanner":"trivy","severity":"LOW","pkg":"tar"}],"today":"2026-07-14"}

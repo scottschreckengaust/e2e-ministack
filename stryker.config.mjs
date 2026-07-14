@@ -36,6 +36,7 @@ export default {
     '.github/scripts/clamav-to-sarif.ts',
     '.github/scripts/sonar-to-sarif.ts',
     '.github/scripts/vex-to-sarif-suppressions.ts',
+    '.github/scripts/vex-report.ts',
     '.github/scripts/license-verdict.ts',
     'scripts/ministack-upstream.ts',
   ],

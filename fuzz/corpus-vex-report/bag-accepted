@@ -1,0 +1,1 @@
+{"vex":[{"cve":"CVE-2026-11822","status":"not_affected","justification":"vulnerable_code_cannot_be_controlled_by_adversary","revisitBy":"wait-for-image-rebuild"}],"findings":[{"id":"CVE-2026-11822","scanner":"grype","severity":"HIGH","pkg":"libsqlite3-0"},{"id":"CVE-2026-11822","scanner":"trivy","severity":"MEDIUM","pkg":"libsqlite3-0"}],"today":"2026-07-14"}
