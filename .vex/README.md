@@ -90,20 +90,29 @@ finding to accept; a speculative acceptance is the blanket-VEX anti-pattern):
 
 OpenVEX has **no expiry field** — only `timestamp` (required), `last_updated`,
 and a monotonic `version`, so a record can rot silently. To keep acceptances
-**durable, not forgotten**, each record MAY carry a custom **`revisit_by`**
-date + reason. This is safe: go-vex parses records with the Go stdlib
+**durable, not forgotten**, each record MUST carry a custom **`revisit_by`**
+date + reason. `MUST`, not `MAY`: the whole point is that an acceptance is never
+open-ended — an optional field would rot exactly like the bare timestamp it
+replaces. This is safe to add: go-vex parses records with the Go stdlib
 `json.Unmarshal` (no `DisallowUnknownFields`), so an unknown top-level key is
 ignored by both scanners while remaining readable by humans and the #76 drift
 audit. The `affected` path also has the spec-native
 `action_statement_timestamp` for the same purpose.
 
+Every record needs an authorable revisit trigger, so `MUST` is a real bar, not
+an aspiration: the `not_affected` **image** CVEs revisit **on the next digest
+bump** (`revisit_by: "wait-for-image-rebuild"`) — when the image changes, the
+reachability claim is re-verified; a genuinely-open `affected` item revisits on
+the upstream fix or a dated review. The **#76** drift audit **enforces presence**
+(a record lacking `revisit_by` is flagged) and keys off `last_updated` /
+`revisit_by` to force periodic re-review and prune resolved records.
+
 Suggested `revisit_by` reason vocabulary (free text, but standardize):
 `wait-for-image-rebuild` · `waiting-on-upstream-issue <url>` ·
-`waiting-for-fix <advisory>` · `revisit <ISO-date>`. The **#76** drift audit
-keys off `last_updated` / `revisit_by` to force periodic re-review and prune
-resolved records. (Trivy also honors a per-CVE `expired_at` + `statement` in
-`.trivyignore.yaml`, the only scanner with first-class expiry — an option if a
-tool-enforced expiry is later wanted; grype ignore-rules have neither.)
+`waiting-for-fix <advisory>` · `revisit <ISO-date>`. (Trivy also honors a
+per-CVE `expired_at` + `statement` in `.trivyignore.yaml`, the only scanner with
+first-class expiry — an option if a tool-enforced expiry is later wanted; grype
+ignore-rules have neither.)
 
 ## Vendor-vs-tool severity honesty (#188)
 
