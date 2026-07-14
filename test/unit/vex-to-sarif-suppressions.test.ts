@@ -362,6 +362,31 @@ describe('injectSuppressions', () => {
     ).toBe(0);
   });
 
+  it('fills a missing `version` so the output is a valid SARIF doc, but preserves an existing one', () => {
+    // A SARIF producer must emit `version` (schema-required, #187). On input
+    // lacking it, default to 2.1.0; never overwrite a producer's own value.
+    expect(
+      (injectSuppressions({} as SarifLogLike, []).sarif as { version: string })
+        .version,
+    ).toBe('2.1.0');
+    expect(
+      (
+        injectSuppressions(null as unknown as SarifLogLike, []).sarif as {
+          version: string;
+        }
+      ).version,
+    ).toBe('2.1.0');
+    // An existing version is preserved (not clobbered to 2.1.0).
+    expect(
+      (
+        injectSuppressions(
+          { version: '2.1.0-custom', runs: [] } as unknown as SarifLogLike,
+          [],
+        ).sarif as { version: string }
+      ).version,
+    ).toBe('2.1.0-custom');
+  });
+
   it('skips null/non-object result elements within a run', () => {
     const sarif = {
       runs: [{ results: [null, 7, { ruleId: 'CVE-2026-11822-z' }] }],
