@@ -464,6 +464,20 @@ ones (digest bump drops a CVE, or upstream-fixed python reaches the image) are
 pruned by the #76 drift audit. A new uncovered high+ CVE fails the gate until
 VEX-accepted or the digest is bumped.
 
+**Status-honesty policy as the floor ratchets down (#188).** Choosing a record's
+`status` is spec-dictated, not a preference, and is the guardrail against
+blanket-suppression: `not_affected` + a justification enum for **adversary-
+unreachable** findings (the image CVEs today; it suppresses); honest `affected` +
+`action_statement` for a **reachable-but-tolerated** upstream-won't-fix CVE (it
+does **not** suppress — but below the floor its value is a durable, reviewable
+decision, not silence). Never file `not_affected` on a reachable finding to quiet
+a scanner. Records carry a `revisit_by` cadence (a custom field go-vex safely
+ignores) so acceptances don't rot, and the `impact_statement` states the vendor/
+NVD severity honestly even when the tool's gate severity is lower (the "Critical
+badge on a Negligible CVE" case). Full method, the decision table, the illustrative
+`affected` record, and the two-feed (grype-glob vs explicit `trivy.yaml`) gotcha
+live in **`.vex/README.md`** § "Status-honesty policy".
+
 **`trivy-config` (cdk.out misconfig) — deferred as checkov-redundant (YAGNI).**
 A Trivy config/IaC scan of the synthesized `cdk.out` templates was
 **deliberately omitted**: that surface is already the REQUIRED `iac` gate
