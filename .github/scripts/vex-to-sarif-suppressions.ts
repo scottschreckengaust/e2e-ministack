@@ -183,6 +183,12 @@ export function injectSuppressions(
     ? (out.runs as SarifRunLike[])
     : [];
   out.runs = runs;
+  // A SARIF producer's output must be a valid SARIF 2.1.0 document — `version`
+  // is schema-required (#187). Grype always sets it, but on degenerate input
+  // (a non-SARIF object, or one missing `version`) the normalized result would
+  // otherwise be schema-invalid and rejected at upload. Only fill it when
+  // absent, so we never overwrite a producer's own value.
+  if (typeof out.version !== 'string') out.version = '2.1.0';
   let covered = 0;
   const uncovered = new Set<string>();
   for (const run of runs) {
