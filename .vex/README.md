@@ -21,6 +21,12 @@ The `ecdsa` record targets a filesystem/lockfile surface not yet wired to a
 `--vex` consumer, so it remains staged (see its note below) and is excluded from
 both image-gate feeds.
 
+Beyond the CI gate, these records also drive the **GitHub Security-tab** state:
+a covered CVE is surfaced as a _dismissed_ alert whose suppression is derived
+from its record here, and it auto-re-opens if the record is dropped (issue #181;
+`vex-to-sarif-suppressions` + `advanced-security/dismiss-alerts`, on the default
+branch). See `docs/SECURITY-TOOLING.md` § "VEX → Code Scanning".
+
 ## Why `not_affected` (not `affected`)
 
 The maintainer's first instinct was `status: affected` + `action_statement`

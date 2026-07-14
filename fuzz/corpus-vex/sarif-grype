@@ -1,0 +1,1 @@
+{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Grype"}},"results":[{"ruleId":"CVE-2026-11822-libsqlite3-0","message":{"text":"x"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"image//usr/lib/x"},"region":{"startLine":1}}}]},{"ruleId":"CVE-2099-1-pkg","message":{"text":"y"}}]}]}

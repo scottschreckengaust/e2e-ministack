@@ -470,6 +470,50 @@ A Trivy config/IaC scan of the synthesized `cdk.out` templates was
 new signal here. #133 scope was vuln scanning (FS + image); add `trivy-config`
 later only if a concrete gap in checkov's CloudFormation coverage is identified.
 
+### VEX → Code Scanning: dismissal coupled to `.vex/` (#181)
+
+**Problem.** VEX gates the CI _scan_ (the hard-fail above), but the GitHub
+Security-tab _alert store_ is a separate ledger. A manual **Dismiss** clears the
+badge but is **sticky and un-coupled**: it survives even after the `.vex/`
+record that justified it is deleted, so the durable governance stance and the
+Security tab silently diverge — the finding stays hidden precisely when it
+becomes real again. Empirically (issue #181) GitHub does **not** act on an
+uploaded SARIF `suppressions[]` at ingest; a dismissed alert stays dismissed
+across identical re-uploads; and a result that disappears from a later SARIF
+closes an _open_ alert as `fixed` but never re-opens a _dismissed_ one.
+
+**Mechanism.** Make the Security-tab state a **pure function of `.vex/`** so it
+self-cleans like the records do. In the `ministack-image` job, alongside the
+VEX-fed gate scan, a **second grype scan runs WITHOUT the VEX feed** (so every
+high+ CVE is present in the SARIF — grype otherwise _drops_ VEX-covered ones,
+leaving no audit trail). `.github/scripts/vex-to-sarif-suppressions.mjs` then
+injects `suppressions[] {kind:"external"}` (SARIF §3.35.2 — "suppressed in an
+external, persistent store", exactly what a `.vex/` record is) onto every result
+whose CVE has a `not_affected`/`fixed` record, and an empty `suppressions: []`
+on the rest (SARIF §3.27.23 is all-or-nothing per run). That SARIF uploads to
+the Security tab, then **`advanced-security/dismiss-alerts`** (MIT, GitHub's own
+org, SHA-pinned, on the default branch only — dismissal is a repo-global
+property) PATCHes each suppressed result's alert to `dismissed`/`won't fix` and
+**re-opens** any alert whose suppression has since disappeared. Drop a `.vex/`
+record → next default-branch scan omits its suppression → the alert re-opens
+automatically. No manual click, no divergent ledger.
+
+**Scope / non-goals.** This is **visibility-only** — it does NOT feed the
+hard-fail gate, which stays on the VEX-fed scan's outcome, so the security
+posture is unchanged. It covers the **high+ VEX-accepted** set; it does **not**
+clear the below-`high`-floor alerts grype writes to SARIF (medium/low, and the
+NVD-vs-distro divergent findings whose _badge_ is Critical while grype's _gate_
+severity is Negligible). Those are a separate lever (the severity-floor ratchet,
+or normalizing `properties["security-severity"]` from grype's qualitative
+severity — which the same injector step could later do).
+
+**Injector governance.** The logic lives in the jest-visible
+`vex-to-sarif-suppressions.ts` (100% coverage gate, Stryker mutation, fuzz-
+regression tier — same contract as the other `*-to-sarif` converters); the
+`.mjs` is a thin CLI shim. `advanced-security/dismiss-alerts` is **MIT** (on the
+`allow-licenses` permissive list — no `dependency-review` exemption needed) and
+SHA-pinned per the zizmor convention; it needs `security-events: write`.
+
 ## Intentional local ↔ remote (pre-commit) gap
 
 Per CLAUDE.md, pre-commit is a **fast convenience tier**, not a mirror of CI —
