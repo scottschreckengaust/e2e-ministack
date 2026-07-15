@@ -832,8 +832,19 @@ jobs:
           # alerts (SonarQube, CodeQL) don't leak into the VEX/image report.
           node .github/scripts/alerts-findings.mjs alerts.json findings.json \
             grype-ministack-image trivy-image
+          # "Recently resolved" window boundary: the LAST published release's
+          # date ("resolved since users last saw a release"). Fall back to a
+          # rolling 7-day window when there is no prior release yet (fresh repo)
+          # or the lookup fails, so the block is always bounded, never all-history
+          # (#210). Date-only (YYYY-MM-DD); the report compares calendar days.
+          resolved_since="$(gh release view --json publishedAt \
+            --jq '.publishedAt[0:10]' 2>/dev/null || true)"
+          if [ -z "${resolved_since:-}" ]; then
+            resolved_since="$(date -u -d '7 days ago' +%Y-%m-%d)"
+          fi
+          echo "recently-resolved window since: ${resolved_since}"
           node .github/scripts/vex-report.mjs .vex findings.json \
-            "$(date -u +%Y-%m-%d)" HIGH vex-report.md
+            "$(date -u +%Y-%m-%d)" HIGH vex-report.md "${resolved_since}"
           cat vex-report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload VEX report artifact
         if: always()

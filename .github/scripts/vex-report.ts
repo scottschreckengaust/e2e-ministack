@@ -51,6 +51,9 @@ export interface ScannerFinding {
   state?: string;
   /** The alert's Security-tab URL, so the report can link the scanner to it. */
   htmlUrl?: string;
+  /** `fixed_at` ISO timestamp (when the alert auto-fixed) — bounds the
+   *  "recently resolved" window. Absent/empty on non-fixed findings. */
+  fixedAt?: string;
 }
 
 /** A scanner that reported this CVE, with a link to its own alert. */
@@ -75,6 +78,12 @@ export interface ReportRow {
   revisitOverdue: boolean;
   /** True when this row needs a human decision/action (drives the signal). */
   actionNeeded: boolean;
+  /** Prioritization rank (0 = most urgent). Drives the report sort so
+   *  act-now rows lead and settled Accepted/Tracked sink. See `priorityRank`. */
+  priorityRank: number;
+  /** For a `Resolved` row, the alert's `fixed_at` ISO timestamp (else null) —
+   *  bounds the recency window and orders the "recently resolved" block. */
+  resolvedAt: string | null;
 }
 
 // Human-readable, action-oriented status labels. The reviewer should be able to
@@ -101,6 +110,51 @@ export function isActionable(status: UnifiedStatus): boolean {
     status === 'VEX drift' ||
     status === 'Undocumented dismissal'
   );
+}
+
+// Prioritization rank per status — lower sorts higher (top of the report). The
+// tiers, most-urgent first (#210): things that block the gate or represent a
+// missed commitment lead; ledger-reconciliation next; the harvest/prune signal;
+// then the bounded "recently resolved" news; then in-progress; then the settled
+// Accepted/Tracked bulk (which sinks to the collapsed ledger). Total by
+// construction — every UnifiedStatus has an entry, so there is no fallback.
+const PRIORITY: Record<UnifiedStatus, number> = {
+  'Decision needed': 0, // gate is/goes RED — must VEX or fix
+  'Revisit overdue': 1, // accepted, but the revisit_by date passed
+  'Undocumented dismissal': 2, // hidden with NO .vex/ record — governance hole
+  'VEX drift': 3, // justified, but the Security-tab alert lags — reconcile
+  'Stale record': 4, // .vex/ record with no finding — the real PRUNE signal
+  Resolved: 5, // auto-fixed this window — news, not work
+  Investigating: 6, // under_investigation — no action yet
+  Accepted: 7, // VEX'd + dismissed — settled noise
+  Tracked: 8, // below floor — settled noise
+};
+
+/** The prioritization rank for a status (0 = most urgent). */
+export function priorityRank(status: UnifiedStatus): number {
+  return PRIORITY[status];
+}
+
+/**
+ * True iff a `Resolved` row is INSIDE the recency window — its `fixed_at`
+ * calendar day is on/after the `resolvedSince` boundary day. The boundary is
+ * INJECTED (not computed here) so the policy lives with the caller: the CLI shim
+ * passes the last release's `published_at` ("resolved since users last saw a
+ * release" — the governance-aligned default), falling back to a rolling window
+ * (`today − N days`) when there is no prior release or the lookup fails. Keeping
+ * the boundary a parameter leaves this transform pure/reproducible and lets the
+ * report's retention policy change without touching gated logic.
+ *
+ * Both operands become a `YYYYMMDD` integer via `isoDayNumber`; the single `>=`
+ * is false whenever EITHER side is NaN — so a missing/malformed `fixedAt` (an
+ * undated resolved row) or an absent/malformed `resolvedSince` reads as OUTSIDE
+ * the window (dropped), never surfaced without a real date behind it.
+ */
+export function isRecentlyResolved(
+  fixedAt: string | null,
+  resolvedSince: string,
+): boolean {
+  return isoDayNumber(fixedAt) >= isoDayNumber(resolvedSince);
 }
 
 const SEV_RANK: Record<string, number> = {
@@ -229,12 +283,18 @@ export function isRevisitOverdue(
  *   `Date.now()`) so the transform stays pure/reproducible. Both params are
  *   REQUIRED — a default would be an arbitrary sentinel (for `today`, any
  *   non-date behaves identically), so callers must state their intent.
+ * @param resolvedSince ISO date boundary for the "recently resolved" window: a
+ *   `Resolved` row survives only if its `fixed_at` day is on/after this. The
+ *   shim passes the last release's date (rolling-window fallback when none).
+ *   Injected for the same purity reason as `today`; a non-date drops all
+ *   Resolved rows (nothing is "recent" relative to an unknown boundary).
  */
 export function buildReport(
   vexRecords: readonly VexRecord[],
   findings: readonly ScannerFinding[],
   gateFloor: string,
   today: string,
+  resolvedSince: string,
 ): ReportRow[] {
   // `vexRecords`/`findings` are arrays by contract — the CLI shim (the only
   // untrusted-input boundary) parses JSON and passes arrays. ELEMENT-level junk
@@ -268,6 +328,9 @@ export function buildReport(
       anyOpen: boolean;
       anyDismissed: boolean;
       anyFixed: boolean;
+      // The latest `fixed_at` ISO day-string across this CVE's fixed alerts
+      // ('' if none) — bounds/orders the "recently resolved" block.
+      fixedAt: string;
     }
   >();
   for (const f of findings) {
@@ -281,6 +344,7 @@ export function buildReport(
       anyOpen: false,
       anyDismissed: false,
       anyFixed: false,
+      fixedAt: '',
     };
     g.alertCount += 1; // every finding is one Code-Scanning alert
     // `nonEmptyString` is load-bearing: it excludes both non-strings (which
@@ -298,6 +362,12 @@ export function buildReport(
     if (f.state === 'open') g.anyOpen = true;
     if (f.state === 'dismissed') g.anyDismissed = true;
     if (f.state === 'fixed') g.anyFixed = true;
+    // Record this CVE's fixed_at (last non-empty wins). GitHub stamps `fixed_at`
+    // per ANALYSIS — all of one CVE's alerts fix in the same run — so every
+    // fixed alert for a CVE carries the same date; "last wins" == "any", with no
+    // order comparison that could go wrong (a `>`-max here would be an EQUIVALENT
+    // mutant: `>`/`>=` differ only on equal values, which write the same string).
+    if (nonEmptyString(f.fixedAt)) g.fixedAt = f.fixedAt;
     byId.set(key, g);
   }
 
@@ -365,6 +435,13 @@ export function buildReport(
       revisitBy: vex?.revisitBy ?? null,
       revisitOverdue: overdue,
       actionNeeded: isActionable(status),
+      priorityRank: priorityRank(status),
+      // The CVE's fixed date if any alert reported one, else null — a pure data
+      // field (NOT status-gated: gating on `status === 'Resolved'` would be an
+      // equivalent mutant, since an undated Resolved row is always dropped by the
+      // recency filter, so its null could never be observed). Display is gated
+      // in render/filter, which key on `status`; this just carries the date.
+      resolvedAt: nonEmptyString(g.fixedAt) ? g.fixedAt : null,
     });
   }
 
@@ -382,15 +459,34 @@ export function buildReport(
       revisitBy: vex.revisitBy ?? null,
       revisitOverdue: isRevisitOverdue(vex.revisitBy, today),
       actionNeeded: isActionable('Stale record'),
+      priorityRank: priorityRank('Stale record'),
+      resolvedAt: null,
     });
   }
 
-  // Stable order: severity desc, then item.
-  rows.sort((a, b) => {
+  // Drop `Resolved` rows whose alert fixed OUTSIDE the recency window (or with
+  // no fixed date) — otherwise the ever-growing all-history pile of fixed alerts
+  // would swamp the report (#210). Non-Resolved rows always survive.
+  const kept = rows.filter(
+    (r) =>
+      r.status !== 'Resolved' ||
+      isRecentlyResolved(r.resolvedAt, resolvedSince),
+  );
+
+  // Prioritized order (#210): rank asc (act-now leads, settled sinks), then
+  // severity desc, then most-recently-resolved first (resolvedAt desc — nulls
+  // last), then item asc for a fully deterministic, test-pinnable order.
+  kept.sort((a, b) => {
+    if (a.priorityRank !== b.priorityRank)
+      return a.priorityRank - b.priorityRank;
     const d = rankOf(b.maxSeverity) - rankOf(a.maxSeverity);
-    return d !== 0 ? d : a.item.localeCompare(b.item);
+    if (d !== 0) return d;
+    const ra = a.resolvedAt ?? '';
+    const rb = b.resolvedAt ?? '';
+    if (ra !== rb) return rb.localeCompare(ra); // newer resolvedAt first
+    return a.item.localeCompare(b.item);
   });
-  return rows;
+  return kept;
 }
 
 /** Count rows by unified status (for the summary line). */
@@ -458,16 +554,20 @@ function renderScanners(r: ReportRow): string {
 }
 
 /**
- * Render the report as GitHub-flavored markdown:
+ * Render the report as GitHub-flavored markdown, in reader-priority order (#210):
  *   1. a summary line stating the two denominators (distinct CVEs vs. alerts),
- *   2. a NARROW "action needed" table (item · status · why) — always visible,
- *   3. the FULL ledger in a DEFAULT-COLLAPSED <details>, with scanners linked
- *      to their Code-Scanning alerts,
- *   4. the legend.
+ *   2. NEEDS ATTENTION — the actionable rows (item · status · why), the top slot,
+ *   3. RECENTLY RESOLVED — a bounded "what cleared this window" block (news, not
+ *      work), sitting just below the action table,
+ *   4. the FULL ledger in a DEFAULT-COLLAPSED <details> (rows in priority order,
+ *      so Accepted/Tracked sink to the bottom), scanners linked to their alerts,
+ *   5. the legend.
+ * `rows` is assumed already priority-sorted by `buildReport`.
  */
 export function renderMarkdown(rows: readonly ReportRow[]): string {
   const s = summarize(rows);
   const action = rows.filter((r) => r.actionNeeded);
+  const resolved = rows.filter((r) => r.status === 'Resolved');
   const alertTotal = rows.reduce((n, r) => n + r.alertCount, 0);
 
   // (1) Header: distinct CVEs (rows) vs. the alerts they collapse (the #206
@@ -497,7 +597,22 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
     actionBlock = `**Needs attention (${action.length}):**\n\n${head}\n${body}`;
   }
 
-  // (3) Full ledger — default-collapsed. Scanners link to their own alerts.
+  // (3) Recently resolved — bounded "what cleared" block, below the action table
+  // and only when there's something to show (buildReport already dropped
+  // out-of-window Resolved rows). Non-actionable news, not work.
+  let resolvedBlock = '';
+  if (resolved.length > 0) {
+    const head = '| item | severity | resolved |\n| --- | --- | --- |';
+    const body = resolved
+      .map(
+        (r) =>
+          `| ${renderItem(r)} | ${r.maxSeverity} | ${r.resolvedAt ?? '—'} |`,
+      )
+      .join('\n');
+    resolvedBlock = `ℹ️ **Recently resolved (${resolved.length}):**\n\n${head}\n${body}\n\n`;
+  }
+
+  // (4) Full ledger — default-collapsed. Scanners link to their own alerts.
   const fHead =
     '| item | status | severity | scanners | revisit_by |\n' +
     '| --- | --- | --- | --- | --- |';
@@ -511,6 +626,7 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
   return (
     `${summary}\n\n` +
     `${actionBlock}\n\n` +
+    `${resolvedBlock}` +
     `<details>\n<summary>Full VEX ledger (${rows.length} CVEs) — click to expand</summary>\n\n` +
     `${fHead}\n${fBody}\n\n` +
     `</details>\n\n` +

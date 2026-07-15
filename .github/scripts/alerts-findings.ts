@@ -34,6 +34,7 @@ export interface AlertFinding {
   dismissedReason: string; // e.g. "won't fix" | "" when not dismissed
   category: string; // most_recent_instance.category (which scan produced it)
   htmlUrl: string; // alert's Security-tab URL, so the report can link to it
+  fixedAt: string; // `fixed_at` ISO timestamp when state==='fixed', else '' — bounds the "recently resolved" window (#210)
 }
 
 // A CVE token inside a rule id (grype `CVE-2026-1-python`, trivy `CVE-2026-1`),
@@ -81,6 +82,7 @@ export function parseAlerts(alerts: unknown): AlertFinding[] {
       dismissedReason: str(a.dismissed_reason),
       category: str(asRecord(a.most_recent_instance)?.category),
       htmlUrl: str(a.html_url),
+      fixedAt: str(a.fixed_at),
     });
   }
   return out;
@@ -117,6 +119,7 @@ export function toScannerFindings(
     severity: f.badgeSeverity,
     state: f.state,
     htmlUrl: f.htmlUrl,
+    fixedAt: f.fixedAt,
   }));
 }
 

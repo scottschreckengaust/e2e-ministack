@@ -60,7 +60,7 @@ describe('parseAlerts', () => {
     ...over,
   });
 
-  it('maps a full alert to {id, scanner, badgeSeverity, state, dismissedReason, category, htmlUrl}', () => {
+  it('maps a full alert to {id, scanner, badgeSeverity, state, dismissedReason, category, htmlUrl, fixedAt}', () => {
     const out = parseAlerts([alert({})]);
     expect(out).toEqual([
       {
@@ -71,8 +71,17 @@ describe('parseAlerts', () => {
         dismissedReason: '',
         category: 'grype-ministack-image',
         htmlUrl: 'https://example.test/alert/1',
+        fixedAt: '', // not fixed => empty
       },
     ]);
+  });
+
+  it('captures fixed_at when the alert is fixed (bounds the recently-resolved window)', () => {
+    const out = parseAlerts([
+      alert({ state: 'fixed', fixed_at: '2026-07-15T20:08:43Z' }),
+    ]);
+    expect(out[0].state).toBe('fixed');
+    expect(out[0].fixedAt).toBe('2026-07-15T20:08:43Z');
   });
 
   it('preserves dismissed state + reason (the second-ledger signal)', () => {
@@ -102,6 +111,7 @@ describe('parseAlerts', () => {
       dismissedReason: '',
       category: '',
       htmlUrl: '',
+      fixedAt: '',
     });
   });
 
@@ -133,6 +143,7 @@ describe('filterByCategory', () => {
     dismissedReason: '',
     category,
     htmlUrl: '',
+    fixedAt: '',
   });
 
   it('keeps only findings in the requested categories', () => {
@@ -162,19 +173,23 @@ describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
     dismissedReason: '',
     category: 'grype-ministack-image',
     htmlUrl: 'https://x.test/1',
+    fixedAt: '',
     ...over,
   });
 
-  it('maps badgeSeverity -> severity and carries id/scanner/state/htmlUrl', () => {
+  it('maps badgeSeverity -> severity and carries id/scanner/state/htmlUrl/fixedAt', () => {
     // This is the load-bearing rename: the report reads `severity`, the alert
     // exposes `badgeSeverity`. A wrong mapping makes every CI severity UNKNOWN.
-    expect(toScannerFindings([af()])).toEqual([
+    expect(
+      toScannerFindings([af({ fixedAt: '2026-07-15T00:00:00Z' })]),
+    ).toEqual([
       {
         id: 'CVE-2026-1',
         scanner: 'Grype',
         severity: 'CRITICAL',
         state: 'open',
         htmlUrl: 'https://x.test/1',
+        fixedAt: '2026-07-15T00:00:00Z',
       },
     ]);
   });
@@ -197,6 +212,7 @@ describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
         severity: 'HIGH',
         state: 'open',
         htmlUrl: 'https://x.test/1',
+        fixedAt: '',
       },
       {
         id: 'CVE-2026-2',
@@ -204,6 +220,7 @@ describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
         severity: 'MEDIUM',
         state: 'dismissed',
         htmlUrl: 'https://x.test/2',
+        fixedAt: '',
       },
     ]);
   });

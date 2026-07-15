@@ -55,12 +55,14 @@ function assertInvariants(
   vex: unknown,
   findings: unknown,
   today: unknown,
+  resolvedSince: unknown = '',
 ): void {
   const rows = buildReport(
     (Array.isArray(vex) ? vex : []) as VexRecord[],
     (Array.isArray(findings) ? findings : []) as ScannerFinding[],
     'HIGH',
     typeof today === 'string' ? today : '',
+    typeof resolvedSince === 'string' ? resolvedSince : '',
   );
   expect(Array.isArray(rows)).toBe(true);
   const md = renderMarkdown(rows);
@@ -83,6 +85,17 @@ function assertInvariants(
       expect(typeof sc.htmlUrl).toBe('string');
     }
     expect(typeof r.alertCount).toBe('number');
+    expect(typeof r.priorityRank).toBe('number'); // sort key always present
+    // resolvedAt is a string or null (never undefined/garbage)
+    expect(r.resolvedAt === null || typeof r.resolvedAt === 'string').toBe(
+      true,
+    );
+  }
+  // rows are priority-sorted (non-decreasing rank) — the invariant the render relies on
+  for (let k = 1; k < rows.length; k++) {
+    expect(rows[k].priorityRank).toBeGreaterThanOrEqual(
+      rows[k - 1].priorityRank,
+    );
   }
 }
 
@@ -119,10 +132,11 @@ describe('vex-report — corpus replay (regression)', () => {
         vex?: unknown;
         findings?: unknown;
         today?: unknown;
+        resolvedSince?: unknown;
       };
-      assertInvariants(bag.vex, bag.findings, bag.today);
+      assertInvariants(bag.vex, bag.findings, bag.today, bag.resolvedSince);
       // Also feed the whole parsed value as each arg to stress type-tolerance.
-      assertInvariants(parsed, parsed, parsed);
+      assertInvariants(parsed, parsed, parsed, parsed);
     },
   );
 
@@ -148,9 +162,16 @@ describe('vex-report — corpus replay (regression)', () => {
           scanner: fdp.consumeString(8) || 'grype',
           severity: fdp.consumeString(10),
           pkg: fdp.consumeString(12),
+          state: fdp.consumeString(10),
+          fixedAt: fdp.consumeString(24),
         },
       ];
-      assertInvariants(vex, findings, fdp.consumeString(10));
+      assertInvariants(
+        vex,
+        findings,
+        fdp.consumeString(10),
+        fdp.consumeString(10),
+      );
     }
   });
 
