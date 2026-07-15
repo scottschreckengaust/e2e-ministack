@@ -324,7 +324,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       ),
     );
     expect(md.split('\n')[0]).toBe(
-      '**VEX report** — 1 item(s): 0 decision needed · 0 revisit overdue · 0 stale · 0 accepted · 1 tracked',
+      '**VEX report** — 1 item(s): 0 decision needed · 0 vex drift · 0 undocumented dismissal · 0 revisit overdue · 0 stale · 0 accepted · 1 tracked',
     );
   });
 
@@ -502,6 +502,329 @@ describe('buildReport — status mapping', () => {
     );
     expect(rows[0].status).toBe('Stale record');
     expect(rows[0].revisitBy).toBe('2026-01-01'); // not null-ed by a && mutant
+  });
+});
+
+describe('buildReport — two-ledger reconciliation (alert state)', () => {
+  const na = (cve: string): VexRecord => ({
+    cve,
+    status: 'not_affected',
+    justification: NOT_AFFECTED,
+  });
+
+  it('not_affected + alert DISMISSED => Accepted (the steady state)', () => {
+    const rows = buildReport(
+      [na('CVE-2026-1')],
+      [
+        {
+          id: 'CVE-2026-1',
+          scanner: 'Grype',
+          severity: 'HIGH',
+          state: 'dismissed',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Accepted');
+    expect(rows[0].actionNeeded).toBe(false);
+  });
+
+  it('not_affected + alert still OPEN => VEX drift (action)', () => {
+    const rows = buildReport(
+      [na('CVE-2026-2')],
+      [{ id: 'CVE-2026-2', scanner: 'Grype', severity: 'HIGH', state: 'open' }],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('VEX drift');
+    expect(rows[0].actionNeeded).toBe(true);
+  });
+
+  it('one dismissed + one OPEN alert for a covered CVE => VEX drift (any-open wins)', () => {
+    const rows = buildReport(
+      [na('CVE-2026-3')],
+      [
+        {
+          id: 'CVE-2026-3',
+          scanner: 'Grype',
+          severity: 'HIGH',
+          state: 'dismissed',
+        },
+        { id: 'CVE-2026-3', scanner: 'Trivy', severity: 'HIGH', state: 'open' },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('VEX drift');
+  });
+
+  it('no VEX + alert DISMISSED => Undocumented dismissal (inverse drift, action)', () => {
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-9',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'dismissed',
+          pkg: 'zlib1g',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Undocumented dismissal');
+    expect(rows[0].actionNeeded).toBe(true);
+  });
+
+  it('no VEX + alert FIXED (finding gone) => Resolved, NOT actionable', () => {
+    // A `fixed` alert auto-closed because the finding disappeared — NOT a human
+    // dismissal to justify. Must be Resolved (informational), not Undocumented
+    // dismissal, and must not raise the 🔴 signal.
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-10',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'fixed',
+          pkg: 'zlib1g',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Resolved');
+    expect(rows[0].actionNeeded).toBe(false);
+  });
+
+  it('no VEX + BOTH a dismissed and a fixed alert (none open) => Undocumented dismissal wins', () => {
+    // Dismissed (human) takes precedence over fixed — the human action is the
+    // one that needs documentation.
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-13',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'fixed',
+          pkg: 'zlib1g',
+        },
+        {
+          id: 'CVE-2099-13',
+          scanner: 'Trivy',
+          severity: 'LOW',
+          state: 'dismissed',
+          pkg: 'zlib1g',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Undocumented dismissal');
+  });
+
+  it('undocumented-dismissal suggests justification FROM its packages (kills the []-spread mutant)', () => {
+    // A never-run package (tar) must yield not-in-execute-path, not the default
+    // — proving the pkgs are actually passed to suggestJustification here.
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-12',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'dismissed',
+          pkg: 'tar',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Undocumented dismissal');
+    expect(rows[0].suggestedJustification).toBe(
+      'vulnerable_code_not_in_execute_path',
+    );
+  });
+
+  it('no VEX + a dismissed AND an open alert => NOT undocumented (an open one still needs the decision)', () => {
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-11',
+          scanner: 'Grype',
+          severity: 'CRITICAL',
+          state: 'dismissed',
+          pkg: 'openssl',
+        },
+        {
+          id: 'CVE-2099-11',
+          scanner: 'Trivy',
+          severity: 'CRITICAL',
+          state: 'open',
+          pkg: 'openssl',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    // anyOpen is true, so the undocumented-dismissal branch is skipped; the
+    // open critical is a live decision.
+    expect(rows[0].status).toBe('Decision needed');
+  });
+
+  it('absent state leaves the pure .vex/ verdict unchanged (no ledger opinion)', () => {
+    // A not_affected record with a finding that has NO state must stay Accepted
+    // (not flip to VEX drift) — drift needs POSITIVE open evidence.
+    const rows = buildReport(
+      [na('CVE-2026-4')],
+      [{ id: 'CVE-2026-4', scanner: 'Grype', severity: 'HIGH' }], // no state
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Accepted');
+  });
+
+  it('uncovered + OPEN alert below the floor => Tracked (open branch, below-floor side)', () => {
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-19',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'open',
+          pkg: 'zlib1g',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Tracked');
+  });
+
+  it('uncovered + OPEN alert EXACTLY AT the floor => Decision needed (kills >= vs >), justification from pkgs', () => {
+    // never-run pkg (tar) => not-in-execute-path, which also proves the
+    // uncovered-open branch passes its packages to suggestJustification
+    // (kills the []-spread mutant there).
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-18',
+          scanner: 'Grype',
+          severity: 'HIGH',
+          state: 'open',
+          pkg: 'tar',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Decision needed');
+    expect(rows[0].suggestedJustification).toBe(
+      'vulnerable_code_not_in_execute_path',
+    );
+  });
+
+  it('undocumented-dismissal + resolved suggest justification FROM packages (kill []-spread mutants)', () => {
+    const dismissed = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-16',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'dismissed',
+          pkg: 'tar',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(dismissed[0].status).toBe('Undocumented dismissal');
+    expect(dismissed[0].suggestedJustification).toBe(
+      'vulnerable_code_not_in_execute_path',
+    );
+    const resolved = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-17',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'fixed',
+          pkg: 'tar',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(resolved[0].status).toBe('Resolved');
+    expect(resolved[0].suggestedJustification).toBe(
+      'vulnerable_code_not_in_execute_path',
+    );
+  });
+
+  it('uncovered finding with NO alert state falls to pure severity (no ledger opinion)', () => {
+    // state absent => not open/dismissed/fixed => the severity path decides.
+    const belowFloor = buildReport(
+      [],
+      [{ id: 'CVE-2099-20', scanner: 'Grype', severity: 'LOW', pkg: 'zlib1g' }],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(belowFloor[0].status).toBe('Tracked');
+    const atFloor = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-21',
+          scanner: 'Grype',
+          severity: 'HIGH',
+          pkg: 'openssl',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(atFloor[0].status).toBe('Decision needed');
+  });
+
+  it('renders a "resolved" suffix in the summary when present', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [
+          {
+            id: 'CVE-2099-22',
+            scanner: 'Grype',
+            severity: 'LOW',
+            state: 'fixed',
+            pkg: 'zlib1g',
+          },
+        ],
+        'HIGH',
+        '2026-07-14',
+      ),
+    );
+    expect(md).toContain(' · 1 resolved');
+    // Resolved is NOT actionable, so the clean-tree line still shows.
+    expect(md).toContain('✅ **No action needed**');
+  });
+
+  it('an overdue revisit still wins over VEX-drift (acceptance itself is due)', () => {
+    const rows = buildReport(
+      [{ ...na('CVE-2026-5'), revisitBy: '2026-01-01' }],
+      [{ id: 'CVE-2026-5', scanner: 'Grype', severity: 'HIGH', state: 'open' }],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].status).toBe('Revisit overdue');
   });
 });
 
@@ -801,7 +1124,7 @@ describe('summarize + renderMarkdown', () => {
       ),
     );
     const expected = [
-      '**VEX report** — 4 item(s): 1 decision needed · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating',
+      '**VEX report** — 4 item(s): 1 decision needed · 0 vex drift · 0 undocumented dismissal · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating',
       '',
       '**Needs attention (2):**',
       '',

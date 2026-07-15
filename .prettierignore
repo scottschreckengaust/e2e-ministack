@@ -31,6 +31,7 @@ fuzz/corpus-sonar/
 fuzz/corpus-license/
 fuzz/corpus-vex/
 fuzz/corpus-vex-report/
+fuzz/corpus-alerts-findings/
 # Vendored upstream SARIF 2.1.0 JSON Schema (OASIS canonical, #187) — its bytes
 # must match the published artifact for the schema-equivalence claim to hold.
 test/fixtures/sarif-schema-2.1.0.json

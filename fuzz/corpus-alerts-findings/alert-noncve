@@ -1,0 +1,1 @@
+[{"state":"open","rule":{"id":"typescript:S1848","security_severity_level":null},"tool":{"name":"SonarQube"},"most_recent_instance":{"category":"sonarqube"}}]
