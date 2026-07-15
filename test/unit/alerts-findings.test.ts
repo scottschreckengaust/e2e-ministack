@@ -3,6 +3,7 @@ import {
   badgeSeverity,
   parseAlerts,
   filterByCategory,
+  mergeAlertLedgers,
   toScannerFindings,
   asRecord,
   asArray,
@@ -161,6 +162,66 @@ describe('filterByCategory', () => {
   it('keeps everything when no categories are given', () => {
     const all = [f('CVE-1', 'grype-ministack-image'), f('S1848', 'sonarqube')];
     expect(filterByCategory(all, [])).toEqual(all);
+  });
+});
+
+describe('mergeAlertLedgers (run-ref open + main-ref fixed/dismissed history)', () => {
+  const fa = (
+    id: string,
+    scanner: string,
+    state: string,
+    over: Partial<AlertFinding> = {},
+  ): AlertFinding => ({
+    id,
+    scanner,
+    badgeSeverity: 'HIGH',
+    state,
+    dismissedReason: '',
+    category: 'grype-ministack-image',
+    htmlUrl: '',
+    fixedAt: '',
+    ...over,
+  });
+
+  it('adds main-only findings (the fixed/dismissed history the run ref lacks)', () => {
+    const run = [fa('CVE-1', 'Grype', 'open')];
+    const main = [
+      fa('CVE-1', 'Grype', 'dismissed'), // dup key — run wins, NOT added
+      fa('CVE-2', 'Grype', 'fixed', { fixedAt: '2026-07-15' }), // main-only — added
+    ];
+    const out = mergeAlertLedgers(run, main);
+    expect(out.map((x) => [x.id, x.state])).toEqual([
+      ['CVE-1', 'open'], // run-ref entry wins for the shared key
+      ['CVE-2', 'fixed'], // main-only resolved history brought in
+    ]);
+  });
+
+  it('keys by id AND scanner (same CVE from two scanners are distinct)', () => {
+    const run = [fa('CVE-1', 'Grype', 'open')];
+    const main = [fa('CVE-1', 'Trivy', 'fixed', { fixedAt: '2026-07-15' })];
+    const out = mergeAlertLedgers(run, main);
+    // different scanner => different key => both kept
+    expect(out.map((x) => [x.id, x.scanner])).toEqual([
+      ['CVE-1', 'Grype'],
+      ['CVE-1', 'Trivy'],
+    ]);
+  });
+
+  it('run-ref entries lead, in order; main-only appended after', () => {
+    const run = [fa('CVE-B', 'Grype', 'open'), fa('CVE-A', 'Grype', 'open')];
+    const main = [fa('CVE-C', 'Grype', 'fixed')];
+    expect(mergeAlertLedgers(run, main).map((x) => x.id)).toEqual([
+      'CVE-B',
+      'CVE-A',
+      'CVE-C',
+    ]);
+  });
+
+  it('empty main => run unchanged; empty run => main passthrough', () => {
+    const run = [fa('CVE-1', 'Grype', 'open')];
+    expect(mergeAlertLedgers(run, [])).toEqual(run);
+    const main = [fa('CVE-2', 'Grype', 'fixed')];
+    expect(mergeAlertLedgers([], main)).toEqual(main);
   });
 });
 

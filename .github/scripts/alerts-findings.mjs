@@ -12,41 +12,68 @@
 // only argv/read/filter/write plumbing.
 //
 // Usage:
-//   node alerts-findings.mjs <alerts.json> <out.json> [category ...]
+//   node alerts-findings.mjs <alerts.json> <out.json> [--main <mainAlerts.json>] [category ...]
 // `category` args (optional) restrict to specific scan categories — pass the
 // image-scan categories (e.g. grype-ministack-image, trivy-image) so unrelated
 // code-scanning alerts (SonarQube, CodeQL) don't leak into the VEX report.
+//
+// `--main <file>`: a SECOND alerts response fetched for `refs/heads/main`. The
+// `fixed`/`dismissed` alert state lives on the DEFAULT BRANCH, so on a PR merge
+// ref those are absent; merging the default-branch set back in (open findings
+// still come from the run ref) restores the "recently resolved" + drift signals
+// (#210, `mergeAlertLedgers`). Omit it on default-branch runs (the run ref IS
+// main), or when unavailable — the report then reflects the run ref alone.
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   parseAlerts,
   filterByCategory,
+  mergeAlertLedgers,
   toScannerFindings,
 } from './alerts-findings.ts';
 
-const [, , alertsFile, outFile, ...categories] = process.argv;
+// Pull out the optional `--main <file>` pair, leaving positionals intact.
+const argv = process.argv.slice(2);
+let mainFile;
+const rest = [];
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--main') {
+    mainFile = argv[++i];
+  } else {
+    rest.push(argv[i]);
+  }
+}
+const [alertsFile, outFile, ...categories] = rest;
 if (!alertsFile || !outFile) {
   console.error(
-    'usage: alerts-findings.mjs <alerts.json> <out.json> [category ...]',
+    'usage: alerts-findings.mjs <alerts.json> <out.json> [--main <mainAlerts.json>] [category ...]',
   );
   process.exit(2);
 }
 
-let alerts = [];
-try {
-  alerts = JSON.parse(readFileSync(alertsFile, 'utf8'));
-} catch {
-  // No/invalid alerts file -> no findings; the report still renders from `.vex/`
-  // alone (e.g. a fresh branch whose scans haven't uploaded yet).
+// Read + normalize an alerts JSON file; a missing/invalid file yields [] (the
+// report still renders — e.g. a fresh branch whose scans haven't uploaded yet).
+function loadFindings(file) {
+  if (!file) return [];
+  try {
+    return filterByCategory(
+      parseAlerts(JSON.parse(readFileSync(file, 'utf8'))),
+      categories,
+    );
+  } catch {
+    return [];
+  }
 }
 
-// Normalize -> filter by scan category -> adapt to the report's ScannerFinding
-// shape (maps badgeSeverity -> severity; see toScannerFindings). Emitting the
-// consumed shape here keeps the field-name bridge in tested logic, not plumbing.
+// Merge run-ref (open findings, digest-bump-correct) with the default-branch set
+// (fixed/dismissed history the run ref lacks), then adapt to the report's
+// ScannerFinding shape (maps badgeSeverity -> severity; see toScannerFindings).
+// Keeping the merge + field-name bridge in tested logic, not plumbing.
 const findings = toScannerFindings(
-  filterByCategory(parseAlerts(alerts), categories),
+  mergeAlertLedgers(loadFindings(alertsFile), loadFindings(mainFile)),
 );
 writeFileSync(outFile, JSON.stringify(findings));
 console.error(
   `alerts-findings: ${findings.length} finding(s)` +
-    (categories.length ? ` in categories [${categories.join(', ')}]` : ''),
+    (categories.length ? ` in categories [${categories.join(', ')}]` : '') +
+    (mainFile ? ' (merged with default-branch ledger)' : ''),
 );

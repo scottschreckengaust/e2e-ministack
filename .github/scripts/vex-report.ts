@@ -256,6 +256,18 @@ export function isoDayNumber(value: unknown): number {
 }
 
 /**
+ * The leading `YYYY-MM-DD` day of an ISO timestamp for DISPLAY, or the input
+ * unchanged when it has no ISO-day prefix (e.g. an event token) — so the report
+ * shows `2026-07-15`, not the noisy `2026-07-15T20:08:43Z` the Alerts API emits.
+ * A null yields '—' (nothing to show). Reuses the same anchored day regex.
+ */
+export function isoDay(value: string | null): string {
+  if (value === null) return '—';
+  const m = ISO_DAY_CAPTURE_RE.exec(value);
+  return m === null ? value : `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+/**
  * True iff `revisitBy` is a calendar day on/before `today`'s calendar day.
  * Both operands become a `YYYYMMDD` integer (NaN when not a date). The single
  * `due <= now` is false whenever EITHER side is NaN — so a missing/event
@@ -540,9 +552,26 @@ const LEGEND =
   '**revisit_by** — an ISO date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`).\n\n' +
   '</details>';
 
-/** Render `item` as a plain CVE id (the dedup key); un-CVE'd ids get a flag. */
+// GitHub advisory-database search for a CVE. GitHub does NOT autolink a CVE id
+// inside a markdown TABLE cell (it does in prose), so a bare id is dead text —
+// we link it ourselves. A search URL (not a per-CVE page) because the CVE→GHSA
+// mapping isn't known here; GitHub resolves the query to the advisory. Below-
+// floor / un-alerted CVEs have no scanner-alert link, so this is often the ONLY
+// way to click through to what a CVE actually is (#210 maintainer feedback).
+function advisoryUrl(cve: string): string {
+  return `https://github.com/advisories?query=${encodeURIComponent(cve)}`;
+}
+
+/**
+ * Render `item`: a real CVE id becomes a link to its GitHub advisory (always
+ * available, independent of whether a scanner alert exists); an un-CVE'd
+ * `TEMP-…`/GHSA pseudo-id stays plain text with a flag (a CVE-query link would
+ * be misleading — it isn't a CVE the advisory search resolves).
+ */
 function renderItem(r: ReportRow): string {
-  return r.isCve ? r.item : `${r.item} ⚠️ un-CVE'd`;
+  return r.isCve
+    ? `[${r.item}](${advisoryUrl(r.item)})`
+    : `${r.item} ⚠️ un-CVE'd`;
 }
 
 /** Scanners linked to their own alerts, e.g. `[grype](url), [trivy](url)`. */
@@ -606,7 +635,7 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
     const body = resolved
       .map(
         (r) =>
-          `| ${renderItem(r)} | ${r.maxSeverity} | ${r.resolvedAt ?? '—'} |`,
+          `| ${renderItem(r)} | ${r.maxSeverity} | ${isoDay(r.resolvedAt)} |`,
       )
       .join('\n');
     resolvedBlock = `ℹ️ **Recently resolved (${resolved.length}):**\n\n${head}\n${body}\n\n`;

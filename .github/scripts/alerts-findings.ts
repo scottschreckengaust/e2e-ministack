@@ -103,6 +103,36 @@ export function filterByCategory(
 }
 
 /**
+ * Merge the run-ref alert set with the default-branch (`main`) set (#210).
+ *
+ * WHY: the Alerts API `state` (open / dismissed / fixed) is anchored per ref,
+ * but `fixed`/`dismissed` history lives on the DEFAULT BRANCH — a PR merge ref
+ * reports 0 fixed and 0 dismissed even when many exist on `main` (dismissal +
+ * auto-fix are repo-global, like the #186 dismiss-alerts step which is
+ * default-branch-only). So on a PR the "recently resolved" and drift signals
+ * would silently vanish. This merges both: OPEN findings come from the RUN ref
+ * (correct on a digest-bump PR, where the new image's open set differs from
+ * main), while `main` supplies the fixed/dismissed history the run ref lacks.
+ *
+ * Keyed by `id|scanner` (one alert per CVE per scanner). The RUN-ref entry wins
+ * when a key exists on both (its open/severity/url reflect what THIS ref scans);
+ * a key present only on `main` is added (the resolved/dismissed history). Order
+ * is deterministic: run-ref entries first (in their order), then main-only ones.
+ */
+export function mergeAlertLedgers(
+  runRef: readonly AlertFinding[],
+  mainRef: readonly AlertFinding[],
+): AlertFinding[] {
+  const key = (f: AlertFinding): string => `${f.id}|${f.scanner}`;
+  const seen = new Set(runRef.map(key));
+  const out = [...runRef];
+  for (const f of mainRef) {
+    if (!seen.has(key(f))) out.push(f);
+  }
+  return out;
+}
+
+/**
  * Adapt Alert findings to the `ScannerFinding` shape the VEX report consumes.
  * The two ledgers name the same concepts differently — the alert's
  * `badgeSeverity` is the report's `severity` — so this is the ONE place the

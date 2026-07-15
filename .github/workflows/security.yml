@@ -828,10 +828,26 @@ jobs:
           gh api --paginate \
             "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?ref=${REF}&per_page=100" \
             > alerts.json 2>/dev/null || echo '[]' > alerts.json
+          # `fixed`/`dismissed` alert state is anchored to the DEFAULT BRANCH, so
+          # on a PR merge ref they are absent (0 fixed/dismissed) — the "recently
+          # resolved" + drift signals would silently vanish. Also fetch main's
+          # alerts and merge them back in (#210, mergeAlertLedgers): open findings
+          # still come from the run ref (digest-bump-correct), main supplies the
+          # resolved/dismissed history. On a push-to-main run REF already IS main,
+          # so this is the same set — harmless. Non-fatal if it can't be fetched.
+          main_arg=""
+          if [ "${REF}" != "refs/heads/main" ]; then
+            if gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?ref=refs/heads/main&per_page=100" \
+              > main-alerts.json 2>/dev/null; then
+              main_arg="--main main-alerts.json"
+            fi
+          fi
           # Restrict to the image-scan categories so unrelated code-scanning
           # alerts (SonarQube, CodeQL) don't leak into the VEX/image report.
+          # shellcheck disable=SC2086  # $main_arg is an intentional flag pair
           node .github/scripts/alerts-findings.mjs alerts.json findings.json \
-            grype-ministack-image trivy-image
+            $main_arg grype-ministack-image trivy-image
           # "Recently resolved" window boundary: the LAST published release's
           # date ("resolved since users last saw a release"). Fall back to a
           # rolling 7-day window when there is no prior release yet (fresh repo)

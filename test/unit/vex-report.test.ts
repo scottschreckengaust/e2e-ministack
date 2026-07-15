@@ -1,6 +1,7 @@
 import {
   isCveId,
   isoDayNumber,
+  isoDay,
   isRevisitOverdue,
   isActionable,
   priorityRank,
@@ -81,6 +82,21 @@ describe('isoDayNumber', () => {
     // `String(['2026-07-14']) === '2026-07-14'` — without the typeof guard the
     // regex would coerce the array and return 20260714. It must be NaN.
     expect(isoDayNumber(['2026-07-14'])).toBeNaN();
+  });
+});
+
+describe('isoDay (display trim)', () => {
+  it('trims an ISO timestamp to its YYYY-MM-DD day', () => {
+    expect(isoDay('2026-07-15T20:08:43Z')).toBe('2026-07-15');
+    expect(isoDay('2026-07-15')).toBe('2026-07-15');
+  });
+  it('returns "—" for null', () => {
+    expect(isoDay(null)).toBe('—');
+  });
+  it('returns a non-ISO-day string unchanged (kills the branch mutant)', () => {
+    // no YYYY-MM-DD prefix => passed through verbatim, not blanked.
+    expect(isoDay('wait-for-image-rebuild')).toBe('wait-for-image-rebuild');
+    expect(isoDay('')).toBe('');
   });
 });
 
@@ -360,7 +376,9 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       ),
     );
     // ledger columns: item · status · severity · scanners · revisit_by
-    expect(md).toContain('| CVE-2099-3 | Stale record | UNKNOWN | — | — |');
+    expect(md).toContain(
+      '| [CVE-2099-3](https://github.com/advisories?query=CVE-2099-3) | Stale record | UNKNOWN | — | — |',
+    );
   });
 
   it('the investigating summary suffix text is exact', () => {
@@ -405,7 +423,9 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
     );
     // columns: item · status · severity · scanners · revisit_by. The scanner is
     // unlinked here (no htmlUrl on the finding) so it renders as a bare name.
-    expect(md).toContain('| CVE-2026-1 | Accepted | HIGH | grype | — |');
+    expect(md).toContain(
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Accepted | HIGH | grype | — |',
+    );
   });
 });
 
@@ -562,7 +582,7 @@ describe('buildReport — status mapping', () => {
     expect(rows[0].suggestedJustification).toBeNull();
     // Stale is actionable, so its "why" column exercises shortJust(null) => "—".
     expect(renderMarkdown(rows)).toContain(
-      '| CVE-2026-88 | Stale record | — |',
+      '| [CVE-2026-88](https://github.com/advisories?query=CVE-2026-88) | Stale record | — |',
     );
   });
 
@@ -918,7 +938,9 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
     expect(md).toContain('✅ **No action needed**');
     // ...and the bounded Recently-resolved block lists it (item · severity · resolved).
     expect(md).toContain('ℹ️ **Recently resolved (1):**');
-    expect(md).toContain('| CVE-2099-22 | LOW | 2026-07-13 |');
+    expect(md).toContain(
+      '| [CVE-2099-22](https://github.com/advisories?query=CVE-2099-22) | LOW | 2026-07-13 |',
+    );
   });
 
   it('drops a Resolved row whose fixed_at is OUTSIDE the recency window', () => {
@@ -1304,7 +1326,9 @@ describe('summarize + renderMarkdown', () => {
     };
     const md = renderMarkdown([row]);
     expect(md).toContain('ℹ️ **Recently resolved (1):**');
-    expect(md).toContain('| CVE-2099-Z | LOW | — |');
+    expect(md).toContain(
+      '| [CVE-2099-Z](https://github.com/advisories?query=CVE-2099-Z) | LOW | — |',
+    );
   });
 
   it('summarize counts every status bucket', () => {
@@ -1392,7 +1416,7 @@ describe('summarize + renderMarkdown', () => {
     expect(md).toContain('ℹ️ **Recently resolved (2):**');
     // both rows present on their OWN lines (join('\n'), not concatenated)
     expect(md).toContain(
-      '| CVE-2099-71 | LOW | 2026-07-12 |\n| CVE-2099-72 | LOW | 2026-07-10 |',
+      '| [CVE-2099-71](https://github.com/advisories?query=CVE-2099-71) | LOW | 2026-07-12 |\n| [CVE-2099-72](https://github.com/advisories?query=CVE-2099-72) | LOW | 2026-07-10 |',
     );
   });
 
@@ -1417,7 +1441,7 @@ describe('summarize + renderMarkdown', () => {
     expect(md).toContain('| item | status | why |');
     // the actionable row is the overdue acceptance, with its justification as "why"
     expect(md).toContain(
-      '| CVE-2026-1 | Revisit overdue | adversary-unreachable |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | adversary-unreachable |',
     );
   });
 
@@ -1456,7 +1480,7 @@ describe('summarize + renderMarkdown', () => {
       ),
     );
     expect(md).toContain(
-      '| CVE-2026-1 | Revisit overdue | component_not_present |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | component_not_present |',
     );
   });
 
@@ -1502,7 +1526,9 @@ describe('summarize + renderMarkdown', () => {
       ),
     );
     // no htmlUrl => bare name, not a markdown link (kills the link-branch mutant)
-    expect(md).toContain('| CVE-2099-1 | Tracked | MEDIUM | grype | — |');
+    expect(md).toContain(
+      '| [CVE-2099-1](https://github.com/advisories?query=CVE-2099-1) | Tracked | MEDIUM | grype | — |',
+    );
     expect(md).not.toContain('[grype](');
   });
 
@@ -1609,24 +1635,24 @@ describe('summarize + renderMarkdown', () => {
       '',
       '| item | status | why |',
       '| --- | --- | --- |',
-      '| CVE-2099-9 | Decision needed | adversary-unreachable |',
-      '| CVE-2026-1 | Revisit overdue | adversary-unreachable |',
+      '| [CVE-2099-9](https://github.com/advisories?query=CVE-2099-9) | Decision needed | adversary-unreachable |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | adversary-unreachable |',
       '',
       'ℹ️ **Recently resolved (1):**',
       '',
       '| item | severity | resolved |',
       '| --- | --- | --- |',
-      '| CVE-2099-7 | MEDIUM | 2026-07-13 |',
+      '| [CVE-2099-7](https://github.com/advisories?query=CVE-2099-7) | MEDIUM | 2026-07-13 |',
       '',
       '<details>',
       '<summary>Full VEX ledger (5 CVEs) — click to expand</summary>',
       '',
       '| item | status | severity | scanners | revisit_by |',
       '| --- | --- | --- | --- | --- |',
-      '| CVE-2099-9 | Decision needed | CRITICAL | [grype](https://x.test/5), [trivy](https://x.test/4) | — |',
-      '| CVE-2026-1 | Revisit overdue | HIGH | [grype](https://x.test/1), [trivy](https://x.test/2) | 2026-01-01 |',
-      '| CVE-2099-7 | Resolved | MEDIUM | [grype](https://x.test/7) | — |',
-      '| CVE-2026-2 | Investigating | HIGH | [grype](https://x.test/3) | — |',
+      '| [CVE-2099-9](https://github.com/advisories?query=CVE-2099-9) | Decision needed | CRITICAL | [grype](https://x.test/5), [trivy](https://x.test/4) | — |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | HIGH | [grype](https://x.test/1), [trivy](https://x.test/2) | 2026-01-01 |',
+      '| [CVE-2099-7](https://github.com/advisories?query=CVE-2099-7) | Resolved | MEDIUM | [grype](https://x.test/7) | — |',
+      '| [CVE-2026-2](https://github.com/advisories?query=CVE-2026-2) | Investigating | HIGH | [grype](https://x.test/3) | — |',
       "| TEMP-1-ABC ⚠️ un-CVE'd | Tracked | LOW | [trivy](https://x.test/6) | — |",
       '',
       '</details>',
@@ -1696,6 +1722,8 @@ describe('summarize + renderMarkdown', () => {
     );
     expect(md).toContain('Stale record');
     // stale row: item · status · severity · scanners(—) · revisit_by(—)
-    expect(md).toContain('| CVE-2026-9 | Stale record | UNKNOWN | — | — |');
+    expect(md).toContain(
+      '| [CVE-2026-9](https://github.com/advisories?query=CVE-2026-9) | Stale record | UNKNOWN | — | — |',
+    );
   });
 });

@@ -12,6 +12,7 @@ import { FuzzedDataProvider } from '@jazzer.js/core/dist/FuzzedDataProvider';
 import {
   parseAlerts,
   filterByCategory,
+  mergeAlertLedgers,
   toScannerFindings,
   type AlertFinding,
 } from '../.github/scripts/alerts-findings';
@@ -93,6 +94,11 @@ describe('alerts-findings — corpus replay (regression)', () => {
         expect(sf[i].id).toBe(f[i].id);
         expect(sf[i].scanner).toBe(f[i].scanner);
       }
+      // Merging the set with itself must stay well-formed and never lose a
+      // run-ref entry (dup keys collapse to the run side) or exceed 2x length.
+      const merged = mergeAlertLedgers(f, f);
+      assertWellFormed(merged);
+      expect(merged).toHaveLength(f.length); // self-merge: every key already seen
     },
   );
 
