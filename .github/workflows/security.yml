@@ -488,7 +488,12 @@ jobs:
         continue-on-error: true # visibility path only; never fails the job
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          image: 'ministackorg/ministack:full@sha256:dd2cf4d2e58a9ee6534a52f1edf06a720064c24b90ca28d42b1c57181b9b8815'
+          # MUST match the gate scan's digest above — this VEX-free scan feeds
+          # the Security-tab alert store, so a stale digest here re-opens alerts
+          # for CVEs on an OLD image the gate no longer uses (#210: the py3.12
+          # base's CVE-2026-6100 et al. kept reappearing because #182's digest
+          # bump missed this one line). Keep in lockstep with the gate scan.
+          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
           fail-build: false # do not gate on this scan
           severity-cutoff: high
           output-format: sarif
