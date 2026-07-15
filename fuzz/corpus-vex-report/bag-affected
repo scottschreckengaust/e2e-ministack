@@ -1,0 +1,1 @@
+{"vex":[{"cve":"CVE-2099-3","status":"affected"}],"findings":[{"id":"CVE-2099-3","scanner":"grype","severity":"MEDIUM","pkg":"node-undici"}],"today":"2026-07-14"}
