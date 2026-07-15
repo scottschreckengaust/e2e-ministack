@@ -33,7 +33,14 @@ scan:
 # .vex/README.md and docs/SECURITY-TOOLING.md.
 vulnerability:
   vex:
+    - .vex/CVE-2005-2541.openvex.json
+    - .vex/CVE-2017-18018.openvex.json
+    - .vex/CVE-2018-20796.openvex.json
+    - .vex/CVE-2019-1010022.openvex.json
+    - .vex/CVE-2019-1010023.openvex.json
+    - .vex/CVE-2019-9192.openvex.json
     - .vex/CVE-2025-69720.openvex.json
+    - .vex/CVE-2025-70873.openvex.json
     - .vex/CVE-2026-11822.openvex.json
     - .vex/CVE-2026-11824.openvex.json
     - .vex/CVE-2026-11940.openvex.json
@@ -73,6 +80,7 @@ vulnerability:
     - .vex/CVE-2026-54370.openvex.json
     - .vex/CVE-2026-54371.openvex.json
     - .vex/CVE-2026-57432.openvex.json
+    - .vex/CVE-2026-57433.openvex.json
     - .vex/CVE-2026-5450.openvex.json
     - .vex/CVE-2026-5928.openvex.json
     - .vex/CVE-2026-6734.openvex.json
