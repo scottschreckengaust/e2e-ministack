@@ -421,18 +421,28 @@ function shortJust(j: string | null): string {
   return j;
 }
 
-// A one-line legend defining every vocabulary the tables use — so no status,
-// severity, or revisit_by cell needs its own footnote (#206 item 2).
+// A legend defining every vocabulary the tables use — so no status, severity,
+// or revisit_by cell needs its own footnote (#206 item 2). Rendered as a
+// scannable status TABLE (one row per label) plus two short definition lines,
+// all inside a collapsed <details> so it stays out of the way. (The previous
+// single dense italic run-on was unreadable — maintainer feedback on PR #207.)
 const LEGEND =
-  '_Legend — **status:** Accepted = VEX not_affected/fixed + alert dismissed · ' +
-  'Tracked = below the gate floor, tolerated (no action) · Decision needed = ' +
-  'uncovered at/above the gate floor · VEX drift = VEX-accepted but the alert ' +
-  'is still open · Undocumented dismissal = alert dismissed with no `.vex/` ' +
-  'record · Resolved = auto-fixed (finding gone) · Revisit overdue = accepted ' +
-  'record past its `revisit_by` · Stale record = `.vex/` record with no current ' +
-  "alert · Investigating = under review. **severity:** GitHub's badge (NVD) " +
-  'severity — may differ from a scanner’s gate rating. **revisit_by:** an ISO ' +
-  'date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`)._';
+  '<details>\n' +
+  '<summary>Legend — status vocabulary, severity, revisit_by</summary>\n\n' +
+  '| status | meaning |\n' +
+  '| --- | --- |\n' +
+  '| Accepted | VEX `not_affected`/`fixed` + alert dismissed — gated, nothing to do |\n' +
+  '| Tracked | below the gate floor, tolerated — no action now |\n' +
+  '| Decision needed | uncovered at/above the gate floor — must VEX or fix |\n' +
+  '| VEX drift | VEX-accepted but the alert is still open — dismiss it |\n' +
+  '| Undocumented dismissal | alert dismissed with no `.vex/` record — justify or reopen |\n' +
+  '| Resolved | alert auto-fixed (finding gone) — informational |\n' +
+  '| Revisit overdue | accepted record past its `revisit_by` date |\n' +
+  '| Stale record | `.vex/` record with no current alert — prune? |\n' +
+  '| Investigating | `under_investigation` record |\n\n' +
+  "**severity** — GitHub's badge (NVD) severity; may differ from a scanner's gate rating.\n\n" +
+  '**revisit_by** — an ISO date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`).\n\n' +
+  '</details>';
 
 /** Render `item` as a plain CVE id (the dedup key); un-CVE'd ids get a flag. */
 function renderItem(r: ReportRow): string {

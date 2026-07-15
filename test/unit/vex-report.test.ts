@@ -1265,15 +1265,26 @@ describe('summarize + renderMarkdown', () => {
       '',
       '</details>',
       '',
-      '_Legend — **status:** Accepted = VEX not_affected/fixed + alert dismissed · ' +
-        'Tracked = below the gate floor, tolerated (no action) · Decision needed = ' +
-        'uncovered at/above the gate floor · VEX drift = VEX-accepted but the alert ' +
-        'is still open · Undocumented dismissal = alert dismissed with no `.vex/` ' +
-        'record · Resolved = auto-fixed (finding gone) · Revisit overdue = accepted ' +
-        'record past its `revisit_by` · Stale record = `.vex/` record with no current ' +
-        "alert · Investigating = under review. **severity:** GitHub's badge (NVD) " +
-        'severity — may differ from a scanner’s gate rating. **revisit_by:** an ISO ' +
-        'date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`)._',
+      '<details>',
+      '<summary>Legend — status vocabulary, severity, revisit_by</summary>',
+      '',
+      '| status | meaning |',
+      '| --- | --- |',
+      '| Accepted | VEX `not_affected`/`fixed` + alert dismissed — gated, nothing to do |',
+      '| Tracked | below the gate floor, tolerated — no action now |',
+      '| Decision needed | uncovered at/above the gate floor — must VEX or fix |',
+      '| VEX drift | VEX-accepted but the alert is still open — dismiss it |',
+      '| Undocumented dismissal | alert dismissed with no `.vex/` record — justify or reopen |',
+      '| Resolved | alert auto-fixed (finding gone) — informational |',
+      '| Revisit overdue | accepted record past its `revisit_by` date |',
+      '| Stale record | `.vex/` record with no current alert — prune? |',
+      '| Investigating | `under_investigation` record |',
+      '',
+      "**severity** — GitHub's badge (NVD) severity; may differ from a scanner's gate rating.",
+      '',
+      '**revisit_by** — an ISO date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`).',
+      '',
+      '</details>',
     ].join('\n');
     expect(md).toBe(expected);
   });
