@@ -78,7 +78,8 @@ export type UnifiedStatus =
   | 'Stale record' // a VEX record with no matching current finding — prune?
   | 'Investigating' // under_investigation record
   | 'VEX drift' // VEX-accepted, but its Code-Scanning alert is still OPEN (dismiss it)
-  | 'Undocumented dismissal'; // alert dismissed with NO backing .vex/ record (justify or reopen)
+  | 'Undocumented dismissal' // alert DISMISSED (a human hid it) with NO backing .vex/ record
+  | 'Resolved'; // alert auto-FIXED (finding gone), no .vex/ record — informational, no action
 
 // A status is "actionable" (gets the 🔴 signal) iff it asks a human to do
 // something. SINGLE source of truth — every `actionNeeded` derives from this,
@@ -236,14 +237,16 @@ export function buildReport(
   }
   const floorRank = rankOf(normSev(gateFloor));
 
-  // Group findings by id. The second-ledger (alert-state) signal is tri-valued
-  // and drift is only asserted on POSITIVE evidence — an absent `state` means
-  // "no alert-ledger opinion" (the caller didn't supply one), NOT open, so the
-  // VEX status stands unchallenged:
-  //   anyOpen   — at least one alert is explicitly `open`  (=> VEX drift risk)
-  //   anyClosed — at least one alert is dismissed/fixed    (=> undocumented-dismissal risk)
-  // A finding with no `state` sets neither, leaving the pure `.vex/`+severity
-  // logic in charge (so the engine behaves identically when no alerts are fed).
+  // Group findings by id. The second-ledger (alert-state) signals are set only
+  // on POSITIVE evidence — an absent `state` means "no alert-ledger opinion"
+  // (the caller didn't supply one), leaving the pure `.vex/`+severity logic in
+  // charge (so the engine behaves identically when no alerts are fed). The
+  // three alert states are kept DISTINCT because they mean different things:
+  //   anyOpen      — an alert is `open`      => a human decision is still due
+  //   anyDismissed — an alert is `dismissed` => a HUMAN hid it (drift-relevant)
+  //   anyFixed     — an alert is `fixed`     => it genuinely went away (resolved)
+  // Conflating dismissed with fixed would flag auto-resolved findings as
+  // "undocumented dismissal" — a false alarm; they are separate signals.
   const byId = new Map<
     string,
     {
@@ -251,7 +254,8 @@ export function buildReport(
       sevs: Record<string, string>;
       pkgs: Set<string>;
       anyOpen: boolean;
-      anyClosed: boolean;
+      anyDismissed: boolean;
+      anyFixed: boolean;
     }
   >();
   for (const f of findings) {
@@ -262,7 +266,8 @@ export function buildReport(
       sevs: {},
       pkgs: new Set(),
       anyOpen: false,
-      anyClosed: false,
+      anyDismissed: false,
+      anyFixed: false,
     };
     // `nonEmptyString` is load-bearing: it excludes both non-strings (which
     // would index/label the row with garbage) and '' (an empty scanner/pkg
@@ -273,7 +278,8 @@ export function buildReport(
     }
     if (nonEmptyString(f.pkg)) g.pkgs.add(f.pkg);
     if (f.state === 'open') g.anyOpen = true;
-    if (f.state === 'dismissed' || f.state === 'fixed') g.anyClosed = true;
+    if (f.state === 'dismissed') g.anyDismissed = true;
+    if (f.state === 'fixed') g.anyFixed = true;
     byId.set(key, g);
   }
 
@@ -312,14 +318,22 @@ export function buildReport(
         status = 'Investigating';
       }
       suggested = vex.justification ?? null;
-    } else if (g.anyClosed && !g.anyOpen) {
-      // No `.vex/` record, yet the alert was dismissed/fixed (and none open) —
-      // a suppression with no durable justification (inverse drift, #167).
+    } else if (g.anyOpen) {
+      // Uncovered + open: at/above floor needs a decision; below floor is tracked.
+      status = maxRank >= floorRank ? 'Decision needed' : 'Tracked';
+      suggested = suggestJustification([...g.pkgs]);
+    } else if (g.anyDismissed) {
+      // No `.vex/` record, yet a HUMAN dismissed the alert — a suppression with
+      // no durable justification (inverse drift, #167). Actionable.
       status = 'Undocumented dismissal';
       suggested = suggestJustification([...g.pkgs]);
+    } else if (g.anyFixed) {
+      // No `.vex/` record and the alert auto-FIXED (finding gone) — resolved,
+      // NOT a dismissal to document. Informational only.
+      status = 'Resolved';
+      suggested = suggestJustification([...g.pkgs]);
     } else {
-      // Uncovered (open or no-ledger-opinion): at/above floor needs a decision;
-      // below floor is tracked.
+      // Uncovered with no alert-ledger opinion: severity decides.
       status = maxRank >= floorRank ? 'Decision needed' : 'Tracked';
       suggested = suggestJustification([...g.pkgs]);
     }
@@ -378,6 +392,7 @@ export function summarize(
     Investigating: 0,
     'VEX drift': 0,
     'Undocumented dismissal': 0,
+    Resolved: 0,
   };
   for (const r of rows) acc[r.status] += 1;
   return acc;
@@ -411,7 +426,8 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
     `${s['Undocumented dismissal']} undocumented dismissal · ` +
     `${s['Revisit overdue']} revisit overdue · ${s['Stale record']} stale · ` +
     `${s['Accepted']} accepted · ${s['Tracked']} tracked` +
-    (s['Investigating'] ? ` · ${s['Investigating']} investigating` : '');
+    (s['Investigating'] ? ` · ${s['Investigating']} investigating` : '') +
+    (s['Resolved'] ? ` · ${s['Resolved']} resolved` : '');
 
   const signal = (r: ReportRow): string => {
     const bits: string[] = [];
