@@ -12,6 +12,7 @@ import { FuzzedDataProvider } from '@jazzer.js/core/dist/FuzzedDataProvider';
 import {
   parseAlerts,
   filterByCategory,
+  toScannerFindings,
   type AlertFinding,
 } from '../.github/scripts/alerts-findings';
 
@@ -83,6 +84,15 @@ describe('alerts-findings — corpus replay (regression)', () => {
       // Filtering by arbitrary categories must also stay well-formed.
       assertWellFormed(filterByCategory(f, ['grype-ministack-image']));
       assertWellFormed(filterByCategory(f, []));
+      // The report-shape adapter must map every finding totally: same length,
+      // badgeSeverity carried into `severity`, id/scanner preserved.
+      const sf = toScannerFindings(f);
+      expect(sf).toHaveLength(f.length);
+      for (let i = 0; i < f.length; i++) {
+        expect(sf[i].severity).toBe(f[i].badgeSeverity);
+        expect(sf[i].id).toBe(f[i].id);
+        expect(sf[i].scanner).toBe(f[i].scanner);
+      }
     },
   );
 

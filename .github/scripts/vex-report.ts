@@ -49,15 +49,24 @@ export interface ScannerFinding {
   pkg?: string; // package name when known (Alerts API often omits it)
   /** Alert state: open | dismissed | fixed. Absent => treat as open. */
   state?: string;
+  /** The alert's Security-tab URL, so the report can link the scanner to it. */
+  htmlUrl?: string;
+}
+
+/** A scanner that reported this CVE, with a link to its own alert. */
+export interface ScannerLink {
+  scanner: string; // e.g. "Grype"
+  htmlUrl: string; // that scanner's alert URL ('' if none — rendered unlinked)
 }
 
 export interface ReportRow {
   item: string;
   isCve: boolean; // false => un-CVE'd TEMP-/GHSA pseudo-id (needs manual tracking)
-  packages: string[]; // affected package name(s) — triage aid in the full ledger
-  tools: string[]; // scanners that report it
-  severities: Record<string, string>; // scanner -> severity (diverges)
-  maxSeverity: string; // union max across scanners (kept in data; not a rendered column)
+  /** Scanners reporting this CVE, each linked to its own Code-Scanning alert. */
+  scanners: ScannerLink[];
+  /** How many Code-Scanning alerts collapsed into this one CVE row (dedup count). */
+  alertCount: number;
+  maxSeverity: string; // the badge (NVD) severity shown in the report
   status: UnifiedStatus;
   suggestedJustification: string | null; // for uncovered items, else the recorded one
   /** The revisit_by value as authored: an ISO date OR an event token. */
@@ -250,9 +259,12 @@ export function buildReport(
   const byId = new Map<
     string,
     {
-      tools: Set<string>;
-      sevs: Record<string, string>;
-      pkgs: Set<string>;
+      // scanner -> that scanner's alert URL (last non-empty wins). One entry per
+      // scanner; each is a distinct Code-Scanning alert the report links to.
+      scannerUrls: Map<string, string>;
+      maxRank: number; // highest badge severity across this CVE's alerts
+      pkgs: Set<string>; // affected package(s) — for the justification suggestion
+      alertCount: number; // how many alerts collapsed into this CVE
       anyOpen: boolean;
       anyDismissed: boolean;
       anyFixed: boolean;
@@ -262,19 +274,25 @@ export function buildReport(
     if (!f || !nonEmptyString(f.id)) continue;
     const key = f.id.toUpperCase();
     const g = byId.get(key) ?? {
-      tools: new Set(),
-      sevs: {},
-      pkgs: new Set(),
+      scannerUrls: new Map<string, string>(),
+      maxRank: 0,
+      pkgs: new Set<string>(),
+      alertCount: 0,
       anyOpen: false,
       anyDismissed: false,
       anyFixed: false,
     };
+    g.alertCount += 1; // every finding is one Code-Scanning alert
     // `nonEmptyString` is load-bearing: it excludes both non-strings (which
-    // would index/label the row with garbage) and '' (an empty scanner/pkg
-    // name). Both halves are observable — see the adversarial finding tests.
+    // would label the row with garbage) and '' (an empty scanner name).
     if (nonEmptyString(f.scanner)) {
-      g.tools.add(f.scanner);
-      g.sevs[f.scanner] = normSev(f.severity);
+      // Keep this scanner's alert URL (a later empty url must not clobber a
+      // real one — only overwrite when we actually have a url).
+      const url = nonEmptyString(f.htmlUrl)
+        ? f.htmlUrl
+        : (g.scannerUrls.get(f.scanner) ?? '');
+      g.scannerUrls.set(f.scanner, url);
+      g.maxRank = Math.max(g.maxRank, rankOf(normSev(f.severity)));
     }
     if (nonEmptyString(f.pkg)) g.pkgs.add(f.pkg);
     if (f.state === 'open') g.anyOpen = true;
@@ -288,11 +306,7 @@ export function buildReport(
 
   for (const [id, g] of byId) {
     seenCves.add(id);
-    const severities = g.sevs;
-    const maxRank = Math.max(
-      0,
-      ...Object.values(severities).map((s) => rankOf(s)),
-    );
+    const maxRank = g.maxRank;
     const maxSeverity = RANK_NAME[maxRank];
     const vex = vexByCve.get(id);
     const isCve = isCveId(id);
@@ -341,9 +355,10 @@ export function buildReport(
     rows.push({
       item: id,
       isCve,
-      packages: [...g.pkgs].sort(),
-      tools: [...g.tools].sort(),
-      severities,
+      scanners: [...g.scannerUrls]
+        .map(([scanner, htmlUrl]) => ({ scanner, htmlUrl }))
+        .sort((x, y) => x.scanner.localeCompare(y.scanner)),
+      alertCount: g.alertCount,
       maxSeverity,
       status,
       suggestedJustification: suggested,
@@ -359,9 +374,8 @@ export function buildReport(
     rows.push({
       item: cve,
       isCve: isCveId(cve),
-      packages: [],
-      tools: [],
-      severities: {},
+      scanners: [],
+      alertCount: 0,
       maxSeverity: 'UNKNOWN',
       status: 'Stale record',
       suggestedJustification: vex.justification ?? null,
@@ -407,21 +421,49 @@ function shortJust(j: string | null): string {
   return j;
 }
 
+// A one-line legend defining every vocabulary the tables use — so no status,
+// severity, or revisit_by cell needs its own footnote (#206 item 2).
+const LEGEND =
+  '_Legend — **status:** Accepted = VEX not_affected/fixed + alert dismissed · ' +
+  'Tracked = below the gate floor, tolerated (no action) · Decision needed = ' +
+  'uncovered at/above the gate floor · VEX drift = VEX-accepted but the alert ' +
+  'is still open · Undocumented dismissal = alert dismissed with no `.vex/` ' +
+  'record · Resolved = auto-fixed (finding gone) · Revisit overdue = accepted ' +
+  'record past its `revisit_by` · Stale record = `.vex/` record with no current ' +
+  "alert · Investigating = under review. **severity:** GitHub's badge (NVD) " +
+  'severity — may differ from a scanner’s gate rating. **revisit_by:** an ISO ' +
+  'date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`)._';
+
+/** Render `item` as a plain CVE id (the dedup key); un-CVE'd ids get a flag. */
+function renderItem(r: ReportRow): string {
+  return r.isCve ? r.item : `${r.item} ⚠️ un-CVE'd`;
+}
+
+/** Scanners linked to their own alerts, e.g. `[grype](url), [trivy](url)`. */
+function renderScanners(r: ReportRow): string {
+  if (r.scanners.length === 0) return '—';
+  return r.scanners
+    .map((sc) => (sc.htmlUrl ? `[${sc.scanner}](${sc.htmlUrl})` : sc.scanner))
+    .join(', ');
+}
+
 /**
  * Render the report as GitHub-flavored markdown:
- *   1. a one-line summary,
- *   2. a NARROW "action needed" table (item · status · justification · signal) —
- *      always visible, ≤4 columns so a reviewer never scrolls horizontally,
- *   3. the FULL ledger inside a DEFAULT-COLLAPSED <details> (no `open` attr).
- * `signal`: 🔴 = needs a human decision/action; ⏰ = revisit date passed;
- * ⚠️ = un-CVE'd (manual tracking). Empty otherwise.
+ *   1. a summary line stating the two denominators (distinct CVEs vs. alerts),
+ *   2. a NARROW "action needed" table (item · status · why) — always visible,
+ *   3. the FULL ledger in a DEFAULT-COLLAPSED <details>, with scanners linked
+ *      to their Code-Scanning alerts,
+ *   4. the legend.
  */
 export function renderMarkdown(rows: readonly ReportRow[]): string {
   const s = summarize(rows);
   const action = rows.filter((r) => r.actionNeeded);
+  const alertTotal = rows.reduce((n, r) => n + r.alertCount, 0);
 
+  // (1) Header: distinct CVEs (rows) vs. the alerts they collapse (the #206
+  // "170 vs 125" legibility fix — say both denominators explicitly).
   const summary =
-    `**VEX report** — ${rows.length} item(s): ` +
+    `**VEX report** — ${rows.length} CVE(s) across ${alertTotal} image-scan alert(s): ` +
     `${s['Decision needed']} decision needed · ${s['VEX drift']} vex drift · ` +
     `${s['Undocumented dismissal']} undocumented dismissal · ` +
     `${s['Revisit overdue']} revisit overdue · ${s['Stale record']} stale · ` +
@@ -429,50 +471,39 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
     (s['Investigating'] ? ` · ${s['Investigating']} investigating` : '') +
     (s['Resolved'] ? ` · ${s['Resolved']} resolved` : '');
 
-  const signal = (r: ReportRow): string => {
-    const bits: string[] = [];
-    if (r.actionNeeded) bits.push('🔴');
-    if (r.revisitOverdue) bits.push('⏰');
-    if (!r.isCve) bits.push('⚠️');
-    return bits.join(' ') || '';
-  };
-
   // (2) Narrow action table — only rows needing attention; the reviewer's focus.
   let actionBlock: string;
   if (action.length === 0) {
     actionBlock =
-      '✅ **No action needed** — every finding is accepted or tracked.';
+      '✅ **No action needed** — every finding is accepted, tracked, or resolved.';
   } else {
-    const head =
-      '| item | status | justification | signal |\n| --- | --- | --- | --- |';
+    const head = '| item | status | why |\n| --- | --- | --- |';
     const body = action
       .map(
         (r) =>
-          `| ${r.item} | ${r.status} | ${shortJust(r.suggestedJustification)} | ${signal(r)} |`,
+          `| ${renderItem(r)} | ${r.status} | ${shortJust(r.suggestedJustification)} |`,
       )
       .join('\n');
     actionBlock = `**Needs attention (${action.length}):**\n\n${head}\n${body}`;
   }
 
-  // (3) Full ledger — default-collapsed. Wider columns live here, out of the way.
+  // (3) Full ledger — default-collapsed. Scanners link to their own alerts.
   const fHead =
-    '| item | status | justification | package(s) | tools (severity) | revisit_by | signal |\n' +
-    '| --- | --- | --- | --- | --- | --- | --- |';
+    '| item | status | severity | scanners | revisit_by |\n' +
+    '| --- | --- | --- | --- | --- |';
   const fBody = rows
-    .map((r) => {
-      const tools = r.tools.length
-        ? r.tools.map((t) => `${t}=${r.severities[t]}`).join(', ')
-        : '—';
-      const pkgs = r.packages.length ? r.packages.join(', ') : '—';
-      return `| ${r.item} | ${r.status} | ${shortJust(r.suggestedJustification)} | ${pkgs} | ${tools} | ${r.revisitBy ?? '—'} | ${signal(r)} |`;
-    })
+    .map(
+      (r) =>
+        `| ${renderItem(r)} | ${r.status} | ${r.maxSeverity} | ${renderScanners(r)} | ${r.revisitBy ?? '—'} |`,
+    )
     .join('\n');
 
   return (
     `${summary}\n\n` +
     `${actionBlock}\n\n` +
-    `<details>\n<summary>Full VEX ledger (${rows.length} items) — click to expand</summary>\n\n` +
+    `<details>\n<summary>Full VEX ledger (${rows.length} CVEs) — click to expand</summary>\n\n` +
     `${fHead}\n${fBody}\n\n` +
-    `</details>`
+    `</details>\n\n` +
+    `${LEGEND}`
   );
 }

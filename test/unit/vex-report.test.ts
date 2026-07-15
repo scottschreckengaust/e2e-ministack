@@ -227,8 +227,8 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       '2026-07-14',
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].tools).toEqual(['grype']); // 42 and '' excluded
-    expect(rows[0].packages).toEqual(['openssl']); // 7 and '' excluded
+    // 42 and '' scanner excluded => only grype becomes a scanner link
+    expect(rows[0].scanners.map((s) => s.scanner)).toEqual(['grype']);
   });
 
   it('overdue compares only date parts even when today carries a time suffix', () => {
@@ -251,7 +251,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
     expect(rows.map((r) => r.item)).toEqual(['CVE-2099-A', 'CVE-2099-B']);
   });
 
-  it('severities/tools are sorted deterministically by scanner name', () => {
+  it('scanners are sorted deterministically by scanner name', () => {
     const rows = buildReport(
       [],
       [
@@ -261,8 +261,8 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       'HIGH',
       '2026-07-14',
     );
-    expect(rows[0].tools).toEqual(['grype', 'trivy']); // sorted, not insertion order
-    expect(rows[0].packages).toEqual(['aaa', 'zzz']); // sorted
+    expect(rows[0].scanners.map((s) => s.scanner)).toEqual(['grype', 'trivy']); // sorted, not insertion order
+    expect(rows[0].alertCount).toBe(2); // two alerts collapsed into one CVE
   });
 
   it('non-string severity becomes exactly "UNKNOWN" (kills the literal mutant)', () => {
@@ -272,7 +272,6 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       'HIGH',
       '2026-07-14',
     );
-    expect(rows[0].severities.g).toBe('UNKNOWN');
     expect(rows[0].maxSeverity).toBe('UNKNOWN');
   });
 
@@ -287,8 +286,8 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
     expect(rows[0].maxSeverity).toBe('UNKNOWN');
   });
 
-  it('a row with no packages renders an em-dash in the package column', () => {
-    // stale record has empty packages -> "—" (kills the pkgs join literal mutant)
+  it('a row with no scanners renders an em-dash in the scanners column', () => {
+    // stale record has no scanners -> "—" (kills the renderScanners empty mutant)
     const md = renderMarkdown(
       buildReport(
         [{ cve: 'CVE-2099-3', status: 'not_affected', justification: 'x' }],
@@ -297,7 +296,8 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         '2026-07-14',
       ),
     );
-    expect(md).toContain('| CVE-2099-3 | Stale record | x | — | — | — | 🔴 |');
+    // ledger columns: item · status · severity · scanners · revisit_by
+    expect(md).toContain('| CVE-2099-3 | Stale record | UNKNOWN | — | — |');
   });
 
   it('the investigating summary suffix text is exact', () => {
@@ -324,11 +324,11 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       ),
     );
     expect(md.split('\n')[0]).toBe(
-      '**VEX report** — 1 item(s): 0 decision needed · 0 vex drift · 0 undocumented dismissal · 0 revisit overdue · 0 stale · 0 accepted · 1 tracked',
+      '**VEX report** — 1 CVE(s) across 1 image-scan alert(s): 0 decision needed · 0 vex drift · 0 undocumented dismissal · 0 revisit overdue · 0 stale · 0 accepted · 1 tracked',
     );
   });
 
-  it('a clean row has an empty signal string (kills the ||-fallback mutant)', () => {
+  it('an accepted row renders the new 5-column ledger line (no signal column)', () => {
     const md = renderMarkdown(
       buildReport(
         [{ cve: 'CVE-2026-1', status: 'not_affected', justification: 'x' }],
@@ -337,10 +337,9 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         '2026-07-14',
       ),
     );
-    // The accepted row's ledger line ends "| x | grype=HIGH | — |  |" — empty signal.
-    expect(md).toContain(
-      '| CVE-2026-1 | Accepted | x | p | grype=HIGH | — |  |',
-    );
+    // columns: item · status · severity · scanners · revisit_by. The scanner is
+    // unlinked here (no htmlUrl on the finding) so it renders as a bare name.
+    expect(md).toContain('| CVE-2026-1 | Accepted | HIGH | grype | — |');
   });
 });
 
@@ -471,8 +470,8 @@ describe('buildReport — status mapping', () => {
     expect(rows[0].status).toBe('Stale record');
     expect(rows[0].actionNeeded).toBe(true);
     expect(rows[0].revisitOverdue).toBe(true);
-    expect(rows[0].tools).toEqual([]);
-    expect(rows[0].packages).toEqual([]);
+    expect(rows[0].scanners).toEqual([]);
+    expect(rows[0].alertCount).toBe(0);
   });
 
   it('a stale record with NO justification yields null (guards the ?? on the stale path)', () => {
@@ -484,6 +483,10 @@ describe('buildReport — status mapping', () => {
     );
     expect(rows[0].status).toBe('Stale record');
     expect(rows[0].suggestedJustification).toBeNull();
+    // Stale is actionable, so its "why" column exercises shortJust(null) => "—".
+    expect(renderMarkdown(rows)).toContain(
+      '| CVE-2026-88 | Stale record | — |',
+    );
   });
 
   it('a stale record PRESERVES its revisit_by (kills the ?? -> && mutant on the stale path)', () => {
@@ -829,7 +832,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
 });
 
 describe('buildReport — merging, severity, ordering', () => {
-  it('merges two scanners on one id and records both severities', () => {
+  it('merges two scanners on one id, keeping both links and the union-max severity', () => {
     const rows = buildReport(
       [],
       [
@@ -839,8 +842,8 @@ describe('buildReport — merging, severity, ordering', () => {
       'HIGH',
       '2026-07-14',
     );
-    expect(rows[0].tools).toEqual(['grype', 'trivy']);
-    expect(rows[0].severities).toEqual({ grype: 'CRITICAL', trivy: 'MEDIUM' });
+    expect(rows[0].scanners.map((s) => s.scanner)).toEqual(['grype', 'trivy']);
+    expect(rows[0].alertCount).toBe(2); // two alerts collapse into one CVE
     expect(rows[0].maxSeverity).toBe('CRITICAL'); // union max
   });
 
@@ -851,7 +854,6 @@ describe('buildReport — merging, severity, ordering', () => {
       'HIGH',
       '2026-07-14',
     );
-    expect(rows[0].severities.grype).toBe('UNKNOWN');
     expect(rows[0].maxSeverity).toBe('UNKNOWN');
   });
 
@@ -868,7 +870,50 @@ describe('buildReport — merging, severity, ordering', () => {
       'HIGH',
       '2026-07-14',
     );
-    expect(rows[0].severities.grype).toBe('UNKNOWN');
+    expect(rows[0].maxSeverity).toBe('UNKNOWN');
+  });
+
+  it('excludes an empty-string pkg from the justification set (kills the f.pkg guard mutant)', () => {
+    // Two uncovered findings on one CVE: a genuine never-run tool + one whose
+    // pkg is ''. The '' must be EXCLUDED — otherwise it counts as "some other
+    // package" and downgrades the suggestion from not-in-execute-path to
+    // cannot-be-controlled. Dropping the `nonEmptyString(f.pkg)` guard (mutant
+    // `if (true)`) adds '' to the set and flips the suggestion — observable here.
+    const rows = buildReport(
+      [],
+      [
+        finding('CVE-2099-13', 'grype', 'HIGH', 'mount'), // never-run tool
+        { id: 'CVE-2099-13', scanner: 'trivy', severity: 'HIGH', pkg: '' }, // empty pkg
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].suggestedJustification).toBe(
+      'vulnerable_code_not_in_execute_path',
+    );
+  });
+
+  it('preserves a scanner alert URL when the SAME scanner reports again with no URL (kills the ?? -> && mutant)', () => {
+    // grype reports twice on one CVE: first with an alert URL, then without.
+    // The second (URL-less) finding must NOT clobber the first real URL to ''.
+    // The `?? ''` mutated to `&& ''` would wipe it — observable via the link.
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-14',
+          scanner: 'grype',
+          severity: 'HIGH',
+          htmlUrl: 'https://x.test/99',
+        },
+        { id: 'CVE-2099-14', scanner: 'grype', severity: 'HIGH' }, // no htmlUrl
+      ],
+      'HIGH',
+      '2026-07-14',
+    );
+    expect(rows[0].scanners).toEqual([
+      { scanner: 'grype', htmlUrl: 'https://x.test/99' },
+    ]);
   });
 
   it('a not_affected record with NO justification renders an em-dash', () => {
@@ -1010,7 +1055,7 @@ describe('summarize + renderMarkdown', () => {
     expect(md).toContain('**VEX report** —');
   });
 
-  it('renders a Needs-attention table with signals when action is required', () => {
+  it('renders a Needs-attention table (item · status · why) when action is required', () => {
     const md = renderMarkdown(
       buildReport(
         [
@@ -1027,9 +1072,11 @@ describe('summarize + renderMarkdown', () => {
       ),
     );
     expect(md).toContain('Needs attention (1)');
-    expect(md).toContain('🔴');
-    expect(md).toContain('⏰');
-    expect(md).toContain('Revisit overdue');
+    expect(md).toContain('| item | status | why |');
+    // the actionable row is the overdue acceptance, with its justification as "why"
+    expect(md).toContain(
+      '| CVE-2026-1 | Revisit overdue | adversary-unreachable |',
+    );
   });
 
   it('shortens justification labels and flags un-CVE items in the table', () => {
@@ -1045,9 +1092,10 @@ describe('summarize + renderMarkdown', () => {
     expect(md).toContain('⚠️'); // un-CVE'd signal
   });
 
-  it('passes a non-standard justification through verbatim (unknown enum)', () => {
+  it('passes a non-standard justification through verbatim in the why column (unknown enum)', () => {
     // A record whose justification is neither known enum is rendered as-is
-    // (guards the shortJust fall-through).
+    // (guards the shortJust fall-through). shortJust now only feeds the action
+    // table's "why" column, so the row must be ACTIONABLE — an overdue revisit.
     const md = renderMarkdown(
       buildReport(
         [
@@ -1055,6 +1103,7 @@ describe('summarize + renderMarkdown', () => {
             cve: 'CVE-2026-1',
             status: 'not_affected',
             justification: 'component_not_present',
+            revisitBy: '2026-01-01', // past today => Revisit overdue (actionable)
           },
         ],
         [finding('CVE-2026-1', 'grype', 'HIGH')],
@@ -1062,20 +1111,53 @@ describe('summarize + renderMarkdown', () => {
         '2026-07-14',
       ),
     );
-    expect(md).toContain('component_not_present');
+    expect(md).toContain(
+      '| CVE-2026-1 | Revisit overdue | component_not_present |',
+    );
   });
 
-  it('shows adversary-unreachable short label + package column in the ledger', () => {
+  it('links each scanner to its own Code-Scanning alert in the ledger', () => {
     const md = renderMarkdown(
       buildReport(
         [],
-        [finding('CVE-2099-1', 'grype', 'MEDIUM', 'node-undici')],
+        [
+          {
+            id: 'CVE-2099-1',
+            scanner: 'grype',
+            severity: 'MEDIUM',
+            pkg: 'node-undici',
+            htmlUrl: 'https://example.test/alert/7',
+          },
+          {
+            id: 'CVE-2099-1',
+            scanner: 'trivy',
+            severity: 'MEDIUM',
+            pkg: 'node-undici',
+            htmlUrl: 'https://example.test/alert/8',
+          },
+        ],
         'HIGH',
         '2026-07-14',
       ),
     );
-    expect(md).toContain('adversary-unreachable');
-    expect(md).toContain('node-undici'); // package column populated
+    // scanners column carries a markdown link per scanner (#206 scanner-linking)
+    expect(md).toContain(
+      '[grype](https://example.test/alert/7), [trivy](https://example.test/alert/8)',
+    );
+  });
+
+  it('renders a scanner without an alert URL as a bare (unlinked) name', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [finding('CVE-2099-1', 'grype', 'MEDIUM', 'node-undici')], // no htmlUrl
+        'HIGH',
+        '2026-07-14',
+      ),
+    );
+    // no htmlUrl => bare name, not a markdown link (kills the link-branch mutant)
+    expect(md).toContain('| CVE-2099-1 | Tracked | MEDIUM | grype | — |');
+    expect(md).not.toContain('[grype](');
   });
 
   it('renders investigating in the summary only when present', () => {
@@ -1112,38 +1194,86 @@ describe('summarize + renderMarkdown', () => {
           { cve: 'CVE-2026-2', status: 'under_investigation' },
         ],
         [
-          finding('CVE-2026-1', 'grype', 'HIGH', 'libsqlite3-0'),
-          finding('CVE-2026-1', 'trivy', 'MEDIUM', 'libsqlite3-0'),
-          finding('CVE-2026-2', 'grype', 'HIGH', 'perl-base'),
-          finding('CVE-2099-9', 'trivy', 'CRITICAL', 'openssl'), // decision needed
-          finding('CVE-2099-9', 'grype', 'CRITICAL', 'libcrypto'), // 2nd pkg -> comma-join
-          finding('TEMP-1-ABC', 'trivy', 'LOW', 'tar'), // un-CVE'd, tracked
+          {
+            id: 'CVE-2026-1',
+            scanner: 'grype',
+            severity: 'HIGH',
+            pkg: 'libsqlite3-0',
+            htmlUrl: 'https://x.test/1',
+          },
+          {
+            id: 'CVE-2026-1',
+            scanner: 'trivy',
+            severity: 'MEDIUM',
+            pkg: 'libsqlite3-0',
+            htmlUrl: 'https://x.test/2',
+          },
+          {
+            id: 'CVE-2026-2',
+            scanner: 'grype',
+            severity: 'HIGH',
+            pkg: 'perl-base',
+            htmlUrl: 'https://x.test/3',
+          },
+          // decision needed, two scanners on one CVE
+          {
+            id: 'CVE-2099-9',
+            scanner: 'trivy',
+            severity: 'CRITICAL',
+            pkg: 'openssl',
+            htmlUrl: 'https://x.test/4',
+          },
+          {
+            id: 'CVE-2099-9',
+            scanner: 'grype',
+            severity: 'CRITICAL',
+            pkg: 'libcrypto',
+            htmlUrl: 'https://x.test/5',
+          },
+          // un-CVE'd, tracked
+          {
+            id: 'TEMP-1-ABC',
+            scanner: 'trivy',
+            severity: 'LOW',
+            pkg: 'tar',
+            htmlUrl: 'https://x.test/6',
+          },
         ],
         'HIGH',
         '2026-07-14',
       ),
     );
     const expected = [
-      '**VEX report** — 4 item(s): 1 decision needed · 0 vex drift · 0 undocumented dismissal · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating',
+      '**VEX report** — 4 CVE(s) across 6 image-scan alert(s): 1 decision needed · 0 vex drift · 0 undocumented dismissal · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating',
       '',
       '**Needs attention (2):**',
       '',
-      '| item | status | justification | signal |',
-      '| --- | --- | --- | --- |',
-      '| CVE-2099-9 | Decision needed | adversary-unreachable | 🔴 |',
-      '| CVE-2026-1 | Revisit overdue | adversary-unreachable | 🔴 ⏰ |',
+      '| item | status | why |',
+      '| --- | --- | --- |',
+      '| CVE-2099-9 | Decision needed | adversary-unreachable |',
+      '| CVE-2026-1 | Revisit overdue | adversary-unreachable |',
       '',
       '<details>',
-      '<summary>Full VEX ledger (4 items) — click to expand</summary>',
+      '<summary>Full VEX ledger (4 CVEs) — click to expand</summary>',
       '',
-      '| item | status | justification | package(s) | tools (severity) | revisit_by | signal |',
-      '| --- | --- | --- | --- | --- | --- | --- |',
-      '| CVE-2099-9 | Decision needed | adversary-unreachable | libcrypto, openssl | grype=CRITICAL, trivy=CRITICAL | — | 🔴 |',
-      '| CVE-2026-1 | Revisit overdue | adversary-unreachable | libsqlite3-0 | grype=HIGH, trivy=MEDIUM | 2026-01-01 | 🔴 ⏰ |',
-      '| CVE-2026-2 | Investigating | — | perl-base | grype=HIGH | — |  |',
-      '| TEMP-1-ABC | Tracked | not-in-execute-path | tar | trivy=LOW | — | ⚠️ |',
+      '| item | status | severity | scanners | revisit_by |',
+      '| --- | --- | --- | --- | --- |',
+      '| CVE-2099-9 | Decision needed | CRITICAL | [grype](https://x.test/5), [trivy](https://x.test/4) | — |',
+      '| CVE-2026-1 | Revisit overdue | HIGH | [grype](https://x.test/1), [trivy](https://x.test/2) | 2026-01-01 |',
+      '| CVE-2026-2 | Investigating | HIGH | [grype](https://x.test/3) | — |',
+      "| TEMP-1-ABC ⚠️ un-CVE'd | Tracked | LOW | [trivy](https://x.test/6) | — |",
       '',
       '</details>',
+      '',
+      '_Legend — **status:** Accepted = VEX not_affected/fixed + alert dismissed · ' +
+        'Tracked = below the gate floor, tolerated (no action) · Decision needed = ' +
+        'uncovered at/above the gate floor · VEX drift = VEX-accepted but the alert ' +
+        'is still open · Undocumented dismissal = alert dismissed with no `.vex/` ' +
+        'record · Resolved = auto-fixed (finding gone) · Revisit overdue = accepted ' +
+        'record past its `revisit_by` · Stale record = `.vex/` record with no current ' +
+        "alert · Investigating = under review. **severity:** GitHub's badge (NVD) " +
+        'severity — may differ from a scanner’s gate rating. **revisit_by:** an ISO ' +
+        'date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`)._',
     ].join('\n');
     expect(md).toBe(expected);
   });
@@ -1171,7 +1301,7 @@ describe('summarize + renderMarkdown', () => {
     }
   });
 
-  it('renders an em-dash for missing tools/packages/revisit in a stale row', () => {
+  it('renders an em-dash for missing scanners/revisit in a stale row', () => {
     const md = renderMarkdown(
       buildReport(
         [
@@ -1187,7 +1317,7 @@ describe('summarize + renderMarkdown', () => {
       ),
     );
     expect(md).toContain('Stale record');
-    // stale row has em-dash tools + packages
-    expect(md).toMatch(/CVE-2026-9 \| Stale record \|[^|]+\| — \| — \| — \|/);
+    // stale row: item · status · severity · scanners(—) · revisit_by(—)
+    expect(md).toContain('| CVE-2026-9 | Stale record | UNKNOWN | — | — |');
   });
 });

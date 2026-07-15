@@ -76,8 +76,13 @@ function assertInvariants(
     expect(typeof r.item).toBe('string');
     expect(typeof r.status).toBe('string');
     expect(typeof r.actionNeeded).toBe('boolean');
-    expect(Array.isArray(r.tools)).toBe(true);
-    expect(Array.isArray(r.packages)).toBe(true);
+    expect(Array.isArray(r.scanners)).toBe(true);
+    // every scanner link is a {scanner, htmlUrl} string pair
+    for (const sc of r.scanners) {
+      expect(typeof sc.scanner).toBe('string');
+      expect(typeof sc.htmlUrl).toBe('string');
+    }
+    expect(typeof r.alertCount).toBe('number');
   }
 }
 

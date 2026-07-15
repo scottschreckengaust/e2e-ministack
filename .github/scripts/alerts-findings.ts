@@ -23,6 +23,8 @@
 // + Stryker mutation (#122, zero survivors) + fuzz. Runnable CLI is the thin
 // `alerts-findings.mjs` shim. TOTAL: malformed input yields `[]`, never throws.
 
+import type { ScannerFinding } from './vex-report';
+
 /** One Code Scanning alert, reduced to what the VEX report reconciles. */
 export interface AlertFinding {
   id: string; // CVE-… extracted from the rule id (or the raw rule id if none)
@@ -31,6 +33,7 @@ export interface AlertFinding {
   state: string; // open | dismissed | fixed
   dismissedReason: string; // e.g. "won't fix" | "" when not dismissed
   category: string; // most_recent_instance.category (which scan produced it)
+  htmlUrl: string; // alert's Security-tab URL, so the report can link to it
 }
 
 // A CVE token inside a rule id (grype `CVE-2026-1-python`, trivy `CVE-2026-1`),
@@ -77,6 +80,7 @@ export function parseAlerts(alerts: unknown): AlertFinding[] {
       state: str(a.state),
       dismissedReason: str(a.dismissed_reason),
       category: str(asRecord(a.most_recent_instance)?.category),
+      htmlUrl: str(a.html_url),
     });
   }
   return out;
@@ -94,6 +98,26 @@ export function filterByCategory(
   if (categories.length === 0) return [...findings];
   const wanted = new Set(categories);
   return findings.filter((f) => wanted.has(f.category));
+}
+
+/**
+ * Adapt Alert findings to the `ScannerFinding` shape the VEX report consumes.
+ * The two ledgers name the same concepts differently — the alert's
+ * `badgeSeverity` is the report's `severity` — so this is the ONE place the
+ * contract is bridged (a typed seam, not an untested `.mjs` field rename). The
+ * report has no `pkg` source from the Alerts API (it omits the package), so it
+ * is left undefined; `state`/`htmlUrl` carry the second-ledger signal + link.
+ */
+export function toScannerFindings(
+  findings: readonly AlertFinding[],
+): ScannerFinding[] {
+  return findings.map((f) => ({
+    id: f.id,
+    scanner: f.scanner,
+    severity: f.badgeSeverity,
+    state: f.state,
+    htmlUrl: f.htmlUrl,
+  }));
 }
 
 // -- small total coercions (exported + unit-tested directly, mutation-tight) --
