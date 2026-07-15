@@ -37,6 +37,7 @@ export default {
     '.github/scripts/sonar-to-sarif.ts',
     '.github/scripts/vex-to-sarif-suppressions.ts',
     '.github/scripts/vex-report.ts',
+    '.github/scripts/alerts-findings.ts',
     '.github/scripts/license-verdict.ts',
     'scripts/ministack-upstream.ts',
   ],

@@ -1,0 +1,1 @@
+[{"number":2,"state":"dismissed","dismissed_reason":"won't fix","rule":{"id":"CVE-2026-1"},"tool":{"name":"Trivy"},"most_recent_instance":{"category":"trivy-image"}}]

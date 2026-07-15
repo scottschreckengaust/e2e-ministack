@@ -775,6 +775,92 @@ jobs:
   # add trivy-config later only if a concrete gap in checkov's CFN coverage is
   # identified. Recorded in docs/SECURITY-TOOLING.md.
 
+  # ── VEX report (two-ledger reconciliation, #189) ────────────────────────
+  # A per-push, human-readable reconciliation of the committed `.vex/` records
+  # (the durable governance ledger) against the GitHub Code Scanning ALERTS
+  # (the live Security-tab ledger) — so every accepted/known image CVE is
+  # visible with its status + suggested justification + revisit cadence, and
+  # anything needing a human is flagged: an uncovered high+ (Decision needed),
+  # a VEX-accepted item whose alert is still OPEN (VEX drift, #186 wiring gap),
+  # a dismissed alert with NO backing `.vex/` record (Undocumented dismissal,
+  # #167 inverse-drift), an overdue revisit, or a stale record.
+  #
+  # Built from the Alerts API — NOT a re-scan and NOT SARIF: the API is the
+  # UNION of every scanner (GitHub already merged grype+trivy), normalized, and
+  # is the ONLY source that carries alert STATE (open/dismissed/fixed) — the
+  # signal the reconciliation needs. Logic is 100%-covered + mutation-tested +
+  # fuzzed (`alerts-findings.*`, `vex-report.*`). REPORT-ONLY (never fails; the
+  # hard-fail gate is the ministack-image/trivy-image jobs). `needs:` the image
+  # jobs so their alerts are uploaded before we read them (avoids the
+  # last-upload lag noted in alerts-findings.ts).
+  vex-report:
+    name: VEX report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [ministack-image, trivy-image]
+    if: always() # report even if a gate job failed — the drift view still helps
+    permissions:
+      contents: read
+      security-events: read # read the Code Scanning alerts
+      pull-requests: write # post/update the sticky PR comment
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: mise.toml
+      # Fetch the Code Scanning alerts for THIS ref (all states), then normalize
+      # + render. `gh` reads the ref from the run context; on a PR that's the
+      # merge ref, on push the branch. REF is passed via env (no interpolation
+      # in the shell body), per the repo's no-injection rule.
+      - name: Build + render VEX report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?ref=${REF}&per_page=100" \
+            > alerts.json 2>/dev/null || echo '[]' > alerts.json
+          # Restrict to the image-scan categories so unrelated code-scanning
+          # alerts (SonarQube, CodeQL) don't leak into the VEX/image report.
+          node .github/scripts/alerts-findings.mjs alerts.json findings.json \
+            grype-ministack-image trivy-image
+          node .github/scripts/vex-report.mjs .vex findings.json \
+            "$(date -u +%Y-%m-%d)" HIGH vex-report.md
+          cat vex-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload VEX report artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vex-report
+          path: |
+            vex-report.md
+            findings.json
+          if-no-files-found: warn
+      # Sticky PR comment (hidden-marker upsert, like license-review-poller.yml).
+      # PRs only; same-repo guard (a fork PR's read-only token can't comment).
+      - name: Post/update sticky PR comment
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          marker='<!-- vex-report -->'
+          body="$(printf '%s\n\n%s' "$marker" "$(cat vex-report.md)")"
+          # Find an existing marker comment; PATCH it in place, else create one.
+          url="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"$marker\"))] | last | .url // empty")"
+          if [ -n "$url" ]; then
+            gh api "$url" -X PATCH -f body="$body" >/dev/null
+          else
+            gh pr comment "$PR" --body "$body" >/dev/null
+          fi
+
   # ── Malware / virus scan (ClamAV) ───────────────────────────────────────
   # Signature-based scan of the working tree (#149). ClamAV (GPLv2) runs as an
   # EXTERNAL scanner — a Docker service container + apt `clamdscan` over

@@ -12,8 +12,9 @@
 //   node vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md]
 //
 //   vexDir        directory of `.vex/CVE-*.openvex.json` records (the source of truth)
-//   findings.json a JSON array of {id, scanner, severity, pkg} — the normalized
-//                 union of scanner findings (tool-agnostic; the workflow builds it)
+//   findings.json a JSON array of {id, scanner, severity, pkg, state} — the
+//                 Code-Scanning alerts normalized by `alerts-findings.mjs`
+//                 (tool-agnostic; `state` carries the second-ledger signal)
 //   today         ISO date (YYYY-MM-DD) for overdue detection; '' to skip
 //   gateFloor     CRITICAL|HIGH|MEDIUM|LOW (default HIGH)
 //   out.md        optional output path; else stdout

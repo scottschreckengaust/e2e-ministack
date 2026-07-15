@@ -1,23 +1,28 @@
 // Build a per-push "VEX report" — a human-readable table reconciling the
-// committed `.vex/` records against current scanner findings, so every accepted
-// or known base-image CVE is visible with its status, severity (per scanner),
-// suggested justification, and revisit cadence (#189).
+// committed `.vex/` records (the durable governance ledger) against the GitHub
+// Code Scanning ALERTS (the live Security-tab ledger), so every accepted/known
+// base-image CVE is visible with its status, badge severity, suggested
+// justification, and revisit cadence (#189).
 //
 // LOGIC MODULE (jest-visible, gate-eligible): the pure transform lives here so
 // it flows through the repo's 100% coverage gate (#124), Stryker mutation
 // (#122), and the fuzz-regression tier. The runnable CLI is the thin
-// `vex-report.mjs` shim, which reads `.vex/*.json` + normalized scanner
-// findings and writes the markdown.
+// `vex-report.mjs` shim, which reads `.vex/*.json` + the alerts normalized by
+// `alerts-findings.*` and writes the markdown.
 //
-// DESIGN (validated by the #189 full-ratchet enumeration):
+// DESIGN:
 //   - `.vex/`-DIRECTORY-DRIVEN, tool-agnostic: the report reflects OUR durable
-//     decisions (`.vex/` records), enriched by which scanners corroborate each
-//     item — it does NOT depend on a specific scanner staying in the stack.
-//   - Two-ledger STATUS (CI-gate x GitHub-alert). "Suppressed" is not a GitHub
-//     state; the unified status is the product of the two ledgers.
-//   - Option A: only `not_affected`/`fixed` are dismissed; a reachable
-//     `affected` item is WATCH-BELOW-FLOOR (visible, not hidden).
-//   - Severity is SCANNER-RELATIVE — show every scanner's rating (they diverge).
+//     decisions, reconciled against the Alerts API (already the UNION of all
+//     scanners) — it does NOT depend on a specific scanner staying in the stack.
+//   - TWO-LEDGER reconciliation: the unified status is the product of the VEX
+//     verdict AND the alert state (open/dismissed/fixed). "Suppressed" is not a
+//     GitHub state, so drift between the ledgers is surfaced as a status:
+//       * VEX drift — VEX-accepted but the alert is still OPEN (dismiss it);
+//       * Undocumented dismissal — alert dismissed with NO backing `.vex/`
+//         record (justify or reopen; the #167 inverse-drift).
+//   - Severity is the BADGE severity (GitHub's NVD-derived
+//     `security_severity_level`); it can diverge from a scanner's distro/gate
+//     rating (#181) — the gate-vs-badge column is a fast-follow.
 //   - Flags: the `vulnerable_code_not_in_execute_path` (never-run tools) class,
 //     and un-CVE'd `TEMP-…`/GHSA pseudo-ids that a CVE-keyed record can't match.
 
@@ -31,12 +36,19 @@ export interface VexRecord {
   revisitBy?: string;
 }
 
-/** One scanner's view of one finding. `severity` is that scanner's rating. */
+/**
+ * One finding the report reconciles against `.vex/`. Sourced from the GitHub
+ * Code Scanning Alerts API (the union of all scanners), so it carries the
+ * SECOND LEDGER's state — that's what lets the report detect drift between the
+ * durable `.vex/` decision and what the Security tab actually shows.
+ */
 export interface ScannerFinding {
   id: string; // CVE-… or a TEMP-…/GHSA pseudo-id
-  scanner: string; // e.g. "grype" | "trivy"
-  severity: string; // CRITICAL|HIGH|MEDIUM|LOW|NEGLIGIBLE|UNKNOWN (any case)
-  pkg?: string;
+  scanner: string; // e.g. "Grype" | "Trivy" (alert tool.name)
+  severity: string; // the BADGE severity (NVD-derived): CRITICAL|…|UNKNOWN
+  pkg?: string; // package name when known (Alerts API often omits it)
+  /** Alert state: open | dismissed | fixed. Absent => treat as open. */
+  state?: string;
 }
 
 export interface ReportRow {
@@ -59,12 +71,14 @@ export interface ReportRow {
 // Human-readable, action-oriented status labels. The reviewer should be able to
 // tell "do I need to do something?" from the word alone.
 export type UnifiedStatus =
-  | 'Accepted' // VEX not_affected/fixed — gated, nothing to do
+  | 'Accepted' // VEX not_affected/fixed + alert dismissed (or n/a) — nothing to do
   | 'Tracked' // below floor / reachable-accepted — visible, no action now
   | 'Decision needed' // uncovered at/above the gate floor — must VEX or fix (blocks gate)
   | 'Revisit overdue' // an accepted record whose revisit_by DATE has passed
   | 'Stale record' // a VEX record with no matching current finding — prune?
-  | 'Investigating'; // under_investigation record
+  | 'Investigating' // under_investigation record
+  | 'VEX drift' // VEX-accepted, but its Code-Scanning alert is still OPEN (dismiss it)
+  | 'Undocumented dismissal'; // alert dismissed with NO backing .vex/ record (justify or reopen)
 
 // A status is "actionable" (gets the 🔴 signal) iff it asks a human to do
 // something. SINGLE source of truth — every `actionNeeded` derives from this,
@@ -73,7 +87,9 @@ export function isActionable(status: UnifiedStatus): boolean {
   return (
     status === 'Decision needed' ||
     status === 'Revisit overdue' ||
-    status === 'Stale record'
+    status === 'Stale record' ||
+    status === 'VEX drift' ||
+    status === 'Undocumented dismissal'
   );
 }
 
@@ -220,15 +236,34 @@ export function buildReport(
   }
   const floorRank = rankOf(normSev(gateFloor));
 
-  // Group findings by id.
+  // Group findings by id. The second-ledger (alert-state) signal is tri-valued
+  // and drift is only asserted on POSITIVE evidence — an absent `state` means
+  // "no alert-ledger opinion" (the caller didn't supply one), NOT open, so the
+  // VEX status stands unchallenged:
+  //   anyOpen   — at least one alert is explicitly `open`  (=> VEX drift risk)
+  //   anyClosed — at least one alert is dismissed/fixed    (=> undocumented-dismissal risk)
+  // A finding with no `state` sets neither, leaving the pure `.vex/`+severity
+  // logic in charge (so the engine behaves identically when no alerts are fed).
   const byId = new Map<
     string,
-    { tools: Set<string>; sevs: Record<string, string>; pkgs: Set<string> }
+    {
+      tools: Set<string>;
+      sevs: Record<string, string>;
+      pkgs: Set<string>;
+      anyOpen: boolean;
+      anyClosed: boolean;
+    }
   >();
   for (const f of findings) {
     if (!f || !nonEmptyString(f.id)) continue;
     const key = f.id.toUpperCase();
-    const g = byId.get(key) ?? { tools: new Set(), sevs: {}, pkgs: new Set() };
+    const g = byId.get(key) ?? {
+      tools: new Set(),
+      sevs: {},
+      pkgs: new Set(),
+      anyOpen: false,
+      anyClosed: false,
+    };
     // `nonEmptyString` is load-bearing: it excludes both non-strings (which
     // would index/label the row with garbage) and '' (an empty scanner/pkg
     // name). Both halves are observable — see the adversarial finding tests.
@@ -237,6 +272,8 @@ export function buildReport(
       g.sevs[f.scanner] = normSev(f.severity);
     }
     if (nonEmptyString(f.pkg)) g.pkgs.add(f.pkg);
+    if (f.state === 'open') g.anyOpen = true;
+    if (f.state === 'dismissed' || f.state === 'fixed') g.anyClosed = true;
     byId.set(key, g);
   }
 
@@ -259,16 +296,30 @@ export function buildReport(
     let suggested: string | null;
     if (vex) {
       const st = String(vex.status);
-      if (st === 'not_affected' || st === 'fixed') {
-        status = overdue ? 'Revisit overdue' : 'Accepted';
+      const suppressing = st === 'not_affected' || st === 'fixed';
+      if (overdue) {
+        // Revisit takes precedence — the acceptance itself is due for review.
+        status = 'Revisit overdue';
+      } else if (suppressing && g.anyOpen) {
+        // Ledger drift: VEX-accepted, yet an alert is still OPEN. The
+        // dismiss-alerts wiring (#186) should have closed it — flag to reconcile.
+        status = 'VEX drift';
+      } else if (suppressing) {
+        status = 'Accepted';
       } else if (st === 'affected') {
-        status = overdue ? 'Revisit overdue' : 'Tracked';
+        status = 'Tracked';
       } else {
         status = 'Investigating';
       }
       suggested = vex.justification ?? null;
+    } else if (g.anyClosed && !g.anyOpen) {
+      // No `.vex/` record, yet the alert was dismissed/fixed (and none open) —
+      // a suppression with no durable justification (inverse drift, #167).
+      status = 'Undocumented dismissal';
+      suggested = suggestJustification([...g.pkgs]);
     } else {
-      // Uncovered: at/above floor needs a decision; below floor is tracked.
+      // Uncovered (open or no-ledger-opinion): at/above floor needs a decision;
+      // below floor is tracked.
       status = maxRank >= floorRank ? 'Decision needed' : 'Tracked';
       suggested = suggestJustification([...g.pkgs]);
     }
@@ -325,6 +376,8 @@ export function summarize(
     'Revisit overdue': 0,
     'Stale record': 0,
     Investigating: 0,
+    'VEX drift': 0,
+    'Undocumented dismissal': 0,
   };
   for (const r of rows) acc[r.status] += 1;
   return acc;
@@ -354,8 +407,10 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
 
   const summary =
     `**VEX report** — ${rows.length} item(s): ` +
-    `${s['Decision needed']} decision needed · ${s['Revisit overdue']} revisit overdue · ` +
-    `${s['Stale record']} stale · ${s['Accepted']} accepted · ${s['Tracked']} tracked` +
+    `${s['Decision needed']} decision needed · ${s['VEX drift']} vex drift · ` +
+    `${s['Undocumented dismissal']} undocumented dismissal · ` +
+    `${s['Revisit overdue']} revisit overdue · ${s['Stale record']} stale · ` +
+    `${s['Accepted']} accepted · ${s['Tracked']} tracked` +
     (s['Investigating'] ? ` · ${s['Investigating']} investigating` : '');
 
   const signal = (r: ReportRow): string => {
