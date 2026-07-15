@@ -3,6 +3,7 @@ import {
   badgeSeverity,
   parseAlerts,
   filterByCategory,
+  toScannerFindings,
   asRecord,
   asArray,
   str,
@@ -55,10 +56,11 @@ describe('parseAlerts', () => {
     rule: { id: 'CVE-2026-1-libnode115', security_severity_level: 'high' },
     tool: { name: 'Grype' },
     most_recent_instance: { category: 'grype-ministack-image' },
+    html_url: 'https://example.test/alert/1',
     ...over,
   });
 
-  it('maps a full alert to {id, scanner, badgeSeverity, state, dismissedReason, category}', () => {
+  it('maps a full alert to {id, scanner, badgeSeverity, state, dismissedReason, category, htmlUrl}', () => {
     const out = parseAlerts([alert({})]);
     expect(out).toEqual([
       {
@@ -68,6 +70,7 @@ describe('parseAlerts', () => {
         state: 'open',
         dismissedReason: '',
         category: 'grype-ministack-image',
+        htmlUrl: 'https://example.test/alert/1',
       },
     ]);
   });
@@ -89,7 +92,7 @@ describe('parseAlerts', () => {
     expect(out[0].id).toBe('CVE-2026-1');
   });
 
-  it('defaults missing tool/severity/category to safe empties', () => {
+  it('defaults missing tool/severity/category/html_url to safe empties', () => {
     const out = parseAlerts([{ state: 'open', rule: { id: 'CVE-2026-9' } }]);
     expect(out[0]).toEqual({
       id: 'CVE-2026-9',
@@ -98,7 +101,17 @@ describe('parseAlerts', () => {
       state: 'open',
       dismissedReason: '',
       category: '',
+      htmlUrl: '',
     });
+  });
+
+  it('captures the alert html_url (for the report scanner links)', () => {
+    const out = parseAlerts([
+      alert({ html_url: 'https://github.com/o/r/security/code-scanning/42' }),
+    ]);
+    expect(out[0].htmlUrl).toBe(
+      'https://github.com/o/r/security/code-scanning/42',
+    );
   });
 
   it('tolerates missing/garbage input without throwing (totality)', () => {
@@ -119,6 +132,7 @@ describe('filterByCategory', () => {
     state: 'open',
     dismissedReason: '',
     category,
+    htmlUrl: '',
   });
 
   it('keeps only findings in the requested categories', () => {
@@ -136,6 +150,66 @@ describe('filterByCategory', () => {
   it('keeps everything when no categories are given', () => {
     const all = [f('CVE-1', 'grype-ministack-image'), f('S1848', 'sonarqube')];
     expect(filterByCategory(all, [])).toEqual(all);
+  });
+});
+
+describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
+  const af = (over: Partial<AlertFinding> = {}): AlertFinding => ({
+    id: 'CVE-2026-1',
+    scanner: 'Grype',
+    badgeSeverity: 'CRITICAL',
+    state: 'open',
+    dismissedReason: '',
+    category: 'grype-ministack-image',
+    htmlUrl: 'https://x.test/1',
+    ...over,
+  });
+
+  it('maps badgeSeverity -> severity and carries id/scanner/state/htmlUrl', () => {
+    // This is the load-bearing rename: the report reads `severity`, the alert
+    // exposes `badgeSeverity`. A wrong mapping makes every CI severity UNKNOWN.
+    expect(toScannerFindings([af()])).toEqual([
+      {
+        id: 'CVE-2026-1',
+        scanner: 'Grype',
+        severity: 'CRITICAL',
+        state: 'open',
+        htmlUrl: 'https://x.test/1',
+      },
+    ]);
+  });
+
+  it('preserves per-finding values across a multi-element map', () => {
+    const out = toScannerFindings([
+      af({ id: 'CVE-2026-1', scanner: 'Grype', badgeSeverity: 'HIGH' }),
+      af({
+        id: 'CVE-2026-2',
+        scanner: 'Trivy',
+        badgeSeverity: 'MEDIUM',
+        state: 'dismissed',
+        htmlUrl: 'https://x.test/2',
+      }),
+    ]);
+    expect(out).toEqual([
+      {
+        id: 'CVE-2026-1',
+        scanner: 'Grype',
+        severity: 'HIGH',
+        state: 'open',
+        htmlUrl: 'https://x.test/1',
+      },
+      {
+        id: 'CVE-2026-2',
+        scanner: 'Trivy',
+        severity: 'MEDIUM',
+        state: 'dismissed',
+        htmlUrl: 'https://x.test/2',
+      },
+    ]);
+  });
+
+  it('returns [] for an empty input', () => {
+    expect(toScannerFindings([])).toEqual([]);
   });
 });
 
