@@ -1034,6 +1034,15 @@ jobs:
       # Sticky PR comment (hidden-marker upsert, like license-review-poller.yml).
       # PRs only; same-repo guard (a fork PR's read-only token can't comment).
       - name: Post/update sticky PR comment
+        # NON-FATAL: the VEX report is report-only and already produced (job
+        # summary + uploaded artifact). This step only mirrors it into a PR
+        # comment — a COSMETIC convenience. GitHub's comments API intermittently
+        # returns an HTML rate-limit/5xx page instead of JSON, which makes
+        # `gh api --jq` exit with `invalid character '<' …` and (under `set -e`)
+        # would red an otherwise-green report job. `continue-on-error` keeps the
+        # transient comment hiccup from failing the job; the report itself is
+        # unaffected. (Observed on run 29539235273.)
+        continue-on-error: true
         if: >-
           github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
@@ -1045,8 +1054,10 @@ jobs:
           marker='<!-- vex-report -->'
           body="$(printf '%s\n\n%s' "$marker" "$(cat vex-report.md)")"
           # Find an existing marker comment; PATCH it in place, else create one.
+          # `|| true` on the lookup so a transient non-JSON API response yields an
+          # empty url (→ create path) rather than aborting under `set -e`.
           url="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"$marker\"))] | last | .url // empty")"
+            --jq "[.[] | select(.body | contains(\"$marker\"))] | last | .url // empty" || true)"
           if [ -n "$url" ]; then
             gh api "$url" -X PATCH -f body="$body" >/dev/null
           else
