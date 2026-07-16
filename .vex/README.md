@@ -180,6 +180,42 @@ the FS surface — the `ecdsa` record is now listed in `trivy.yaml` too).
   still flags ecdsa as alert #13, so the **API dismissal** of #13
   (`tolerable_risk`) remains the active control for THAT surface.
 
+### `mcp` (server-transport CVEs — filesystem/lockfile surface, #226)
+
+- **`mcp-CVE-2026-59950.openvex.json`** (GHSA-vj7q-gjh5-988w, WebSocket
+  Host/Origin validation), **`mcp-CVE-2026-52869.openvex.json`**
+  (GHSA-jpw9-pfvf-9f58, streamable-HTTP principal check), and
+  **`mcp-CVE-2026-52870.openvex.json`** (GHSA-hvrp-rf83-w775, task-handler
+  cancellation) — all `status: affected` + `action_statement` for `mcp`
+  (`pkg:pypi/mcp@1.23.3`, a transitive dependency of Semgrep pinned in
+  `.github/scanner-requirements/semgrep.txt`). Semgrep **hard-pins
+  `mcp==1.23.3` unconditionally** in every release through the latest and bundles
+  it to back the `semgrep mcp` server subcommand — it cannot be bumped without
+  breaking `--require-hashes`, so this is a VEX acceptance, not a version bump
+  (upstream [semgrep#11506](https://github.com/semgrep/semgrep/issues/11506)
+  tracks making mcp an optional extra; open, won't-fix-soon).
+
+  **Why `affected`, not `not_affected` (#188 status-honesty policy).** All three
+  CVEs are in MCP's **server** transport, and that code IS present and loadable
+  (it backs `semgrep mcp`); this repo runs semgrep only as a SAST CLI
+  (`semgrep scan --config=auto`) and never starts the MCP server, so the code is
+  **reachable-but-not-exercised**. Per the policy table above, a
+  reachable-but-tolerated finding is honestly `affected` + `action_statement`,
+  **not** `not_affected` — the guardrail is "never file `not_affected` on a
+  reachable finding just to silence a scanner." Consequently these records
+  deliberately do **not** suppress grype/trivy (that is the intended `affected`
+  behavior); their value is being a durable, machine-readable, reviewable
+  decision. Full accepted-risk rationale lives in `docs/SECURITY-TOOLING.md`;
+  see **#226**.
+
+  Note: like the `ecdsa` record above, these target a filesystem/lockfile
+  surface — OSV.dev carries the advisories against `mcp`, but the grype/trivy
+  DBs did not at time of writing. **Dependabot** is the surface that flags
+  `mcp`, and Dependabot does **not** read VEX — the maintainer rejects a
+  Dependabot dismissal here, so these records ARE the honest acceptance. Wiring
+  the filesystem-surface VEX feed into a consuming scanner is tracked separately
+  under **#226** (PR 2).
+
 ### MiniStack image base CVEs (`CVE-*.openvex.json`, #84)
 
 One record per accepted high+ CVE on the pinned MiniStack image. **The record
