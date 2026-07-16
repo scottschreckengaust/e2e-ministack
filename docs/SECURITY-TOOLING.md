@@ -575,6 +575,33 @@ with a matching rationale, and re-opens the moment an upstream fix ships.
   `.github/scanner-requirements/overrides.txt`, recompile `iac.txt` with
   `--require-hashes`, and install `--no-deps`.
 
+- **`mcp` (pip) — CVE-2026-59950 (GHSA-vj7q-gjh5-988w), CVE-2026-52869
+  (GHSA-jpw9-pfvf-9f58), CVE-2026-52870 (GHSA-hvrp-rf83-w775).** Three MCP
+  **server-transport** flaws (WebSocket Host/Origin validation; streamable-HTTP
+  principal check; task-handler cancellation) in `mcp==1.23.3`, a transitive
+  dependency of Semgrep pinned in `.github/scanner-requirements/semgrep.txt`.
+  **No fix to bump to:** semgrep **hard-pins `mcp==1.23.3` unconditionally** in
+  every release through the latest (1.170.0) and bundles it to back the
+  `semgrep mcp` server subcommand, so it cannot be raised without breaking
+  semgrep's `--require-hashes` resolution — this is why it is a VEX acceptance,
+  not a version bump. Upstream tracks making mcp an optional extra in
+  [semgrep#11506](https://github.com/semgrep/semgrep/issues/11506) (open,
+  won't-fix-soon). **Reachable-but-not-exercised, so honestly `status: affected`
+  (not `not_affected`):** the vulnerable code is in MCP's **server** transport
+  and IS present and loadable (it backs `semgrep mcp`), but CI invokes semgrep
+  only as a SAST CLI (`semgrep scan --config=auto`) and never starts the MCP
+  server, so the server-transport code is not exercised. Per the #188
+  status-honesty policy (`.vex/README.md` § "Status-honesty policy"), a
+  reachable-but-tolerated finding is `affected` + `action_statement`, **not**
+  `not_affected` — and `affected` deliberately does **not** suppress grype/trivy
+  (by design); the record's value is being a durable, machine-readable,
+  reviewable decision. Accepted per-CVE via `.vex/mcp-CVE-*.openvex.json`
+  (`status: affected`). OSV.dev carries these advisories against `mcp`, but the
+  grype/trivy vulnerability DBs did not at time of writing. Wiring the
+  filesystem-surface VEX feed into the scanners is tracked separately (#226);
+  revisit when semgrep makes mcp an extra or advances the pin (semgrep#11506).
+  See `.vex/README.md` and **#226**.
+
 ## Pinning
 
 All scanner tools are pinned (action SHA / binary checksum / pinned version) per
