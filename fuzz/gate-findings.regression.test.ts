@@ -54,7 +54,7 @@ const SEV = new Set([
 
 // Every key is a canonical upper-case CVE, every value a known severity keyword.
 function assertWellFormed(m: Map<string, string>): void {
-  expect(m instanceof Map).toBe(true);
+  expect(m).toBeInstanceOf(Map);
   for (const [cve, sev] of m) {
     expect(cve).toMatch(CVE_RE);
     expect(cve).toBe(cve.toUpperCase());
