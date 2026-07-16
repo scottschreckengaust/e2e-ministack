@@ -17,9 +17,18 @@ forwards natively); **Trivy** reads them from the committed `trivy.yaml`
 `TRIVY_VEX` env, so the config file is the channel that actually loads them (see
 `docs/SECURITY-TOOLING.md` § MiniStack image scan). The image gate fails on any
 **new** high+ CVE not covered by a record here, and passes on the accepted set.
-The `ecdsa` record targets a filesystem/lockfile surface not yet wired to a
-`--vex` consumer, so it remains staged (see its note below) and is excluded from
-both image-gate feeds.
+
+As of **#226** the **filesystem** SCA scans are also VEX-aware: the `grype` FS job
+(hard-fail @ high) reads the whole `.vex/*.openvex.json` set via
+`GRYPE_VEX_DOCUMENTS`, and `trivy-fs` (report-only) reads the same set from
+`trivy.yaml`. go-vex only suppresses when a record's product purl matches the
+scanned component, so each record is inert off its own surface: the image
+`CVE-*` records (deb/generic purls) don't touch the FS scan, and the `ecdsa`
+record (a pypi purl) suppresses only the FS finding and is excluded from the
+image-gate `CVE-*` glob. This is what lit up the previously-staged `ecdsa`
+record (see its note below) — it fires now because the pinned pip files were
+relocated to `requirements.txt` (so grype/trivy catalog them by filename) and
+the FS jobs were wired to the `.vex/` feed.
 
 Beyond the CI gate, these records also drive the **GitHub Security-tab** state:
 a covered CVE is surfaced as a _dismissed_ alert whose suppression is derived
@@ -133,30 +142,43 @@ JSON via `gate-findings.*` — never SARIF-scraped).
 
 ## Adding a record — the two-feed gotcha
 
-A new `.vex/CVE-*.openvex.json` reaches **grype** automatically (its feed is a
-glob over `.vex/CVE-*.openvex.json`) and the **suppression injector** the same
-way — but **`trivy.yaml`'s `vulnerability.vex` is an explicit file list**, not a
-glob, so a new record MUST be added there in lockstep or trivy's gate won't see
-it. Keep the two feeds in sync (this is the existing #84 convention).
+A new image `.vex/CVE-*.openvex.json` reaches the **grype image gate**
+automatically (its feed is a glob over `.vex/CVE-*.openvex.json`) and the
+**suppression injector** the same way; the **grype FS gate** globs the broader
+`.vex/*.openvex.json` (so it also picks up the pypi-surface `ecdsa` record).
+Either way, **`trivy.yaml`'s `vulnerability.vex` is an explicit file list**, not
+a glob, so a new record MUST be added there in lockstep or trivy won't see it.
+Keep the feeds in sync (this is the existing #84 convention; #226 extended it to
+the FS surface — the `ecdsa` record is now listed in `trivy.yaml` too).
 
 ## Records
 
-### `ecdsa` (filesystem/lockfile surface — still staged)
+### `ecdsa` (filesystem/lockfile surface — live as of #226)
 
 - **`ecdsa-CVE-2024-23342.openvex.json`** — `not_affected` /
   `vulnerable_code_not_in_execute_path` for `ecdsa` (`pkg:pypi/ecdsa@0.19.2`, a
   transitive dependency of checkov pinned in
-  `.github/scanner-requirements/iac.txt`). CVE-2024-23342 ("Minerva") is a
-  timing side-channel in ECDSA **signing**; we only run checkov to scan local
-  CloudFormation templates offline (no signing, no private keys, no
+  `.github/scanner-requirements/iac/requirements.txt`). CVE-2024-23342
+  ("Minerva") is a timing side-channel in ECDSA **signing**; we only run checkov
+  to scan local CloudFormation templates offline (no signing, no private keys, no
   attacker-observable timing), so the vulnerable path is unreachable. Full
   accepted-risk rationale lives in `docs/SECURITY-TOOLING.md`; see **#155**.
 
-  Note: **Dependabot** is the surface that flags ecdsa (alert #13), and
-  Dependabot does **not** read VEX — so the **API dismissal** of #13
-  (`tolerable_risk`) remains the active control for that surface. This record's
-  value is realized only once a VEX-consuming filesystem/lockfile scanner (#133
-  Trivy over `iac.txt`, or an expanded grype filesystem scope) picks it up.
+  **Product-purl shape (non-obvious).** The record lists the **direct product
+  purl** `pkg:pypi/ecdsa@0.19.2` — NOT a checkov-subcomponent form. A filesystem
+  scan of the requirements file catalogs `ecdsa` as a **top-level** component, and
+  go-vex only suppresses when the statement's product purl equals the scanned
+  component; a `checkov → ecdsa` subcomponent statement does NOT match an FS scan
+  (verified against both grype and trivy). #226 reshaped the record from the
+  subcomponent form to this direct-product form for exactly this reason.
+
+  **Now live (#226).** Formerly staged — this record now suppresses the `ecdsa`
+  high+ finding on the VEX-aware `grype` FS gate (hard-fail) and `trivy-fs`
+  (report-only), because the pinned pip files were relocated to
+  `requirements.txt` (so grype/trivy catalog them by filename) and both FS jobs
+  were wired to the `.vex/` feed. **Dependabot** (which does **not** read VEX)
+  still flags ecdsa as alert #13, so the **API dismissal** of #13
+  (`tolerable_risk`) remains the active control for THAT surface.
 
 ### `mcp` (server-transport CVEs — filesystem/lockfile surface, #226)
 

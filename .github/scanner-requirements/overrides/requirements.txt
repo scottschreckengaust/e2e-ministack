@@ -1,6 +1,10 @@
-# Resolution overrides for iac.txt (uv pip compile --overrides).
+# Resolution overrides for iac/requirements.txt (uv pip compile --overrides).
 # Same idea as the npm `overrides` in package.json: force a transitive
 # dependency past a consumer's stale upper bound to pick up security fixes.
+# Path is a per-tool subdir named requirements.txt so SCA scanners recognize it
+# by filename (#226) — it is NOT installed directly (it is the --overrides input
+# to the iac/requirements.txt compile); the requirements.txt name is purely to
+# keep the scanner-requirements tree uniform.
 #
 # aiohttp: checkov (<= 3.3.6) pins aiohttp<3.14.0, but every aiohttp release
 # below 3.14.1 carries open advisories (GHSA-jg22-mg44-37j8, GHSA-xcgm-r5h9-7989,

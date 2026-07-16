@@ -41,12 +41,16 @@ supply-chain safety. This file is the authoritative inventory.
 >
 > **Scanner pin closures + overrides.** The Semgrep and cfn-lint/checkov pins
 > above are the _top-level_ versions; the full hash-verified closures live in
-> `.github/scanner-requirements/{semgrep,iac}.txt` (regeneration commands in
-> each file's header). `iac.txt` additionally carries a resolution override —
-> `.github/scanner-requirements/overrides.txt` forces `aiohttp==3.14.1` past
-> checkov's `<3.14.0` cap (security fix; Dependabot alerts #14–#24) — so
-> `security.yml` installs it with `--no-deps` (see AGENTS.md "Dependency
-> notes"). Drop the override when checkov's cap allows `aiohttp>=3.14.1`.
+> `.github/scanner-requirements/{semgrep,iac}/requirements.txt` (regeneration
+> commands in each file's header). They sit in per-tool subdirs named
+> `requirements.txt` so the SCA scanners (grype/trivy/OSV) recognize them by
+> filename — the old flat `{semgrep,iac,overrides}.txt` names were invisible to
+> those tools (#226). `iac/requirements.txt` additionally carries a resolution
+> override — `.github/scanner-requirements/overrides/requirements.txt` forces
+> `aiohttp==3.14.1` past checkov's `<3.14.0` cap (security fix; Dependabot alerts
+> #14–#24) — so `security.yml` installs it with `--no-deps` (see AGENTS.md
+> "Dependency notes"). Drop the override when checkov's cap allows
+> `aiohttp>=3.14.1`.
 
 ## Intentionally NOT pinned (with reasons)
 

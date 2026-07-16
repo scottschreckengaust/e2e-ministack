@@ -1,12 +1,16 @@
 # Content-pinned (hash-verified) requirements for the IaC scanners (cfn-lint + checkov).
 # Consumed by .github/workflows/security.yml via `pip install --require-hashes --no-deps`
-# (--no-deps because overrides.txt forces aiohttp past checkov's declared upper bound —
-# see overrides.txt for the rationale; this closure is complete, so resolution is redundant).
+# (--no-deps because overrides/requirements.txt forces aiohttp past checkov's declared
+# upper bound — see that file for the rationale; this closure is complete, so resolution
+# is redundant).
 # Top-level pins: cfn-lint==1.52.0, checkov==3.3.2.
+# Path is a per-tool subdir named requirements.txt so SCA scanners (grype / trivy /
+# OSV) recognize it by filename — the old iac.txt was invisible to them (#226).
 # Regenerate after a version bump (Python 3.12, matches the workflow's setup-python):
 #   printf 'cfn-lint==1.52.0\ncheckov==3.3.2\n' | uv pip compile --universal \
-#     --generate-hashes --python-version 3.12 --overrides .github/scanner-requirements/overrides.txt \
-#     --output-file .github/scanner-requirements/iac.txt -
+#     --generate-hashes --python-version 3.12 \
+#     --overrides .github/scanner-requirements/overrides/requirements.txt \
+#     --output-file .github/scanner-requirements/iac/requirements.txt -
 aiodns==3.6.1 \
     --hash=sha256:46233ccad25f2037903828c5d05b64590eaa756e51d12b4a5616e2defcbc98c7 \
     --hash=sha256:b0e9ce98718a5b8f7ca8cd16fc393163374bc2412236b91f6c851d066e3324b6
@@ -136,7 +140,7 @@ aiohttp==3.14.1 \
     --hash=sha256:faccab372e66bc76d5731525e7f1143c922271725b9d38c9f97edcc66266b451 \
     --hash=sha256:fc0cacab7ba4e56f0f81c82a98c09bed2f39c940107b03a34b168bdf7597edd3
     # via
-    #   --override .github/scanner-requirements/overrides.txt
+    #   --override .github/scanner-requirements/overrides/requirements.txt
     #   checkov
 aiomultiprocess==0.9.1 \
     --hash=sha256:3a7b3bb3c38dbfb4d9d1194ece5934b6d32cf0280e8edbe64a7d215bba1322c6 \

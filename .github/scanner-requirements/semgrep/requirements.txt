@@ -1,9 +1,11 @@
 # Content-pinned (hash-verified) requirements for the Semgrep SAST scanner.
 # Consumed by .github/workflows/security.yml via `pip install --require-hashes`.
 # Top-level pin: semgrep==1.167.0 (see .github/scanner-requirements/*.in equivalents below).
+# Path is a per-tool subdir named requirements.txt so SCA scanners (grype / trivy /
+# OSV) recognize it by filename — the old semgrep.txt was invisible to them (#226).
 # Regenerate after a version bump (Python 3.12, matches the workflow's setup-python):
 #   uv pip compile --universal --generate-hashes --python-version 3.12 \
-#     --output-file .github/scanner-requirements/semgrep.txt - <<<'semgrep==1.167.0'
+#     --output-file .github/scanner-requirements/semgrep/requirements.txt - <<<'semgrep==1.167.0'
 annotated-types==0.7.0 \
     --hash=sha256:1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53 \
     --hash=sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89
