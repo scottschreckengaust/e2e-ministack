@@ -433,7 +433,7 @@ describe('sarifBase (tested directly — both branches observable)', () => {
     expect(out).toEqual(input); // …with identical contents
     // Mutating the clone must not touch the caller's input (the whole point).
     (out.runs as unknown[]).push({});
-    expect((input.runs as unknown[]).length).toBe(1);
+    expect(input.runs as unknown[]).toHaveLength(1);
   });
 
   it('returns a fresh { runs: [] } for degenerate input (null/undefined/primitive/array)', () => {
