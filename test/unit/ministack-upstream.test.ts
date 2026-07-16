@@ -4,6 +4,7 @@ import {
   AUTO_POST_UPSTREAM,
   GH_BIN_DIRS,
   UPSTREAM_REPO,
+  asList,
   draftCommentBody,
   formatOneClickUrl,
   formatPostCommand,
@@ -135,15 +136,26 @@ describe('ministack-upstream — pure match/format logic (offline, in-process)',
     ).toBe(3);
   });
 
-  it('treats a candidate with NO title as a non-match (title ?? "")', () => {
-    // Guards the `r.title ?? ''` branch: a numbered candidate with an absent
-    // title cannot contain the needle, so it is filtered out.
+  it('treats a candidate with NO title as a non-match', () => {
+    // A numbered candidate with an absent title cannot contain the needle, so
+    // the `typeof r.title === 'string'` guard filters it out.
     const match = selectBestMatch(
       [{ number: 50, state: 'open' } as { number: number }],
       [],
       'agentcore',
     );
     expect(match).toBeNull();
+  });
+
+  it('asList: array passes through by reference; nullish/non-array => a fresh []', () => {
+    // Tested directly so the `: []` fallback is an OBSERVABLE return — asserting
+    // it kills the seeded-literal ArrayDeclaration mutant an inline `?? []`
+    // would leave equivalent.
+    const a = [{ number: 1, state: 'open', title: 't' }];
+    expect(asList(a)).toBe(a);
+    expect(asList(null)).toEqual([]);
+    expect(asList(undefined)).toEqual([]);
+    expect(asList('x' as unknown as null)).toEqual([]);
   });
 
   it('pulls a match out of the PRs list, not just issues', () => {
