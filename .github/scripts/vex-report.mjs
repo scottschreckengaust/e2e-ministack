@@ -9,7 +9,7 @@
 // strips the `.ts` on import — no build step.
 //
 // Usage:
-//   node vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince]
+//   node vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince] [--scan-cves <cves.json>]
 //
 //   vexDir        directory of `.vex/CVE-*.openvex.json` records (the source of truth)
 //   findings.json a JSON array of {id, scanner, severity, pkg, state, fixedAt} —
@@ -24,25 +24,43 @@
 //                 since users last saw a release"); '' (default) drops all
 //                 Resolved rows (no release baseline yet). The workflow supplies
 //                 a rolling-window fallback when there is no prior release.
+//   --scan-cves   OPTIONAL JSON array of the CVE ids the CURRENT image scan
+//                 (Grype ∪ Trivy SARIFs of this run) reports, from
+//                 `sarif-cve-ids.mjs`. Enables the #210 cross-check: an alert
+//                 `open` in the API but ABSENT from this set (high+) becomes
+//                 "Scanner-cleared" instead of a false "Decision needed". Omit
+//                 it to disable the cross-check (pre-#210 behavior).
 //
 // The transform never throws; malformed inputs degrade to empty sets.
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildReport, renderMarkdown } from './vex-report.ts';
 
+// Pull out the optional `--scan-cves <file>` pair (a JSON array of the CVE ids
+// the CURRENT image scan reports, produced by `sarif-cve-ids.mjs`), leaving the
+// positional args intact. Its presence enables the #210 stale-open cross-check;
+// its absence leaves the scan set `null` (pre-#210 behavior — no demotion).
+const rawArgv = process.argv.slice(2);
+let scanCvesFile;
+const argv = [];
+for (let i = 0; i < rawArgv.length; i++) {
+  if (rawArgv[i] === '--scan-cves') {
+    scanCvesFile = rawArgv[++i];
+  } else {
+    argv.push(rawArgv[i]);
+  }
+}
 const [
-  ,
-  ,
   vexDir,
   findingsFile,
   today = '',
   gateFloor = 'HIGH',
   outFile,
   resolvedSince = '',
-] = process.argv;
+] = argv;
 if (!vexDir || !findingsFile) {
   console.error(
-    'usage: vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince]',
+    'usage: vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince] [--scan-cves <cves.json>]',
   );
   process.exit(2);
 }
@@ -88,7 +106,29 @@ try {
   // no/!invalid findings file -> empty; report still renders from .vex/ alone.
 }
 
-const rows = buildReport(vexRecords, findings, gateFloor, today, resolvedSince);
+// Load the current-scan CVE set when `--scan-cves` was given. `null` (flag
+// absent) DISABLES the stale-open cross-check — buildReport then behaves exactly
+// as before #210. A present-but-unreadable/invalid file degrades to `null` too:
+// we must not treat "couldn't read the scan" as "the scan found nothing" (which
+// would falsely demote every open alert to Scanner-cleared).
+let scanCves = null;
+if (scanCvesFile) {
+  try {
+    const parsed = JSON.parse(readFileSync(scanCvesFile, 'utf8'));
+    if (Array.isArray(parsed)) scanCves = parsed;
+  } catch {
+    // leave null — no reliable scan ledger, so don't cross-check.
+  }
+}
+
+const rows = buildReport(
+  vexRecords,
+  findings,
+  gateFloor,
+  today,
+  resolvedSince,
+  scanCves,
+);
 const md = renderMarkdown(rows);
 
 if (outFile) writeFileSync(outFile, md);

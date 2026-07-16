@@ -109,11 +109,16 @@ describe('isActionable', () => {
       'Revisit overdue',
       'Stale record',
       'Investigating',
+      'Scanner-cleared',
     ];
     const actionable = all.filter(isActionable);
     expect(actionable.sort()).toEqual(
       ['Decision needed', 'Revisit overdue', 'Stale record'].sort(),
     );
+  });
+
+  it('is false for Scanner-cleared (a stale-open alert needs no action, #210)', () => {
+    expect(isActionable('Scanner-cleared')).toBe(false);
   });
 });
 
@@ -126,12 +131,13 @@ describe('priorityRank', () => {
       'VEX drift',
       'Stale record',
       'Resolved',
+      'Scanner-cleared',
       'Investigating',
       'Accepted',
       'Tracked',
     ];
-    // ranks are 0..8 in exactly this sequence (strictly increasing).
-    expect(order.map(priorityRank)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    // ranks are 0..9 in exactly this sequence (strictly increasing).
+    expect(order.map(priorityRank)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it('puts every actionable status strictly above Resolved/Accepted/Tracked', () => {
@@ -1667,6 +1673,7 @@ describe('summarize + renderMarkdown', () => {
       '| Decision needed | uncovered at/above the gate floor — must VEX or fix |',
       '| VEX drift | VEX-accepted but the alert is still open — dismiss it |',
       '| Undocumented dismissal | alert dismissed with no `.vex/` record — justify or reopen |',
+      '| Scanner-cleared | alert still open in the API but gone from the current scan — stale, no action |',
       '| Resolved | alert auto-fixed (finding gone) — informational |',
       '| Revisit overdue | accepted record past its `revisit_by` date |',
       '| Stale record | `.vex/` record with no current alert — prune? |',
@@ -1725,5 +1732,206 @@ describe('summarize + renderMarkdown', () => {
     expect(md).toContain(
       '| [CVE-2026-9](https://github.com/advisories?query=CVE-2026-9) | Stale record | UNKNOWN | — | — |',
     );
+  });
+});
+
+// The #210 cross-check: an alert `open` in the Code-Scanning Alerts API but
+// ABSENT from the CURRENT image scan is stale (GitHub only auto-closes when a
+// newer analysis omits it), so the report must NOT render it as a false
+// "Decision needed" — it becomes the non-actionable "Scanner-cleared". The
+// scan set is the 6th buildReport param; `null` (default) disables the check.
+describe('buildReport — Scanner-cleared cross-check (#210)', () => {
+  // An open, uncovered high+ finding — the shape that would be "Decision needed"
+  // without a scan-set cross-check.
+  const openFinding = (id: string, sev = 'HIGH'): ScannerFinding => ({
+    id,
+    scanner: 'grype',
+    severity: sev,
+    pkg: 'python3.13',
+    state: 'open',
+    htmlUrl: 'https://x.test/a',
+  });
+
+  it('open + uncovered + ABSENT from the current scan => Scanner-cleared (not Decision needed)', () => {
+    const rows = buildReport(
+      [],
+      [openFinding('CVE-2026-6100')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      [], // scan found nothing => this open alert is stale
+    );
+    expect(rows[0].status).toBe('Scanner-cleared');
+    expect(rows[0].actionNeeded).toBe(false);
+    expect(rows[0].priorityRank).toBe(priorityRank('Scanner-cleared'));
+  });
+
+  it('open + uncovered + PRESENT in the current scan => Decision needed (genuinely open)', () => {
+    const rows = buildReport(
+      [],
+      [openFinding('CVE-2026-6100')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      ['CVE-2026-6100'], // current scan still reports it => real finding
+    );
+    expect(rows[0].status).toBe('Decision needed');
+    expect(rows[0].actionNeeded).toBe(true);
+  });
+
+  it('scan-set membership is case-insensitive (lower-case scan id still matches)', () => {
+    const rows = buildReport(
+      [],
+      [openFinding('CVE-2026-6100')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      ['cve-2026-6100'], // lower-case — must still count as present
+    );
+    expect(rows[0].status).toBe('Decision needed');
+  });
+
+  it('null scan set (default) disables the check => Decision needed (pre-#210 behavior)', () => {
+    // Explicit null and the defaulted arg must behave identically.
+    const withNull = buildReport(
+      [],
+      [openFinding('CVE-2026-6100')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      null,
+    );
+    const defaulted = buildReport(
+      [],
+      [openFinding('CVE-2026-6100')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+    );
+    expect(withNull[0].status).toBe('Decision needed');
+    expect(defaulted[0].status).toBe('Decision needed');
+  });
+
+  it('below-floor absent finding stays Tracked, not Scanner-cleared (floor gate)', () => {
+    // The scan SARIFs carry only high+, so a CVE's absence is NOT conclusive
+    // below the floor — a below-floor finding must remain Tracked even when the
+    // scan set does not list it. Kills a mutant that drops the `maxRank>=floor`
+    // guard (which would mislabel it Scanner-cleared).
+    const rows = buildReport(
+      [],
+      [{ ...openFinding('CVE-2026-4100'), severity: 'LOW' }],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      [], // absent
+    );
+    expect(rows[0].status).toBe('Tracked');
+  });
+
+  it('EXACTLY-AT-floor absent finding => Scanner-cleared (kills >= vs > on the floor gate)', () => {
+    // A HIGH finding, floor HIGH, absent from the scan: the floor gate must be
+    // `>=` so an at-floor CVE is eligible for Scanner-cleared. With `>` it would
+    // fall through to Tracked.
+    const rows = buildReport(
+      [],
+      [openFinding('CVE-2026-4200', 'HIGH')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      [],
+    );
+    expect(rows[0].status).toBe('Scanner-cleared');
+  });
+
+  it('a non-CVE (TEMP-/GHSA) open finding absent from the scan stays Decision needed (isCve guard)', () => {
+    // A pseudo-id can never appear in the scan set, so absence proves nothing —
+    // the `isCve` guard must keep it out of Scanner-cleared. Floor LOW so the
+    // TEMP row qualifies as a finding; it must be Decision needed, not cleared.
+    const rows = buildReport(
+      [],
+      [{ ...openFinding('TEMP-1-ABC'), severity: 'CRITICAL' }],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      [], // scan set can't contain a TEMP id anyway
+    );
+    expect(rows[0].status).toBe('Decision needed');
+  });
+
+  it('VEX-accepted + open but scanner-cleared => Accepted, not false VEX drift (#210)', () => {
+    // A .vex/ not_affected record whose alert is still open would be "VEX drift"
+    // — but if the current scan has cleared the CVE, the open alert is merely
+    // stale, so the record is still valid: Accepted, nothing to reconcile.
+    const rows = buildReport(
+      [{ cve: 'CVE-2026-4300', status: 'not_affected', justification: 'x' }],
+      [openFinding('CVE-2026-4300')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      [], // cleared
+    );
+    expect(rows[0].status).toBe('Accepted');
+    expect(rows[0].actionNeeded).toBe(false);
+  });
+
+  it('VEX-accepted + open + STILL in the current scan => VEX drift (real drift preserved)', () => {
+    const rows = buildReport(
+      [{ cve: 'CVE-2026-4300', status: 'not_affected', justification: 'x' }],
+      [openFinding('CVE-2026-4300')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      ['CVE-2026-4300'], // scan still reports it => genuine drift
+    );
+    expect(rows[0].status).toBe('VEX drift');
+    expect(rows[0].actionNeeded).toBe(true);
+  });
+
+  it('renders the scanner-cleared summary suffix + legend + ledger row', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [openFinding('CVE-2026-6100')],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+        [],
+      ),
+    );
+    // Summary suffix present only when the count is non-zero.
+    expect(md).toContain(' · 1 scanner-cleared');
+    // No action table content (it's non-actionable) — the clean-tree line shows.
+    expect(md).toContain('✅ **No action needed**');
+    // Ledger row carries the status.
+    expect(md).toContain(
+      '| [CVE-2026-6100](https://github.com/advisories?query=CVE-2026-6100) | Scanner-cleared | HIGH |',
+    );
+  });
+
+  it('omits the scanner-cleared suffix ENTIRELY when the count is 0', () => {
+    // With a null scan set there are no Scanner-cleared rows, so the summary
+    // must NOT contain the suffix (kills the always-append mutant).
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [finding('CVE-2099-T', 'grype', 'LOW', 'zlib1g')],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+      ),
+    );
+    expect(md).not.toContain('scanner-cleared');
+  });
+
+  it('summarize counts a Scanner-cleared row under its own key', () => {
+    const rows = buildReport(
+      [],
+      [openFinding('CVE-2026-6100')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      [],
+    );
+    expect(summarize(rows)['Scanner-cleared']).toBe(1);
   });
 });
