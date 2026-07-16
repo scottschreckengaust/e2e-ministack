@@ -39,6 +39,7 @@ export default {
     '.github/scripts/vex-report.ts',
     '.github/scripts/alerts-findings.ts',
     '.github/scripts/sarif-cve-ids.ts',
+    '.github/scripts/gate-findings.ts',
     '.github/scripts/license-verdict.ts',
     'scripts/ministack-upstream.ts',
   ],

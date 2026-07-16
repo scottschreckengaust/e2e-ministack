@@ -125,8 +125,11 @@ MUST **state the vendor body's assessment honestly** even when the tool's gate
 severity is lower — e.g. _"NVD CVSS 9.8 (Critical); Debian tracker rates
 Negligible (disputed / not-a-security-bug upstream). Accepted because …"_. Do
 **not** launder a vendor-Critical into a silent low: record both, and say why we
-act on the lower one. This keeps the acceptance auditable and feeds the future
-VEX report (#189) a truthful "vendor vs tool" column.
+act on the lower one. This keeps the acceptance auditable and feeds the VEX
+report a truthful "vendor vs tool" view: the per-push report renders the ledger
+severity as `badge / gate X` whenever the scanner's distro/gate rating diverges
+from GitHub's NVD-derived badge (#208, sourced from the scanners' structured
+JSON via `gate-findings.*` — never SARIF-scraped).
 
 ## Adding a record — the two-feed gotcha
 

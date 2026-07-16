@@ -22,7 +22,10 @@
 //         record (justify or reopen; the #167 inverse-drift).
 //   - Severity is the BADGE severity (GitHub's NVD-derived
 //     `security_severity_level`); it can diverge from a scanner's distro/gate
-//     rating (#181) — the gate-vs-badge column is a fast-follow.
+//     rating (#181). When the optional `gateSeverities` map (from
+//     `gate-findings.*`, the scanners' structured JSON) is supplied, the ledger
+//     renders `badge / gate X` on exactly the rows where the two differ (#208) —
+//     surfacing the overstated-badge base-image CVEs this repo VEX-accepts.
 //   - CURRENT-SCAN CROSS-CHECK (#210): GitHub only auto-closes an alert when a
 //     newer analysis for the same ref omits it, so an alert can be `open` in the
 //     API yet ABSENT from the current image scan (e.g. after the pinned image
@@ -78,6 +81,10 @@ export interface ReportRow {
   /** How many Code-Scanning alerts collapsed into this one CVE row (dedup count). */
   alertCount: number;
   maxSeverity: string; // the badge (NVD) severity shown in the report
+  /** The scanner's GATE (distro-adjusted) severity for this CVE, when known
+   *  (#208). Null when no gate map was supplied, or the CVE isn't in it. The
+   *  render shows it alongside `maxSeverity` ONLY when the two differ. */
+  gateSeverity: string | null;
   status: UnifiedStatus;
   suggestedJustification: string | null; // for uncovered items, else the recorded one
   /** The revisit_by value as authored: an ISO date OR an event token. */
@@ -322,6 +329,13 @@ export function isRevisitOverdue(
  *   needed` to `Scanner-cleared`; it never invents a finding or hides one the
  *   scan still reports. Floor-gated because the scan SARIFs carry only high+
  *   findings, so a CVE's absence is conclusive only at/above the gate floor.
+ * @param gateSeverities a CVE-id -> scanner GATE (distro-adjusted) severity map
+ *   (from `gate-findings.*`, the union of grype+trivy JSON), joined by CVE id
+ *   onto each row so the report can surface gate-vs-badge divergence (#208).
+ *   Passing `null` (the DEFAULT) leaves every row's `gateSeverity` null — the
+ *   engine behaves exactly as before, so legacy callers and the fuzz harness
+ *   stay valid. A CVE absent from the map (or a non-CVE row) gets a null
+ *   gateSeverity — the report then shows the badge alone, tool-agnostically.
  */
 export function buildReport(
   vexRecords: readonly VexRecord[],
@@ -330,6 +344,7 @@ export function buildReport(
   today: string,
   resolvedSince: string,
   currentScanCves: readonly string[] | null = null,
+  gateSeverities: ReadonlyMap<string, string> | null = null,
 ): ReportRow[] {
   // `vexRecords`/`findings` are arrays by contract — the CLI shim (the only
   // untrusted-input boundary) parses JSON and passes arrays. ELEMENT-level junk
@@ -352,6 +367,14 @@ export function buildReport(
     currentScanCves === null
       ? null
       : new Set(currentScanCves.map((c) => String(c).toUpperCase()));
+
+  // Look up a CVE's scanner GATE severity (#208), keyed the same upper-case way
+  // as the finding ids. Returns null when no gate map was supplied OR this CVE
+  // isn't in it (the report then shows the badge alone). A single helper so both
+  // row-push sites (found findings + stale records) join gate severity the same
+  // way, and a `null` map cleanly disables the whole feature.
+  const gateSevOf = (id: string): string | null =>
+    gateSeverities === null ? null : (gateSeverities.get(id) ?? null);
 
   // Group findings by id. The second-ledger (alert-state) signals are set only
   // on POSITIVE evidence — an absent `state` means "no alert-ledger opinion"
@@ -498,6 +521,7 @@ export function buildReport(
         .sort((x, y) => x.scanner.localeCompare(y.scanner)),
       alertCount: g.alertCount,
       maxSeverity,
+      gateSeverity: gateSevOf(id),
       status,
       suggestedJustification: suggested,
       revisitBy: vex?.revisitBy ?? null,
@@ -522,6 +546,11 @@ export function buildReport(
       scanners: [],
       alertCount: 0,
       maxSeverity: 'UNKNOWN',
+      // A stale record has no CURRENT finding, so by definition no current-scan
+      // gate rating — but if the gate map still lists the CVE, surface it (the
+      // gate map is the current scan's view; a match here is itself signal the
+      // record may not be as stale as the alert ledger suggests).
+      gateSeverity: gateSevOf(cve),
       status: 'Stale record',
       suggestedJustification: vex.justification ?? null,
       revisitBy: vex.revisitBy ?? null,
@@ -606,7 +635,8 @@ const LEGEND =
   '| Revisit overdue | accepted record past its `revisit_by` date |\n' +
   '| Stale record | `.vex/` record with no current alert — prune? |\n' +
   '| Investigating | `under_investigation` record |\n\n' +
-  "**severity** — GitHub's badge (NVD) severity; may differ from a scanner's gate rating.\n\n" +
+  "**severity** — GitHub's badge (NVD) severity. Shown as `badge / gate X` when " +
+  "the scanner's distro/gate rating differs (e.g. NVD Critical vs Debian Negligible).\n\n" +
   '**revisit_by** — an ISO date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`).\n\n' +
   '</details>';
 
@@ -638,6 +668,22 @@ function renderScanners(r: ReportRow): string {
   return r.scanners
     .map((sc) => (sc.htmlUrl ? `[${sc.scanner}](${sc.htmlUrl})` : sc.scanner))
     .join(', ');
+}
+
+/**
+ * Render the severity cell: the badge (NVD) severity alone, OR `badge / gate`
+ * when the scanner's gate rating is known AND DIFFERS (#208). Showing both only
+ * on divergence keeps the common case (they agree) uncluttered while surfacing
+ * exactly the overstated-badge rows this repo VEX-accepts (e.g. libc CVEs the
+ * badge scores Critical but the distro rates Negligible). A null/equal gate
+ * severity shows the badge alone — tool-agnostic (a scanner emitting no gate
+ * rating simply contributes nothing).
+ */
+function renderSeverity(r: ReportRow): string {
+  if (r.gateSeverity === null || r.gateSeverity === r.maxSeverity) {
+    return r.maxSeverity;
+  }
+  return `${r.maxSeverity} / gate ${r.gateSeverity}`;
 }
 
 /**
@@ -707,7 +753,7 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
   const fBody = rows
     .map(
       (r) =>
-        `| ${renderItem(r)} | ${r.status} | ${r.maxSeverity} | ${renderScanners(r)} | ${r.revisitBy ?? '—'} |`,
+        `| ${renderItem(r)} | ${r.status} | ${renderSeverity(r)} | ${renderScanners(r)} | ${r.revisitBy ?? '—'} |`,
     )
     .join('\n');
 

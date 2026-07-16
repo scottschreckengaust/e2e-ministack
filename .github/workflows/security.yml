@@ -513,6 +513,36 @@ jobs:
           fi
           node .github/scripts/vex-to-sarif-suppressions.mjs \
             "$FULL_SARIF" grype-ministack-image.suppressed.sarif .vex/CVE-*.openvex.json
+      # Emit grype JSON carrying the GATE (distro) severity per CVE, for the VEX
+      # report's gate-vs-badge column (#208). VEX-FREE (no GRYPE_VEX_DOCUMENTS)
+      # so the ACCEPTED base-image CVEs — exactly the ones whose badge overstates
+      # the distro rating — are present with their gate severity, not dropped.
+      # Report-only; never gates. Same digest as the gate scan above.
+      - id: grype-json
+        name: Grype image scan as JSON (gate severity for the VEX report, #208)
+        if: always()
+        continue-on-error: true # report-only; must not fail the gate job
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          grype-version: v0.114.0
+          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
+          fail-build: false
+          severity-cutoff: high
+          output-format: json
+      # Stage the JSON under a stable name for the artifact (the action writes a
+      # runner-path filename in its `json` output). Empty file if the scan
+      # produced none, so the downstream glob/upload stays warn-not-error.
+      - name: Stage grype JSON for the gate-severity artifact
+        if: always()
+        env:
+          GRYPE_JSON: ${{ steps.grype-json.outputs.json }}
+        run: |
+          if [ -n "$GRYPE_JSON" ] && [ -f "$GRYPE_JSON" ]; then
+            cp "$GRYPE_JSON" grype-ministack-image.json
+          else
+            echo "no grype JSON produced; staging empty file"
+            : > grype-ministack-image.json
+          fi
       - name: Upload VEX-suppressed SARIF to Security tab
         id: upload-suppressed
         if: always()
@@ -540,6 +570,7 @@ jobs:
           path: |
             ${{ steps.grype.outputs.sarif }}
             grype-ministack-image.suppressed.sarif
+            grype-ministack-image.json
           if-no-files-found: warn
       - name: Enforce Grype image result (hard-fail on any uncovered high+ CVE)
         if: always()
@@ -746,6 +777,24 @@ jobs:
           # auto-loaded from trivy.yaml. `table` isn't SARIF, so severity isn't unset.
           severity: 'HIGH,CRITICAL'
           skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
+      # Emit trivy JSON carrying the GATE (distro) severity per CVE, for the VEX
+      # report's gate-vs-badge column (#208). Reuses the installed trivy +
+      # cached DB (skip-setup-trivy) — no re-fetch. VEX auto-loads from
+      # trivy.yaml, so covered CVEs are filtered; that's fine because the grype
+      # JSON above is VEX-free and supplies gate severity for the accepted set —
+      # trivy's contribution is a UNION, higher-rank-wins. Report-only.
+      - name: Emit Trivy JSON (gate severity for the VEX report, #208)
+        if: always()
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
+          format: json
+          output: trivy-image.json
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+          severity: 'HIGH,CRITICAL'
+          skip-setup-trivy: 'true'
       - name: Upload SARIF to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
@@ -760,6 +809,7 @@ jobs:
           path: |
             trivy-image.sarif
             trivy-image.txt
+            trivy-image.json
           if-no-files-found: warn
       - name: Enforce Trivy image result (hard-fail on any uncovered high+ CVE)
         if: always()
@@ -900,9 +950,28 @@ jobs:
           else
             echo "no current-scan SARIFs found; skipping the stale-open cross-check"
           fi
-          # shellcheck disable=SC2086  # $scan_arg is an intentional flag pair
+          # Extract each scanner's GATE (distro) severity from the CURRENT scan's
+          # JSON for the gate-vs-badge column (#208). The grype JSON is VEX-FREE
+          # (so the accepted base-image CVEs — the ones whose badge overstates the
+          # distro rating — carry their gate severity); trivy's is a union
+          # contribution. Only pass `--gate-severities` when at least one JSON
+          # was produced; an empty file simply contributes nothing.
+          gate_arg=""
+          gate_jsons=()
+          for f in scan-sarifs/grype-ministack-image.json \
+                   scan-sarifs/trivy-image.json; do
+            [ -s "$f" ] && gate_jsons+=("$f")
+          done
+          if [ "${#gate_jsons[@]}" -gt 0 ]; then
+            node .github/scripts/gate-findings.mjs gate-severities.json "${gate_jsons[@]}"
+            gate_arg="--gate-severities gate-severities.json"
+            echo "gate-severity map: $(cat gate-severities.json)"
+          else
+            echo "no current-scan JSON found; skipping the gate-vs-badge column"
+          fi
+          # shellcheck disable=SC2086  # $scan_arg / $gate_arg are intentional flag pairs
           node .github/scripts/vex-report.mjs .vex findings.json \
-            "$(date -u +%Y-%m-%d)" HIGH vex-report.md "${resolved_since}" $scan_arg
+            "$(date -u +%Y-%m-%d)" HIGH vex-report.md "${resolved_since}" $scan_arg $gate_arg
           cat vex-report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload VEX report artifact
         if: always()

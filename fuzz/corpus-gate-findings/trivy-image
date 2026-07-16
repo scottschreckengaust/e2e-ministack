@@ -1,0 +1,1 @@
+{"SchemaVersion":2,"Results":[{"Target":"img","Vulnerabilities":[{"VulnerabilityID":"CVE-2019-1010022","Severity":"LOW"},{"VulnerabilityID":"CVE-2026-11822","Severity":"HIGH"}]},{"Target":"empty"}]}

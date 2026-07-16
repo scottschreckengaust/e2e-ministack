@@ -1322,6 +1322,7 @@ describe('summarize + renderMarkdown', () => {
       scanners: [],
       alertCount: 1,
       maxSeverity: 'LOW',
+      gateSeverity: null,
       status: 'Resolved',
       suggestedJustification: null,
       revisitBy: null,
@@ -1679,7 +1680,7 @@ describe('summarize + renderMarkdown', () => {
       '| Stale record | `.vex/` record with no current alert — prune? |',
       '| Investigating | `under_investigation` record |',
       '',
-      "**severity** — GitHub's badge (NVD) severity; may differ from a scanner's gate rating.",
+      "**severity** — GitHub's badge (NVD) severity. Shown as `badge / gate X` when the scanner's distro/gate rating differs (e.g. NVD Critical vs Debian Negligible).",
       '',
       '**revisit_by** — an ISO date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`).',
       '',
@@ -1933,5 +1934,134 @@ describe('buildReport — Scanner-cleared cross-check (#210)', () => {
       [],
     );
     expect(summarize(rows)['Scanner-cleared']).toBe(1);
+  });
+});
+
+// The #208 gate-vs-badge severity column: buildReport joins a CVE->gate-severity
+// map (7th param) onto each row's badge severity; renderMarkdown shows
+// `badge / gate X` ONLY when they differ. `null` (default) disables it.
+describe('buildReport — gate severity join (#208)', () => {
+  it('null gate map (default) => every row.gateSeverity is null', () => {
+    const withNull = buildReport(
+      [],
+      [finding('CVE-2026-1', 'grype', 'CRITICAL', 'libc6')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      null,
+      null,
+    );
+    const defaulted = buildReport(
+      [],
+      [finding('CVE-2026-1', 'grype', 'CRITICAL', 'libc6')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+    );
+    expect(withNull[0].gateSeverity).toBeNull();
+    expect(defaulted[0].gateSeverity).toBeNull();
+  });
+
+  it('joins the gate severity by CVE id onto the matching row', () => {
+    const rows = buildReport(
+      [],
+      [finding('CVE-2019-1010022', 'grype', 'CRITICAL', 'libc6')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      null,
+      new Map([['CVE-2019-1010022', 'NEGLIGIBLE']]),
+    );
+    expect(rows[0].maxSeverity).toBe('CRITICAL'); // badge unchanged
+    expect(rows[0].gateSeverity).toBe('NEGLIGIBLE');
+  });
+
+  it('a CVE absent from the gate map gets a null gateSeverity (tool-agnostic)', () => {
+    const rows = buildReport(
+      [],
+      [finding('CVE-2026-2', 'grype', 'HIGH', 'openssl')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      null,
+      new Map([['CVE-2026-OTHER', 'LOW']]), // does not contain CVE-2026-2
+    );
+    expect(rows[0].gateSeverity).toBeNull();
+  });
+
+  it('a stale VEX record still picks up a gate severity when the map lists it', () => {
+    const rows = buildReport(
+      [
+        {
+          cve: 'CVE-2026-9',
+          status: 'not_affected',
+          justification: NOT_AFFECTED,
+        },
+      ],
+      [], // no current finding => stale record
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+      null,
+      new Map([['CVE-2026-9', 'MEDIUM']]),
+    );
+    expect(rows[0].status).toBe('Stale record');
+    expect(rows[0].gateSeverity).toBe('MEDIUM');
+  });
+
+  it('renders `badge / gate X` ONLY when the two differ', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [finding('CVE-2019-1010022', 'grype', 'CRITICAL', 'libc6')],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+        null,
+        new Map([['CVE-2019-1010022', 'NEGLIGIBLE']]),
+      ),
+    );
+    expect(md).toContain(
+      '| [CVE-2019-1010022](https://github.com/advisories?query=CVE-2019-1010022) | Decision needed | CRITICAL / gate NEGLIGIBLE |',
+    );
+  });
+
+  it('renders the badge ALONE when gate equals badge (no redundant suffix)', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [finding('CVE-2026-3', 'grype', 'HIGH', 'openssl')],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+        null,
+        new Map([['CVE-2026-3', 'HIGH']]), // same as badge
+      ),
+    );
+    expect(md).toContain(
+      '| [CVE-2026-3](https://github.com/advisories?query=CVE-2026-3) | Decision needed | HIGH |',
+    );
+    expect(md).not.toContain('gate HIGH');
+  });
+
+  it('renders the badge ALONE when no gate severity is known (null)', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [finding('CVE-2026-4', 'grype', 'HIGH', 'openssl')],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+      ),
+    );
+    // The ledger row shows the badge alone — no `/ gate` suffix on the row
+    // itself (the legend text mentions the format, so scope the check to rows).
+    expect(md).toContain(
+      '| [CVE-2026-4](https://github.com/advisories?query=CVE-2026-4) | Decision needed | HIGH |',
+    );
+    const ledgerRows = md
+      .split('\n')
+      .filter((l) => l.includes('CVE-2026-4') && l.startsWith('|'));
+    for (const row of ledgerRows) expect(row).not.toContain('/ gate');
   });
 });
