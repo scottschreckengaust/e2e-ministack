@@ -10,6 +10,23 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.6.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.5.1...v0.6.0) (2026-07-16)
+
+
+### Features
+
+* **security:** couple GitHub Code Scanning dismissal to .vex/ records ([#181](https://github.com/scottschreckengaust/e2e-ministack/issues/181)) ([#186](https://github.com/scottschreckengaust/e2e-ministack/issues/186)) ([313c65c](https://github.com/scottschreckengaust/e2e-ministack/commit/313c65cfa2bdff3addd19fdecb4eb5503a0f4d2a))
+* **security:** prioritized VEX report sort + bounded recently-resolved ([#210](https://github.com/scottschreckengaust/e2e-ministack/issues/210)) ([#213](https://github.com/scottschreckengaust/e2e-ministack/issues/213)) ([99e23ac](https://github.com/scottschreckengaust/e2e-ministack/commit/99e23ac46c85cfc4a9ddb23601bf409883685e0a))
+* **security:** schema-gate vex-to-sarif-suppressions output against OASIS SARIF 2.1.0 ([#187](https://github.com/scottschreckengaust/e2e-ministack/issues/187)) ([#198](https://github.com/scottschreckengaust/e2e-ministack/issues/198)) ([b057d40](https://github.com/scottschreckengaust/e2e-ministack/commit/b057d40152e07099a20a748e0fc8d8edcb00e2a1))
+* **security:** VEX report CI job — reconcile .vex/ against Code Scanning alerts ([#189](https://github.com/scottschreckengaust/e2e-ministack/issues/189)) ([#204](https://github.com/scottschreckengaust/e2e-ministack/issues/204)) ([e924eb2](https://github.com/scottschreckengaust/e2e-ministack/commit/e924eb21d071d48f05d764325738be301af168c0))
+* **security:** VEX report engine — .vex/-driven reconciliation table ([#189](https://github.com/scottschreckengaust/e2e-ministack/issues/189)) ([#203](https://github.com/scottschreckengaust/e2e-ministack/issues/203)) ([24b346f](https://github.com/scottschreckengaust/e2e-ministack/commit/24b346f0371d7870ffc0aaebe9bf25ff1fa9f894))
+* **security:** VEX report format/UX — linked scanners, legend, count legibility ([#206](https://github.com/scottschreckengaust/e2e-ministack/issues/206)) ([#207](https://github.com/scottschreckengaust/e2e-ministack/issues/207)) ([7c360ba](https://github.com/scottschreckengaust/e2e-ministack/commit/7c360ba38364b55e2cfae1c39fe82a94e5937ee6))
+
+
+### Bug Fixes
+
+* **security:** repin the VEX-free suppression-view scan to the current image digest ([#210](https://github.com/scottschreckengaust/e2e-ministack/issues/210)) ([#211](https://github.com/scottschreckengaust/e2e-ministack/issues/211)) ([31b1bed](https://github.com/scottschreckengaust/e2e-ministack/commit/31b1bedc50a9d67feb300c39e01104b8834ebd5c))
+
 ## [0.5.1](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.5.0...v0.5.1) (2026-07-13)
 
 
