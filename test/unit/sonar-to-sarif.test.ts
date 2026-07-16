@@ -255,8 +255,8 @@ describe('sonar-to-sarif — issues/search → SARIF', () => {
   });
 
   it('tolerates a components[] entry with NO key (falls back to strip-prefix)', () => {
-    // Guards the `c.key ?? ''` branch: a key-less component maps under '' and
-    // must not hijack a real component lookup.
+    // Guards the key-less-component branch: a component with no key is skipped
+    // (never inserted), so it can't hijack a real lookup.
     const sarif = toSarif({
       issues: [{ rule: 'r', severity: 'MAJOR', component: 'proj:z.ts' }],
       components: [{ path: 'orphan.ts' }, { key: 'other', path: 'o.ts' }],
@@ -265,6 +265,43 @@ describe('sonar-to-sarif — issues/search → SARIF', () => {
       sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation
         .uri,
     ).toBe('z.ts');
+  });
+
+  it('tolerates a null/undefined components[] entry (kills the `c &&` guard mutant)', () => {
+    // A null element must be skipped without throwing — proves the `c && c.key`
+    // guard's short-circuit is load-bearing (force-true or `c || c.key` would
+    // dereference null and throw). The real component still resolves.
+    const sarif = toSarif({
+      issues: [{ rule: 'r', severity: 'MAJOR', component: 'proj:z.ts' }],
+      components: [
+        null as unknown as { key?: string; path?: string },
+        undefined as unknown as { key?: string; path?: string },
+        { key: 'proj:z.ts', path: 'resolved.ts' },
+      ],
+    });
+    expect(
+      sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation
+        .uri,
+    ).toBe('resolved.ts');
+  });
+
+  it('tolerates a null/undefined impacts[] entry (kills the `im &&` guard mutant)', () => {
+    // A null impact element must be skipped without throwing — proves the
+    // `im && im.severity` short-circuit is load-bearing. The real HIGH impact
+    // still drives the level to error.
+    const sarif = toSarif({
+      issues: [
+        {
+          rule: 'r',
+          component: 'p:a',
+          impacts: [
+            null as unknown as { severity?: string },
+            { severity: 'HIGH' },
+          ],
+        },
+      ],
+    });
+    expect(sarif.runs[0].results[0].level).toBe('error');
   });
 
   it('emits startLine-only region when textRange has line but no offsets', () => {

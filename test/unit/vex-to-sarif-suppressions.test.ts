@@ -2,6 +2,7 @@ import {
   extractCve,
   collectSuppressions,
   injectSuppressions,
+  sarifBase,
   type VexDoc,
   type SarifLogLike,
   type SarifResultLike,
@@ -421,5 +422,26 @@ describe('injectSuppressions', () => {
       },
     ]);
     expect(results[1].suppressions).toEqual([]); // stale inSource cleared
+  });
+});
+
+describe('sarifBase (tested directly — both branches observable)', () => {
+  it('deep-clones a real SARIF object (distinct ref, preserves runs)', () => {
+    const input: SarifLogLike = { version: '2.1.0', runs: [{ results: [] }] };
+    const out = sarifBase(input);
+    expect(out).not.toBe(input); // a CLONE, not the same object
+    expect(out).toEqual(input); // …with identical contents
+    // Mutating the clone must not touch the caller's input (the whole point).
+    (out.runs as unknown[]).push({});
+    expect(input.runs as unknown[]).toHaveLength(1);
+  });
+
+  it('returns a fresh { runs: [] } for degenerate input (null/undefined/primitive/array)', () => {
+    for (const bad of [null, undefined, 'x', 42, [1, 2, 3]]) {
+      // The fallback must carry an EMPTY runs array (kills the `{}` ObjectLiteral
+      // mutant) and be a plain object (kills the guard-forced-true mutant that
+      // would try to structuredClone a primitive/array).
+      expect(sarifBase(bad)).toEqual({ runs: [] });
+    }
   });
 });

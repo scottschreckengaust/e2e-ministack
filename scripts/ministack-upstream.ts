@@ -118,6 +118,17 @@ export function formatRef(
 }
 
 /**
+ * The argument as a `SearchResult[]`, or an empty array for a nullish/non-array
+ * input. Exported + unit-tested directly (like `asArray` in the SARIF parsers)
+ * so the `: []` fallback is an OBSERVABLE return value — asserting it kills the
+ * seeded-literal ArrayDeclaration mutant that an inline `?? []` would leave
+ * equivalent.
+ */
+export function asList(v: SearchResult[] | null | undefined): SearchResult[] {
+  return Array.isArray(v) ? v : [];
+}
+
+/**
  * Choose the best upstream match for a service from `gh search` payloads.
  * Ranking (higher wins): a title hit outranks a non-title hit; among equal
  * title-hits an OPEN item outranks a CLOSED one; ties break to the LOWEST issue
@@ -136,27 +147,28 @@ export function selectBestMatch(
   service: string,
 ): SearchResult | null {
   const needle = String(service).toLowerCase();
-  // Stryker disable next-line ArrayDeclaration: `?? []`→a bogus array only fires
-  // when a list is nullish; the bogus string element has no numeric `number`,
-  // so the very next `.filter` drops it → same as `[]` (equivalent, #165).
-  const candidates = [...(issues ?? []), ...(prs ?? [])].filter(
-    (r): r is SearchResult => Boolean(r) && typeof r.number === 'number',
-  );
-  // Stryker disable next-line ConditionalExpression: forcing this `false` skips
-  // the early return, but an empty `candidates` then yields an empty `scored`,
-  // which the `scored.length === 0` guard below returns null for anyway
-  // (equivalent, #165).
-  if (candidates.length === 0) return null;
+  // Collect candidates from both lists. `asList` normalizes each argument (a
+  // nullish/non-array list -> empty) so there is no `?? []` fallback literal in
+  // this function to spawn an equivalent ArrayDeclaration mutant, then `.filter`
+  // drops any non-record / number-less element. `concat` (not a `[...]` seed +
+  // push) avoids an empty-literal accumulator a mutant could seed with junk.
+  const candidates = asList(issues)
+    .concat(asList(prs))
+    .filter(
+      (r): r is SearchResult => Boolean(r) && typeof r.number === 'number',
+    );
+  // No standalone `candidates.length === 0` early return — it was redundant with
+  // the `scored.length === 0` guard below (an empty candidates yields an empty
+  // scored → null). Removing it kills that equivalent mutant by construction.
 
   const scored = candidates
     .map((r) => {
-      // Stryker disable next-line StringLiteral: `r.title ?? ''`→a bogus string
-      // only matters for a title-less candidate; that bogus string doesn't
-      // contain the service needle, so the candidate is filtered out either
-      // way (equivalent, #165).
-      const title = String(r.title ?? '').toLowerCase();
-      // A candidate must actually mention the service to count as a match.
-      const titleHit = title.includes(needle);
+      // Only a candidate WITH a title can match; a title-less one can't mention
+      // the service, so guard on presence instead of an `?? ''` fallback (which
+      // spawned an equivalent StringLiteral mutant — the sentinel never matched
+      // the needle either way).
+      const titleHit =
+        typeof r.title === 'string' && r.title.toLowerCase().includes(needle);
       return { r, titleHit, open: String(r.state).toLowerCase() === 'open' };
     })
     // gh already searched for the term, but be defensive: require a title hit.

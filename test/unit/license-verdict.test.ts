@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
-import { isAcceptable } from '../../.github/scripts/license-verdict';
+import { isAcceptable, tokenize } from '../../.github/scripts/license-verdict';
 
 // Unit tests for .github/scripts/license-verdict.ts (#127 Leg B2, gated under
 // #165): SPDX allow-list satisfiability, mirroring the dependency-review PR
@@ -422,6 +422,53 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
     expect(isAcceptable('AND MIT', 'and,mit')).toBe(false); // AND in set
     expect(isAcceptable('OR MIT', 'or,mit')).toBe(false); // OR in set
     expect(isAcceptable('MIT WITH', 'mit,with')).toBe(false); // WITH in set (dangling)
+  });
+});
+
+// Direct tokenizer tests (tokenize is exported for exactly this): assert the
+// EXACT token arrays so the split boundary, the ID_RE `^…$` anchors, and the
+// junk-`[]` return are all OBSERVABLE — the mutation gate then kills the mutants
+// that a verdict-only test leaves equivalent.
+describe('license-verdict — tokenize (direct)', () => {
+  it('splits ids, operators and parentheses into exact tokens', () => {
+    expect(tokenize('MIT')).toEqual(['MIT']);
+    expect(tokenize('MIT OR Apache-2.0')).toEqual(['MIT', 'OR', 'Apache-2.0']);
+    // Parens tokenize on their own even when glued to ids (padded then split).
+    expect(tokenize('(MIT OR ISC) AND BSD-3-Clause')).toEqual([
+      '(',
+      'MIT',
+      'OR',
+      'ISC',
+      ')',
+      'AND',
+      'BSD-3-Clause',
+    ]);
+    // Suffixed ids keep their +/-/. characters as one token.
+    expect(tokenize('GPL-3.0-or-later+')).toEqual(['GPL-3.0-or-later+']);
+  });
+
+  it('collapses arbitrary whitespace runs and yields no empty tokens', () => {
+    // Multiple spaces/tabs/newlines between tokens must produce clean tokens.
+    expect(tokenize('MIT   OR\t\tISC')).toEqual(['MIT', 'OR', 'ISC']);
+    expect(tokenize('  MIT  ')).toEqual(['MIT']); // leading/trailing padding
+  });
+
+  it('returns [] tokens for an empty / all-whitespace expression', () => {
+    // `.match` returns null when nothing matches — that branch must yield the
+    // empty token list (the caller then rejects it as unparseable).
+    expect(tokenize('')).toEqual([]);
+    expect(tokenize('   \t\n ')).toEqual([]);
+  });
+
+  it('returns [] on any junk character (kills the []/else/anchor mutants)', () => {
+    // A piece containing a non-SPDX char must make the WHOLE expression
+    // unparseable — an unanchored ID_RE would accept the `MIT` of `MIT;GPL` and
+    // wrongly tokenize; the `^…$` anchors reject it, returning [].
+    expect(tokenize('MIT;GPL')).toEqual([]);
+    expect(tokenize('MIT & ISC')).toEqual([]); // '&' is junk
+    expect(tokenize('a=b')).toEqual([]);
+    // A valid expression must NOT return [] (proves [] is the junk path only).
+    expect(tokenize('MIT').length).toBeGreaterThan(0);
   });
 });
 

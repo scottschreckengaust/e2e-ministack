@@ -39,30 +39,36 @@ const OPERATORS = new Set(['AND', 'OR', 'WITH']);
  *   `[]` rather than `null` keeps the caller's guard a plain length check with
  *   no nullable deref.
  */
-function tokenize(expression: string): string[] {
+// The tokenizer scan: ONE global regex whose alternatives ARE the token
+// classification, so there is no second re-validation pass (which is what used
+// to generate equivalent anchor mutants — the scan already isolates each
+// token). Alternatives, in order:
+//   1. an SPDX id run (letters/digits/./-/+),
+//   2. a single `(` or `)`,
+//   3. a single "junk" char — ANY other non-whitespace (whitespace is skipped
+//      by not being matched). A junk match makes the whole expression
+//      unparseable. Every alternative here is observable: dropping the id run
+//      breaks id tokenizing, dropping the parens breaks grouping, dropping the
+//      junk catch-all lets an invalid char vanish instead of rejecting.
+const TOKEN_RE = /([A-Za-z0-9.+-]+)|([()])|(\S)/g;
+
+/**
+ * Split an SPDX expression into id / parenthesis tokens (exported so the
+ * junk-rejection is tested DIRECTLY, making the `[]` return observable rather
+ * than an equivalent mutant hiding behind the downstream verdict).
+ *
+ * Single pass, single classification: each match is an id (capture group 1) or
+ * a paren (group 2) — a real token — or a junk char (group 3) that makes the
+ * whole expression unparseable → `[]`. Whitespace is skipped by not matching.
+ */
+export function tokenize(expression: string): string[] {
   const tokens: string[] = [];
-  // SPDX ids: letters, digits, dot, dash, plus. Everything else must be a
-  // parenthesis or whitespace, otherwise the expression is unparseable.
-  // Stryker disable next-line Regex: this scanning regex's alternatives are
-  // re-validated per token by the `/^[A-Za-z0-9.+-]+$/` classifier below, so
-  // its equivalent forms (paren-class flip, \s vs \s+, \S+) produce identical
-  // token streams — verified equivalent against 3k+ adversarial inputs (#165).
-  const re = /[A-Za-z0-9.+-]+|[()]|\s+|./g;
-  for (const match of expression.matchAll(re)) {
-    const tok = match[0];
-    // Whitespace runs separate tokens but are not tokens themselves.
-    if (tok.trim() === '') continue;
-    // Stryker disable next-line Regex: the ^…$ anchors are redundant here — a
-    // token is a single whole `matchAll` alternative, so anchored and
-    // un-anchored forms accept exactly the same set (equivalent, #165).
-    if (tok === '(' || tok === ')' || /^[A-Za-z0-9.+-]+$/.test(tok)) {
-      tokens.push(tok);
-    } else {
-      // Stryker disable next-line ArrayDeclaration: `[]`→a non-empty bogus array
-      // still fails to parse (its bogus element is not an allow-listed id →
-      // false), so the verdict is unchanged (equivalent, #165).
+  for (const m of expression.matchAll(TOKEN_RE)) {
+    const junk = m[3]; // group 3 matched → a non-id, non-paren character
+    if (junk !== undefined) {
       return []; // junk character → unparseable (conservative → UNACCEPTABLE)
     }
+    tokens.push(m[0]); // an id run or a single paren
   }
   return tokens;
 }
@@ -81,31 +87,27 @@ function parse(tokens: string[], allow: Set<string>): boolean {
   const peek = (): string | undefined => tokens[pos];
   const next = (): string | undefined => tokens[pos++];
 
-  // NOTE ON THROW MESSAGES: every `throw` in this parser is caught by the
-  // `try/catch` in `isAcceptable`, which maps ANY parse error to `false` (the
-  // conservative fallback). The message text is therefore developer-facing
-  // only and never affects the boolean verdict — so a mutation of a throw's
-  // message string is an EQUIVALENT mutant. `Stryker disable next-line
-  // StringLiteral` documents that (the THROW itself — a ConditionalExpression /
-  // logical mutant that removes it — is still killed by the `*.test.ts` cases,
-  // which is what actually matters).
+  // THROW MESSAGES ARE UNOBSERVABLE: every `throw` here is caught by
+  // `isAcceptable`'s `try/catch`, which maps ANY parse error to `false` (the
+  // conservative fallback) and DISCARDS the error. So the throws carry no
+  // message — an argument-less `new Error()` removes the dead message literal
+  // (no StringLiteral mutant to disable) while keeping the load-bearing throw
+  // (its removal is still killed by the `*.test.ts` cases).
   function primary(): boolean {
-    const tok = next();
-    // Stryker disable next-line StringLiteral,ConditionalExpression: caught →
-    // false; message unobservable. The `tok === undefined` guard is EQUIVALENT
-    // to mutate — dropping it lets an undefined tok reach
-    // `allow.has(tok.toLowerCase())`, which throws a TypeError that the same
-    // catch maps to false: identical verdict (#165).
-    if (tok === undefined) throw new Error('unexpected end of expression');
+    // `next()` may return undefined at end-of-input; we do NOT guard it. A
+    // missing token is not '(' and not ')'/operator, so it falls through to
+    // `tok.toLowerCase()` where `undefined.toLowerCase()` throws — caught by
+    // `isAcceptable` → false, the conservative verdict. No `=== undefined`
+    // guard (that only generated an equivalent mutant); `tok!` documents that
+    // the throw-on-undefined is intentional. Exercised by end-of-input tests.
+    const tok = next()!;
     if (tok === '(') {
       const ok = orExpr();
-      // Stryker disable next-line StringLiteral: caught → false; message unobservable
-      if (next() !== ')') throw new Error('unbalanced parenthesis');
+      if (next() !== ')') throw new Error();
       return ok;
     }
     if (tok === ')' || OPERATORS.has(tok.toUpperCase())) {
-      // Stryker disable next-line StringLiteral: caught → false; message unobservable
-      throw new Error(`unexpected token: ${tok}`);
+      throw new Error();
     }
     return allow.has(tok.toLowerCase());
   }
@@ -115,19 +117,16 @@ function parse(tokens: string[], allow: Set<string>): boolean {
     if (peek()?.toUpperCase() === 'WITH') {
       next();
       const exception = next();
+      // No `exception === undefined` arm: a missing exception is not '(' / ')'
+      // and reaches `exception.toUpperCase()` in the operator arm below, which
+      // throws on undefined — caught → false, identical to an explicit reject.
+      // The '(' / ')' / operator arms ARE observable and killed by tests.
       if (
-        // Stryker disable next-line ConditionalExpression: mutating the
-        // `exception === undefined` arm is EQUIVALENT — a missing exception then
-        // reaches `exception.toUpperCase()` in the next arm, throwing a
-        // TypeError the catch maps to false: identical verdict. The OTHER arms
-        // ('(' / ')' / operator exceptions) ARE observable and killed by tests.
-        exception === undefined ||
         exception === '(' ||
         exception === ')' ||
-        OPERATORS.has(exception.toUpperCase())
+        OPERATORS.has((exception as string).toUpperCase())
       ) {
-        // Stryker disable next-line StringLiteral: caught → false; message unobservable
-        throw new Error('WITH must be followed by an exception id');
+        throw new Error();
       }
       // A WITH unit never matches a plain-id allow-list entry: conservative.
       ok = false;
@@ -157,8 +156,7 @@ function parse(tokens: string[], allow: Set<string>): boolean {
 
   const ok = orExpr();
   if (pos !== tokens.length) {
-    // Stryker disable next-line StringLiteral: caught → false; message unobservable
-    throw new Error(`trailing tokens after expression: ${tokens[pos]}`);
+    throw new Error(); // trailing tokens — caught → false (message unobservable)
   }
   return ok;
 }
@@ -182,28 +180,22 @@ export function isAcceptable(
   );
   if (allow.size === 0) throw new Error('empty allow-list');
 
-  // Stryker disable next-line StringLiteral: the `?? ''` default only applies to
-  // a nullish expression; a bogus replacement string ("Stryker…!") contains a
-  // junk char → tokenizes to `[]` → false, same as the empty default
-  // (equivalent, #165). The `.trim()` here IS load-bearing (padded markers) and
-  // is killed by a test, so only StringLiteral is disabled.
-  const expr = (expression ?? '').trim();
+  // A nullish expression carries no declared license → UNACCEPTABLE. An explicit
+  // early return (not an `?? ''` default) makes the nullish branch OBSERVABLE —
+  // no default-string literal to leave an equivalent mutant. `.trim()` handles
+  // padded markers and is exercised by tests.
+  if (expression === null || expression === undefined) return false;
+  const expr = expression.trim();
   const upper = expr.toUpperCase();
   // NONE / NOASSERTION are the SPDX "no declared license" markers, and the
   // empty expression carries no signal — all three are UNACCEPTABLE. (An empty
-  // `expr` also tokenizes to `[]` and is rejected below, but the explicit
-  // marker check documents intent and short-circuits.)
+  // `expr` also tokenizes to `[]`, which `parse` rejects by throwing on the
+  // first undefined token → caught → false, so no separate length check is
+  // needed here — that check was redundant with the parser's own guard.)
   if (upper === 'NOASSERTION' || upper === 'NONE') return false;
 
-  // An empty token list means the expression was empty or contained a junk
-  // character — unparseable, so conservatively UNACCEPTABLE.
-  const tokens = tokenize(expr);
-  // Stryker disable next-line ConditionalExpression: forcing this `false` lets
-  // an empty token list reach `parse([])`, whose first `next()` is undefined →
-  // it throws → caught → false: identical verdict (equivalent, #165).
-  if (tokens.length === 0) return false;
   try {
-    return parse(tokens, allow);
+    return parse(tokenize(expr), allow);
   } catch {
     return false; // conservative: unparseable / malformed → UNACCEPTABLE
   }
