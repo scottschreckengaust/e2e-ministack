@@ -90,6 +90,19 @@ export function extractCve(value: unknown): string | null {
 const SUPPRESSING_STATUSES = new Set(['not_affected', 'fixed']);
 
 /**
+ * The vulnerability NAME from a statement's `vulnerability` field, which OpenVEX
+ * allows as either a bare string or an object `{ name }`. A string is returned
+ * as-is; anything else is read via `(v as {name?})?.name`, which yields the name
+ * for an object and `undefined` for a primitive/null alike — so there is no
+ * `typeof === 'object'` branch to leave an equivalent mutant. Returns undefined
+ * when no usable name is present; `extractCve` then rejects it.
+ */
+function vulnerabilityName(v: VexStatement['vulnerability']): unknown {
+  if (typeof v === 'string') return v;
+  return (v as { name?: unknown } | undefined)?.name;
+}
+
+/**
  * Build a map of CVE -> suppression justification text from the given VEX docs.
  * Only `not_affected`/`fixed` statements contribute. The justification string
  * combines the VEX `justification` enum and `impact_statement` prose so the
@@ -102,31 +115,19 @@ export function collectSuppressions(
   const map = new Map<string, string>();
   if (!Array.isArray(vexDocs)) return map;
   for (const doc of vexDocs) {
-    // Stryker disable ArrayDeclaration: the `: []` fallback is EQUIVALENT to any
-    // other array here — a non-array `doc.statements` yields an iterable whose
-    // elements are all skipped by the `!st || typeof st !== 'object'` guard
-    // below, so the output is identical regardless of the array's contents.
-    const statements =
-      doc && Array.isArray(doc.statements) ? doc.statements : [];
-    // Stryker restore ArrayDeclaration
-    for (const st of statements) {
-      // Stryker disable next-line ConditionalExpression: the `typeof st !== 'object'`
-      // half is EQUIVALENT — a truthy NON-object statement (string/number) has no
-      // `.status`/`.vulnerability`, so dropping this half still yields no
-      // suppression. The `!st` half IS load-bearing (killed by the null-statement
-      // test); only the object-typecheck is unobservable.
-      if (!st || typeof st !== 'object') continue;
+    // GUARD the statements loop with Array.isArray rather than a `: []` fallback
+    // literal — no array literal to spawn an equivalent ArrayDeclaration mutant,
+    // and the guard's false branch (a non-array `doc.statements` contributes
+    // nothing) stays observable.
+    if (!doc || !Array.isArray(doc.statements)) continue;
+    for (const st of doc.statements) {
+      // Only `!st` is load-bearing here: a primitive (string/number) statement
+      // is truthy but reading `.status`/`.vulnerability` off it yields
+      // `undefined`, so it's dropped by the checks below anyway — no separate
+      // `typeof st !== 'object'` guard (that was the equivalent mutant).
+      if (!st) continue;
       if (!SUPPRESSING_STATUSES.has(String(st.status))) continue;
-      const name =
-        typeof st.vulnerability === 'string'
-          ? st.vulnerability
-          : // Stryker disable next-line ConditionalExpression: forcing this
-            // typeof-object check to `true` is EQUIVALENT — it is reached only
-            // when `st.vulnerability` is truthy and not a string; a truthy
-            // non-object (number/boolean) has an `undefined` `.name` either way.
-            st.vulnerability && typeof st.vulnerability === 'object'
-            ? st.vulnerability.name
-            : undefined;
+      const name = vulnerabilityName(st.vulnerability);
       const cve = extractCve(name);
       if (!cve) continue;
       const justification =
@@ -141,6 +142,23 @@ export function collectSuppressions(
     }
   }
   return map;
+}
+
+/**
+ * A mutable SARIF-shaped base for `injectSuppressions` to write into: a
+ * structured CLONE of a real SARIF object (so the caller's input is never
+ * mutated), or a fresh `{ runs: [] }` for degenerate input (null/undefined, a
+ * primitive, or an array — none of which is a SARIF log). Exported + unit-tested
+ * directly so BOTH outcomes are observable: the clone is a distinct object that
+ * still round-trips `runs`, and the fallback carries an empty `runs` array — so
+ * neither the object-guard nor the `{ runs: [] }` literal leaves an equivalent
+ * mutant (the previous inline form did, hence the disable this removes).
+ */
+export function sarifBase(sarif: unknown): SarifLogLike {
+  if (sarif && typeof sarif === 'object' && !Array.isArray(sarif)) {
+    return structuredClone(sarif) as SarifLogLike;
+  }
+  return { runs: [] };
 }
 
 /**
@@ -161,21 +179,11 @@ export function injectSuppressions(
   vexDocs: readonly VexDoc[],
 ): { sarif: SarifLogLike; covered: number; uncoveredCves: string[] } {
   const suppMap = collectSuppressions(vexDocs);
-  // Structured-clone so callers' input is never mutated (totality/safety).
-  //
-  // Stryker disable ConditionalExpression,ObjectLiteral: two EQUIVALENT mutants
-  // live in this expression. (1) forcing `typeof sarif === 'object'` to `true`:
-  // for a truthy non-object, non-array input (string/number) both branches
-  // yield a document normalized to `runs: []` by the guard just below, so the
-  // output is identical — the `sarif` (null/undefined) and `!Array.isArray`
-  // halves ARE load-bearing (killed by the totality test's null / array cases).
-  // (2) `{}` vs `{ runs: [] }`: `out.runs` is unconditionally normalized to an
-  // array on the next lines, so the initial `runs` value is overwritten anyway.
-  const out: SarifLogLike =
-    sarif && typeof sarif === 'object' && !Array.isArray(sarif)
-      ? structuredClone(sarif)
-      : { runs: [] };
-  // Stryker restore ConditionalExpression,ObjectLiteral
+  // A mutable SARIF-shaped base to write into — either a structured clone of a
+  // real SARIF object (so the caller's input is never mutated) or a fresh
+  // document for degenerate input. Extracted + tested directly (`sarifBase`)
+  // so both the guard and the fallback are OBSERVABLE — no equivalent mutant.
+  const out = sarifBase(sarif);
   // Normalize `runs` to an array so the OUTPUT is always a well-formed SARIF
   // document that uploads (a producer must not pass through a missing/garbage
   // `runs`). A non-array `runs` on input is replaced with an empty array.
@@ -192,14 +200,17 @@ export function injectSuppressions(
   let covered = 0;
   const uncovered = new Set<string>();
   for (const run of runs) {
-    // Stryker disable next-line ConditionalExpression: the `typeof run !==
-    // 'object'` half is EQUIVALENT — a truthy non-object run element
-    // (string/number) has a non-array `.results`, so the very next
-    // `!Array.isArray(run.results)` guard `continue`s on it regardless. The
-    // `!run` half IS load-bearing (killed by the null-run totality case).
-    if (!run || typeof run !== 'object') continue;
+    // Only `!run` is load-bearing (a null run would throw on `.results`). A
+    // primitive run is truthy but its `.results` is undefined, so the next
+    // `!Array.isArray` guard drops it — no separate `typeof run !== 'object'`
+    // check (that was the equivalent mutant).
+    if (!run) continue;
     if (!Array.isArray(run.results)) continue;
     for (const res of run.results as SarifResultLike[]) {
+      // BOTH halves are load-bearing here (unlike the `run` guard above): a
+      // primitive `res` reaches the `res.suppressions = []` write below, which
+      // THROWS on a number/string — so the `typeof res !== 'object'` half is
+      // observable (killed by the null/non-object-result test), not equivalent.
       if (!res || typeof res !== 'object') continue;
       const cve = extractCve(res.ruleId);
       const justification = cve ? suppMap.get(cve) : undefined;
