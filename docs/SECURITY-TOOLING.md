@@ -55,7 +55,7 @@ procedure, in order of preference:
    sink, while `path.basename()` alone and a `resolve()`+`startsWith()`
    containment check do **not** clear it. Reproduce locally with the **pinned**
    scanner version (read it from the repo's scanner config — e.g.
-   `pip install --require-hashes -r .github/scanner-requirements/semgrep.txt`,
+   `pip install --require-hashes -r .github/scanner-requirements/semgrep/requirements.txt`,
    or `uvx semgrep==<pin>`) so your local verdict matches CI exactly.
 
 2. **Prefer a vetted, time-tested fixer over bespoke code.** Do **not**
@@ -561,19 +561,24 @@ with a matching rationale, and re-opens the moment an upstream fix ships.
 
 - **`ecdsa` (pip) — GHSA-wj6h-64fc-37mp / CVE-2024-23342 ("Minerva" timing
   side-channel), high.** A transitive dependency of checkov, pinned in
-  `.github/scanner-requirements/iac.txt` (`ecdsa==0.19.2`). **No fix to pin
-  to:** upstream `python-ecdsa` treats side-channel resistance as out of scope,
-  so the advisory's `first_patched_version` is **null** — there is no fixed
-  release. **Not reachable here:** Minerva is only exploitable when the library
-  performs ECDSA **signing** (`sign_digest`, private-key operations) with
+  `.github/scanner-requirements/iac/requirements.txt` (`ecdsa==0.19.2`). **No fix
+  to pin to:** upstream `python-ecdsa` treats side-channel resistance as out of
+  scope, so the advisory's `first_patched_version` is **null** — there is no
+  fixed release. **Not reachable here:** Minerva is only exploitable when the
+  library performs ECDSA **signing** (`sign_digest`, private-key operations) with
   attacker-observable timing; this repo only runs checkov to scan local
   synthesized CloudFormation templates **offline** — no signing, no private
   keys, no attacker timing channel. Tracked as Dependabot alert #13, dismissed
-  `tolerable_risk`. **If a fix ever ships**, it flows through the same
-  coupled-closure mechanism as the `aiohttp==3.14.1` override (§ Dependency
-  notes / `overrides.txt`, AGENTS.md): add the floor to
-  `.github/scanner-requirements/overrides.txt`, recompile `iac.txt` with
-  `--require-hashes`, and install `--no-deps`.
+  `tolerable_risk`; also carried as an honest `not_affected` OpenVEX record
+  (`.vex/ecdsa-CVE-2024-23342.openvex.json`) that now suppresses the finding on
+  the VEX-aware `grype`/`trivy-fs` filesystem scans (#226 relocated the pip files
+  to `requirements.txt` so those SCA scanners catalog them by filename, and wired
+  the `.vex/` feed into the FS jobs — the record was formerly inert because no
+  VEX-consuming FS scan cataloged ecdsa). **If a fix ever ships**, it flows
+  through the same coupled-closure mechanism as the `aiohttp==3.14.1` override (§
+  Dependency notes / `overrides/requirements.txt`, AGENTS.md): add the floor to
+  `.github/scanner-requirements/overrides/requirements.txt`, recompile
+  `iac/requirements.txt` with `--require-hashes`, and install `--no-deps`.
 
 ## Pinning
 

@@ -60,8 +60,8 @@ jobs:
         run: |
           # Content-pinned install: every dist is hash-verified against the
           # committed lockfile (--require-hashes), so a re-published PyPI
-          # artifact is rejected. Pin lives in scanner-requirements/semgrep.txt.
-          pip install --require-hashes -r .github/scanner-requirements/semgrep.txt
+          # artifact is rejected. Pin lives in scanner-requirements/semgrep/requirements.txt.
+          pip install --require-hashes -r .github/scanner-requirements/semgrep/requirements.txt
           # --error sets a non-zero exit on findings; capture it so the report
           # still uploads, then enforce in a later step.
           set +e
@@ -154,6 +154,24 @@ jobs:
         run: |
           # OSV-Scanner v2 form: `scan source --lockfile=…`. The bare
           # `scan --lockfile=` is deprecated and slated for removal.
+          #
+          # DEFERRED (#226): the pinned pip requirements files were relocated to
+          # `.github/scanner-requirements/<tool>/requirements.txt` so SCA scanners
+          # (grype/trivy) recognize them by filename. Pointing OSV at them too
+          # (an extra `--lockfile=.github/scanner-requirements/<tool>/requirements.txt`
+          # per file) is the natural completion — BUT OSV is a HARD-FAIL gate
+          # (the enforce step below tests exit=0) and OSV.dev already carries the
+          # three `mcp` CVEs whose sanctioned VEX status is `affected` (NOT
+          # `not_affected`; the #188 policy — an honest "we ship it, code fix
+          # pending upstream", tracked at semgrep/semgrep-rules#11506). By design
+          # `affected` does NOT suppress in ANY scanner (only `not_affected`/`fixed`
+          # do — proven in #160), and OSV v2.4.0 has no OpenVEX/`--vex` channel at
+          # all (only `[[IgnoredVulns]]` in osv-scanner.toml, which we will NOT use
+          # — a per-ID ignore is the forbidden blanket-suppress, not honest VEX).
+          # So wiring OSV to the pip files here would red main on mcp with no
+          # sanctioned way to green it. It stays deferred pending a maintainer
+          # policy call on report-only-vs-hard-fail for the pip SCA surface; the
+          # grype-fs (VEX-aware) + trivy-fs jobs already catalog these files.
           set +e
           ./osv-scanner scan source --lockfile=package-lock.json --format sarif > osv.sarif
           echo "exit=$?" > osv.outcome
@@ -363,10 +381,25 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+      # VEX-aware FS gate (#226). This job hard-fails at high+; feed it the whole
+      # `.vex/` set via GRYPE_VEX_DOCUMENTS (comma-separated — the same channel the
+      # ministack-image job uses) so an honest `not_affected` record suppresses a
+      # matching filesystem finding. go-vex only suppresses when the record's
+      # product purl equals the scanned component's, so the image `CVE-*` records
+      # (deb/generic image purls) are INERT here while the pypi-surface records
+      # (e.g. ecdsa-CVE-2024-23342, a pypi purl in a relocated requirements.txt)
+      # match and drop. `affected` records deliberately do NOT suppress (only
+      # `not_affected`/`fixed` do — proven in #160), so a future `affected` record
+      # (e.g. the mcp CVEs) still surfaces here as intended.
+      - name: Gather VEX documents
+        id: vex
+        run: echo "docs=$(printf '%s,' .vex/*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
       # The anchore action emits SARIF and (with fail-build) sets the outcome;
       # capture its output path and always upload.
       - id: grype
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        env:
+          GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
           # Pin the grype ENGINE (#183): the action SHA alone leaves grype
           # floating to "latest at runtime", so local↔CI (and run↔run) diverge.
@@ -1364,11 +1397,11 @@ jobs:
       - name: Install scanners
         # Content-pinned install: every dist is hash-verified against the
         # committed lockfile (--require-hashes), so a re-published PyPI artifact
-        # is rejected. Pins live in scanner-requirements/iac.txt.
-        # --no-deps: the lockfile is a complete closure, and overrides.txt forces
-        # aiohttp past checkov's declared <3.14.0 cap (security fix), which pip's
+        # is rejected. Pins live in scanner-requirements/iac/requirements.txt.
+        # --no-deps: the lockfile is a complete closure, and overrides/requirements.txt
+        # forces aiohttp past checkov's declared <3.14.0 cap (security fix), which pip's
         # resolver would otherwise reject as a conflict.
-        run: pip install --require-hashes --no-deps -r .github/scanner-requirements/iac.txt
+        run: pip install --require-hashes --no-deps -r .github/scanner-requirements/iac/requirements.txt
       - name: cfn-lint (text report; errors-only enforce after upload)
         # cfn-lint is a linter (not a vuln scanner) and its SARIF formatter
         # needs unbundled deps, so keep it as text. Only the two expected W
