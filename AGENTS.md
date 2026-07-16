@@ -77,7 +77,7 @@ These were established by running the stack, not from docs alone — don't "simp
 - `aws-cdk-lib` is pinned to **2.260.0**. Note `lambda.Runtime.NODEJS_24_X` requires >= 2.230.0 (2.220.0 and earlier lack it), so don't downgrade below that.
 - `aws-cdk` (CLI) is **2.1128.0**. Post-2.179 the CLI versions diverged from the library (CLI is numbered `2.10xx.x`/`2.11xx.x`), so they are pinned independently and are not expected to match.
 - **`@aws-cdk/integ-runner` / `@aws-cdk/integ-tests-alpha`** — pinned in `package.json` (`2.202.1` / `2.260.0-alpha.0` at time of writing). The runner version line is independent of `aws-cdk-lib`; bump both together when upgrading CDK and re-run `npm run test:integ-snapshot:update` if the cloud assembly shifts.
-- **Everything pinnable is pinned** — Actions (SHA), Node (exact patch), the MiniStack image (digest), CodeQL bundle, and the pip/uvx scanner versions. See [docs/PINNING.md](docs/PINNING.md) for the full inventory and what's intentionally left floating (and why). Use `npm ci` (never `npm install`) in CI so the lockfile governs.
+- **Everything pinnable is pinned — to the _latest_ release.** Actions (SHA), Node (exact patch), the MiniStack image (digest), CodeQL bundle, pip/uvx scanners. A pin freezes a version, it doesn't keep it current — bump every pin to latest; a stale one still warns/deprecates. See [docs/PINNING.md](docs/PINNING.md) for the inventory and what's intentionally floating. Use `npm ci` (never `npm install`) in CI.
 
 ## Security checks
 
