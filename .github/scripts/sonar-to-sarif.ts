@@ -114,35 +114,36 @@ const IMPACT_LEVEL: Record<string, SarifLevel> = {
   MEDIUM: 'warning',
   LOW: 'note',
 };
+// SARIF level priority, worst first — the fixed spec order the worst-wins pick
+// in `levelFor` searches. Module-level (not a throwaway local), so a mutant that
+// reorders/empties it changes a real, observable pick and dies.
+const SARIF_PRIORITY: readonly SarifLevel[] = ['error', 'warning', 'note'];
 
 function levelFor(issue: SonarIssue): SarifLevel {
   if (issue.severity && LEGACY_LEVEL[issue.severity]) {
     return LEGACY_LEVEL[issue.severity];
   }
-  // Stryker disable next-line ArrayDeclaration: defensive fallback for a
-  // non-array `impacts`; a bogus array element has no `.severity` so it is
-  // skipped below → same result as `[]` (equivalent, #165).
-  const impacts = Array.isArray(issue.impacts) ? issue.impacts : [];
-  // Stryker disable next-line ArrayDeclaration,StringLiteral: mutating the
-  // `ranked` array (empty it, or blank `'error'`) leaves worst-wins intact —
-  // the first HIGH still becomes `best` and no lower impact displaces it via
-  // the indexOf comparison (verified across all impact combos, equivalent #165).
-  const ranked: SarifLevel[] = ['error', 'warning', 'note'];
-  let best: SarifLevel | undefined;
-  for (const im of impacts) {
-    const lvl = im.severity ? IMPACT_LEVEL[im.severity] : undefined;
-    // Stryker disable EqualityOperator: `<`→`<=` only re-assigns `best` to an
-    // EQUAL-ranked level (the same value), so there is no observable change
-    // (equivalent, verified across all impact combos, #165).
-    if (
-      lvl &&
-      (best === undefined || ranked.indexOf(lvl) < ranked.indexOf(best))
-    ) {
-      best = lvl;
+  // Worst-wins over the newer `impacts[]`, expressed as a priority FIND rather
+  // than a mutable running-best + index comparison. Collect the levels present,
+  // then return the first (highest-priority) one that appears — `error` beats
+  // `warning` beats `note`. This carries no `<`/`<=` comparison and no throwaway
+  // `ranked` array to mutate: `SARIF_PRIORITY` is the module-level severity
+  // order the SARIF spec fixes, so every mutant here is observable. `impacts` is
+  // No impact matches → `warning` (Sonar's neutral default). The `Array.isArray`
+  // GUARDS the loop rather than substituting a `: []` fallback literal — so
+  // there is no array literal to spawn an equivalent `ArrayDeclaration` mutant,
+  // yet the guard's false branch stays observable (a non-iterable `impacts`
+  // must yield `warning`, not throw). Each element's level is added DIRECTLY —
+  // an unknown/missing severity maps to `undefined`, which `find` below never
+  // queries, so no `if (lvl)` guard is needed (adding it would be an equivalent
+  // mutant; `present` is typed to admit the `undefined` sentinel deliberately).
+  const present = new Set<SarifLevel | undefined>();
+  if (Array.isArray(issue.impacts)) {
+    for (const im of issue.impacts) {
+      present.add(im && im.severity ? IMPACT_LEVEL[im.severity] : undefined);
     }
-    // Stryker restore EqualityOperator
   }
-  return best ?? 'warning';
+  return SARIF_PRIORITY.find((l) => present.has(l)) ?? 'warning';
 }
 
 function uriFor(
@@ -153,14 +154,13 @@ function uriFor(
   if (pathByKey.has(component) && pathByKey.get(component)) {
     return pathByKey.get(component) as string;
   }
-  // Fallback: component is "projectKey:relative/path" — strip up to the first ':'.
-  const idx = component.indexOf(':');
-  // Stryker disable next-line ConditionalExpression: forcing this `true` calls
-  // `slice(idx + 1)` when idx is -1 (no colon) → `slice(0)` === the whole
-  // string === the `: component` else-branch, so it is EQUIVALENT. (The
-  // `idx >= 0`→`idx > 0` mutant, which IS observable via a leading ':', is
-  // killed by a test.) (#165)
-  return idx >= 0 ? component.slice(idx + 1) : component;
+  // Fallback: component is "projectKey:relative/path" — strip up to the first
+  // ':'. `slice(idx + 1)` handles the no-colon case with no branch: when
+  // `indexOf` returns -1, `slice(0)` yields the whole string — identical to a
+  // `: component` else-branch. Removing the ternary removes the redundant
+  // (equivalent-mutant) conditional entirely; a leading-colon input still
+  // strips correctly (idx 0 → slice(1)), pinned by test.
+  return component.slice(component.indexOf(':') + 1);
 }
 
 function regionFor(issue: SonarIssue): SarifRegion | undefined {
@@ -181,20 +181,19 @@ function regionFor(issue: SonarIssue): SarifRegion | undefined {
 
 export function toSarif(response: SonarResponse | null | undefined): SarifLog {
   const issues = Array.isArray(response?.issues) ? response.issues : [];
-  // Stryker disable ArrayDeclaration: the `: []` else-branch is a defensive
-  // fallback for a non-array `components`; a bogus element resolves no lookup
-  // key so it is inert → same result as `[]` (equivalent, #165). Block form
-  // (not next-line) so prettier's multi-line reformat can't detach the comment.
-  const components = Array.isArray(response?.components)
-    ? response.components
-    : [];
-  // Stryker restore ArrayDeclaration
-  const pathByKey = new Map<string, string | undefined>(
-    // Stryker disable next-line StringLiteral: `c.key ?? ''`→a bogus string only
-    // changes the map key for a KEY-LESS component; no real issue.component ever
-    // equals that string, so the lookup never hits it (equivalent, #165).
-    components.map((c) => [c.key ?? '', c.path]),
-  );
+  // Build the component key -> path lookup. `Array.isArray` GUARDS the loop
+  // (no `: []` fallback literal to spawn an equivalent ArrayDeclaration mutant;
+  // the false branch — a non-array `components` yields an empty map — stays
+  // observable). Only components with a REAL key are inserted: a key-less
+  // component can never be matched by an `issue.component`, so skipping it is
+  // the same as the old `c.key ?? ''` sentinel but without the unobservable
+  // blank-key mutant. `uriFor` falls back to path-stripping when a key misses.
+  const pathByKey = new Map<string, string | undefined>();
+  if (Array.isArray(response?.components)) {
+    for (const c of response.components) {
+      if (c && c.key) pathByKey.set(c.key, c.path);
+    }
+  }
 
   const ruleIds = new Set<string>();
   const results: SarifResult[] = issues.map((issue) => {

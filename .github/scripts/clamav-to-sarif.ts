@@ -34,12 +34,12 @@ export interface SarifLog {
   ];
 }
 
-// Stryker disable next-line Regex: dropping the leading `^` anchor is
-// EQUIVALENT — the pattern is `.exec`'d against one whole `line` and the
-// greedy `(?<path>.+)` already binds from position 0, so anchored and
-// un-anchored forms match identically. (This is a module-level/static regex;
-// the `.+`→`.` and `$`-anchor mutants ARE observable and killed by tests.)
-const FOUND_RE = /^(?<path>.+): (?<sig>.+) FOUND$/;
+// No leading `^` anchor: the pattern is `.exec`'d against one whole `line` and
+// the greedy `(?<path>.+)` binds from position 0, so an anchored form would
+// match identically — omitting it removes a redundant (equivalent-mutant) token
+// rather than suppressing the mutator. The trailing `$` and the `.+` quantifiers
+// ARE load-bearing (killed by the FOUND-at-end / path-message tests).
+const FOUND_RE = /(?<path>.+): (?<sig>.+) FOUND$/;
 
 export function toSarif(logText: string): SarifLog {
   const results: SarifResult[] = [];
@@ -50,13 +50,12 @@ export function toSarif(logText: string): SarifLog {
       inSummary = true; // everything after the banner is stats, not findings
       continue;
     }
-    // The `line === ''` guard is a micro-optimisation (skip blank lines before
-    // the regex). Mutating it is EQUIVALENT: a blank line can never match
-    // FOUND_RE (which requires `<path>: <sig> FOUND`), so skipping-or-not is
-    // unobservable in the output. The `inSummary` guard, by contrast, IS
-    // load-bearing and is killed by the SCAN-SUMMARY tests.
-    // Stryker disable next-line ConditionalExpression,StringLiteral: blank-line skip is unobservable (see above) (#165)
-    if (inSummary || line === '') continue;
+    // Only the `inSummary` guard is load-bearing (everything after the SCAN
+    // SUMMARY banner is stats, not findings — killed by the summary tests). The
+    // former `line === ''` blank-line micro-opt was removed: a blank line can
+    // never match FOUND_RE, so it changed nothing but generated an equivalent
+    // mutant. Dropping it kills that mutant by construction.
+    if (inSummary) continue;
     const m = FOUND_RE.exec(line);
     if (!m || !m.groups) continue;
     const uri = m.groups.path.replace(/^\.\//, '');
