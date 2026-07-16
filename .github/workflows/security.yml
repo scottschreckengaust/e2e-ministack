@@ -150,46 +150,62 @@ jobs:
             https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
           echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
-      - name: Scan lockfile (SARIF; enforce after upload)
+      # npm surface — HARD-FAIL (unchanged). OSV-Scanner v2 form:
+      # `scan source --lockfile=…` (the bare `scan --lockfile=` is deprecated).
+      - name: Scan npm lockfile (SARIF; hard-fail, enforced after upload)
         run: |
-          # OSV-Scanner v2 form: `scan source --lockfile=…`. The bare
-          # `scan --lockfile=` is deprecated and slated for removal.
-          #
-          # DEFERRED (#226): the pinned pip requirements files were relocated to
-          # `.github/scanner-requirements/<tool>/requirements.txt` so SCA scanners
-          # (grype/trivy) recognize them by filename. Pointing OSV at them too
-          # (an extra `--lockfile=.github/scanner-requirements/<tool>/requirements.txt`
-          # per file) is the natural completion — BUT OSV is a HARD-FAIL gate
-          # (the enforce step below tests exit=0) and OSV.dev already carries the
-          # three `mcp` CVEs whose sanctioned VEX status is `affected` (NOT
-          # `not_affected`; the #188 policy — an honest "we ship it, code fix
-          # pending upstream", tracked at semgrep/semgrep-rules#11506). By design
-          # `affected` does NOT suppress in ANY scanner (only `not_affected`/`fixed`
-          # do — proven in #160), and OSV v2.4.0 has no OpenVEX/`--vex` channel at
-          # all (only `[[IgnoredVulns]]` in osv-scanner.toml, which we will NOT use
-          # — a per-ID ignore is the forbidden blanket-suppress, not honest VEX).
-          # So wiring OSV to the pip files here would red main on mcp with no
-          # sanctioned way to green it. It stays deferred pending a maintainer
-          # policy call on report-only-vs-hard-fail for the pip SCA surface; the
-          # grype-fs (VEX-aware) + trivy-fs jobs already catalog these files.
           set +e
           ./osv-scanner scan source --lockfile=package-lock.json --format sarif > osv.sarif
           echo "exit=$?" > osv.outcome
           ./osv-scanner scan source --lockfile=package-lock.json # human-readable
-      - name: Upload SARIF to Security tab
+      # pip surface — REPORT-ONLY (#226). The pinned pip requirement files were
+      # relocated to `.github/scanner-requirements/<tool>/requirements.txt` so SCA
+      # scanners recognize them by filename; point OSV at them so their findings
+      # post to Code Scanning. REPORT-ONLY (its exit code is NOT enforced), mirroring
+      # trivy-fs: OSV v2.4.0 has no OpenVEX channel (only osv-scanner.toml
+      # `[[IgnoredVulns]]`, which we do NOT use — a per-ID ignore is the forbidden
+      # blanket-suppress, not honest VEX), and the sanctioned VEX status for the
+      # `mcp` CVEs is `affected` (#188), which by design suppresses in NO scanner.
+      # Report-only keeps those findings VISIBLE (open Code-Scanning alerts) without
+      # a false hard-fail. A single .vex/ ledger → per-scanner dialect (incl. an OSV
+      # generator) is the durable fix tracked in #251.
+      - name: Scan pip requirements (SARIF; report-only — never fails)
+        if: always()
+        run: |
+          set +e
+          ./osv-scanner scan source \
+            --lockfile=.github/scanner-requirements/semgrep/requirements.txt \
+            --lockfile=.github/scanner-requirements/iac/requirements.txt \
+            --lockfile=.github/scanner-requirements/overrides/requirements.txt \
+            --format sarif > osv-pip.sarif
+          echo "pip osv exit=$? (report-only — not enforced)"
+          ./osv-scanner scan source \
+            --lockfile=.github/scanner-requirements/semgrep/requirements.txt \
+            --lockfile=.github/scanner-requirements/iac/requirements.txt \
+            --lockfile=.github/scanner-requirements/overrides/requirements.txt # human-readable
+          true
+      - name: Upload npm SARIF to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: osv.sarif
           category: osv-scanner
-      - name: Upload SARIF artifact
+      - name: Upload pip SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: osv-pip.sarif
+          category: osv-scanner-pip
+      - name: Upload SARIF artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: osv-sarif
-          path: osv.sarif
+          path: |
+            osv.sarif
+            osv-pip.sarif
           if-no-files-found: warn
-      - name: Enforce OSV result
+      - name: Enforce OSV result (npm surface only — pip is report-only)
         if: always()
         run: |
           source osv.outcome
