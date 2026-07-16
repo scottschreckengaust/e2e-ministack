@@ -1,4 +1,3 @@
-import * as cdk from 'aws-cdk-lib';
 import { buildApp } from '../../bin/app';
 import { MINISTACK_ENV } from '../../lib/env';
 
@@ -32,16 +31,15 @@ describe('bin/app.ts deploy environment', () => {
     process.env.CDK_DEFAULT_ACCOUNT = POLLUTED_ACCOUNT;
     process.env.CDK_DEFAULT_REGION = POLLUTED_REGION;
 
-    const app = buildApp();
-    const stack = app.node.findChild('MiniStackTestStack') as cdk.Stack;
+    // buildApp now returns the stack handle directly (no findChild needed).
+    const { stack } = buildApp();
 
     expect(stack.account).toBe('000000000000');
     expect(stack.region).toBe('us-east-1');
   });
 
   it('uses the shared MINISTACK_ENV constant as the single source of truth', () => {
-    const app = buildApp();
-    const stack = app.node.findChild('MiniStackTestStack') as cdk.Stack;
+    const { stack } = buildApp();
 
     expect(stack.account).toBe(MINISTACK_ENV.account);
     expect(stack.region).toBe(MINISTACK_ENV.region);
