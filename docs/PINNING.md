@@ -114,15 +114,18 @@ graduates to a real advisory (then add a scoped `override`, as we do for
 
 ## Updating a pin
 
-No automation yet — updates are manual for now. **Renovate is intentionally
-not used** (it is AGPL-3.0; this project avoids AGPL tooling — the same
-governance constraint that ruled out k6 for load testing). An automated,
-repo-owned "pin-sync" process is planned (tracked in issue #78): Dependabot for
-npm + Actions, plus a bespoke workflow for the pins Dependabot can't manage
-(pipx `==`, OSV version+SHA, the MiniStack image digest, the coupled Semgrep
-binary+ruleset, and the mise↔workflow Node version). Until that lands, refresh a
-pin by hand: bump the version/SHA/digest in the file above, re-run the relevant
-gate locally to confirm, and commit. For digests:
+**Renovate is intentionally not used** (it is AGPL-3.0; this project avoids AGPL
+tooling — the same governance constraint that ruled out k6 for load testing).
+**Dependabot updates GitHub Actions only** (`.github/dependabot.yml`, weekly,
+grouped, 7-day cooldown, #221) — it rewrites each `uses:` action SHA to the
+latest release. It is deliberately **NOT** pointed at npm/pip: those closures are
+hand-curated (lockfile + `overrides` + `--require-hashes`) and coupled to
+pre-commit, so a bot would fight the curated pins (its js-yaml/aiohttp jobs
+already fail — see AGENTS.md dependency notes). The rest of the pins (pipx `==`,
+OSV version+SHA, the MiniStack image digest, the coupled Semgrep binary+ruleset,
+the mise↔workflow Node version) still need the repo-owned "pin-sync" process
+planned in #78. Refresh those by hand: bump the version/SHA/digest in the file
+above, re-run the relevant gate locally to confirm, and commit. For digests:
 `docker buildx imagetools inspect ministackorg/ministack:full` shows the
 current manifest digest; for Action SHAs, `git ls-remote <repo> refs/tags/<tag>`.
 
