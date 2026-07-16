@@ -1,0 +1,30 @@
+# Please see the documentation for all configuration options:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+# Ensure the file passes validation:
+# ```shell
+# % npx @bugron/validate-dependabot-yaml .github/dependabot.yml
+# ```
+#
+# Dry-run locally (no Docker) from a dependabot-core clone checked out at the tag
+# whose .ruby-version matches your installed Ruby:
+# ```shell
+# % LOCAL_GITHUB_ACCESS_TOKEN=$(gh auth token) ALLOW_DRY_RUN_STANDALONE=true bundle exec ruby bin/dry-run.rb github_actions <owner>/<repo>
+# ```
+
+version: 2
+updates:
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    # Wait 7 days before proposing a newly published action version — a fresh
+    # release can be malicious or unstable (supply-chain caution).
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: 'chore(deps): update github-actions'
+    groups:
+      github-actions-version-updates:
+        patterns:
+          - '*'
