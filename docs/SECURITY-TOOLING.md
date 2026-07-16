@@ -29,7 +29,7 @@ Security tab.
 | **dependency-review** | security.yml | PR dep-diff: vulns + **license policy**     | hard-fail (PR)        |
 | **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree                  | informational         |
 | ClamAV                | security.yml | working-tree virus/malware signature scan   | hard-fail             |
-| SonarQube             | security.yml | code quality + security (Community edition) | report-only           |
+| SonarQube             | security.yml | code quality + security (Community edition) | hard-fail (#170)      |
 | Gitleaks              | security.yml | secrets (full history)                      | hard-fail             |
 | checkov + cfn-lint    | security.yml | synthesized CloudFormation                  | hard-fail             |
 | Threat model          | security.yml | `threat-model.tc.json` parses/sections      | hard-fail             |
@@ -322,12 +322,16 @@ SonarQube is a **single-vendor** SonarSource product. Two separable concerns:
   `error/warning/note`, resolves file paths via the response `components[]`, and
   converts 0-based `textRange` offsets to 1-based SARIF columns. Unit-tested with
   `node --test` (`sonar-to-sarif.test.mjs`).
-- **Failure policy: report-only.** The default "Sonar way" quality gate is tuned
-  for application repos and would be noisy on first run, so the enforce step
-  **logs** the gate status and never fails the job — exactly mirroring the
-  `trivy-fs` report-only posture. **Ratchet:** a follow-up flips it to
-  `test "$QG_STATUS" = "PASSED"` once the baseline is triaged / the quality
-  profile is tuned.
+- **Failure policy: ENFORCED (hard-fail on non-PASSED).** Originally report-only
+  ("Sonar way" is tuned for application repos and was noisy on first run), the
+  job **ratcheted to enforce** once the finding backlog was driven to zero
+  (#170 — the last finding, `S1848` on `bin/app.ts`, fixed in #218 by returning
+  the stack handle, not dismissed). The enforce step is `test "$QG_STATUS" =
+"PASSED"`, **fail-closed**: an empty/absent verdict (the `continue-on-error`
+  quality-gate step errored) is not `PASSED`, so it fails too — never green on a
+  missing verdict. The gate held `PASSED` on three consecutive `main` runs
+  before the flip. (The separate "Enforce SonarQube analysis ran" step still
+  independently fails a non-real scan, so a server-down run can't pass either.)
 - **Semgrep false-positive (maintainer-approved, TEMPORARY rule exclude).** The
   generic secrets rule `generic.secrets.security.detected-sonarqube-docs-api-key`
   matches `sonar…<40-hex>`, which the pinned image **digest** and the two
