@@ -36,7 +36,7 @@ jobs:
       # Only run path detection on push/PR — on dispatch/schedule the event has
       # no `before` SHA, so paths-filter prints a noisy fallback message, and
       # the unit/mutation jobs already force-run on those events anyway.
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: filter
         if: github.event_name == 'push' || github.event_name == 'pull_request'
         with:
@@ -249,7 +249,7 @@ jobs:
       # redundant re-test — never a false pass — but a clean prefix is cheaper to
       # reason about than relying on that safety net.)
       - name: Restore mutation cache
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: reports/mutation/incremental.json
           key: stryker-${{ hashFiles('stryker.config.mjs', 'jest.config.js', 'package-lock.json') }}-${{ github.run_id }}
@@ -311,7 +311,7 @@ jobs:
       # Persist the fuzzing corpus across runs so discovered inputs accumulate
       # and later runs start from prior coverage (rolling key, like mutation).
       - name: Restore fuzz corpus
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .fuzz-corpus
           key: fuzz-corpus-${{ github.run_id }}
