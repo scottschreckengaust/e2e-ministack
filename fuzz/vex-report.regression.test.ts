@@ -90,6 +90,10 @@ function assertInvariants(
     expect(r.resolvedAt === null || typeof r.resolvedAt === 'string').toBe(
       true,
     );
+    // gateSeverity is a string or null (#208 — never undefined/garbage)
+    expect(r.gateSeverity === null || typeof r.gateSeverity === 'string').toBe(
+      true,
+    );
   }
   // rows are priority-sorted (non-decreasing rank) — the invariant the render relies on
   for (let k = 1; k < rows.length; k++) {

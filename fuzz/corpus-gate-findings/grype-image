@@ -1,0 +1,1 @@
+{"matches":[{"vulnerability":{"id":"CVE-2019-1010022","severity":"Negligible"},"artifact":{"name":"libc6"}},{"vulnerability":{"id":"CVE-2026-11822","severity":"High"},"artifact":{"name":"libsqlite3-0"}},{"vulnerability":{"id":"GHSA-xxxx-yyyy-zzzz","severity":"Low"},"artifact":{"name":"pkg"}}]}

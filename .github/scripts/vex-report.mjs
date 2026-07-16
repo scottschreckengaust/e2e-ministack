@@ -30,6 +30,11 @@
 //                 `open` in the API but ABSENT from this set (high+) becomes
 //                 "Scanner-cleared" instead of a false "Decision needed". Omit
 //                 it to disable the cross-check (pre-#210 behavior).
+//   --gate-severities OPTIONAL JSON object { "CVE-…": "SEVERITY" } of the
+//                 scanners' GATE (distro-adjusted) severity, from
+//                 `gate-findings.mjs`. Enables the #208 gate-vs-badge column:
+//                 the ledger shows `badge / gate X` when they differ. Omit it to
+//                 show the badge alone.
 //
 // The transform never throws; malformed inputs degrade to empty sets.
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
@@ -42,10 +47,13 @@ import { buildReport, renderMarkdown } from './vex-report.ts';
 // its absence leaves the scan set `null` (pre-#210 behavior — no demotion).
 const rawArgv = process.argv.slice(2);
 let scanCvesFile;
+let gateSevFile;
 const argv = [];
 for (let i = 0; i < rawArgv.length; i++) {
   if (rawArgv[i] === '--scan-cves') {
     scanCvesFile = rawArgv[++i];
+  } else if (rawArgv[i] === '--gate-severities') {
+    gateSevFile = rawArgv[++i];
   } else {
     argv.push(rawArgv[i]);
   }
@@ -60,7 +68,7 @@ const [
 ] = argv;
 if (!vexDir || !findingsFile) {
   console.error(
-    'usage: vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince] [--scan-cves <cves.json>]',
+    'usage: vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince] [--scan-cves <cves.json>] [--gate-severities <gate.json>]',
   );
   process.exit(2);
 }
@@ -121,6 +129,22 @@ if (scanCvesFile) {
   }
 }
 
+// Load the gate-severity map when `--gate-severities` was given (#208). `null`
+// (flag absent, or an unreadable/invalid/non-object file) leaves the gate column
+// off — the report shows the badge alone. The file is a plain
+// `{ "CVE-…": "SEVERITY" }` object from `gate-findings.mjs`; rehydrate to a Map.
+let gateSeverities = null;
+if (gateSevFile) {
+  try {
+    const parsed = JSON.parse(readFileSync(gateSevFile, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      gateSeverities = new Map(Object.entries(parsed));
+    }
+  } catch {
+    // leave null — no reliable gate map, so show the badge alone.
+  }
+}
+
 const rows = buildReport(
   vexRecords,
   findings,
@@ -128,6 +152,7 @@ const rows = buildReport(
   today,
   resolvedSince,
   scanCves,
+  gateSeverities,
 );
 const md = renderMarkdown(rows);
 
