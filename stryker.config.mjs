@@ -38,6 +38,7 @@ export default {
     '.github/scripts/vex-to-sarif-suppressions.ts',
     '.github/scripts/vex-report.ts',
     '.github/scripts/alerts-findings.ts',
+    '.github/scripts/sarif-cve-ids.ts',
     '.github/scripts/license-verdict.ts',
     'scripts/ministack-upstream.ts',
   ],

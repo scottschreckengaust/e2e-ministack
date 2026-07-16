@@ -23,6 +23,14 @@
 //   - Severity is the BADGE severity (GitHub's NVD-derived
 //     `security_severity_level`); it can diverge from a scanner's distro/gate
 //     rating (#181) — the gate-vs-badge column is a fast-follow.
+//   - CURRENT-SCAN CROSS-CHECK (#210): GitHub only auto-closes an alert when a
+//     newer analysis for the same ref omits it, so an alert can be `open` in the
+//     API yet ABSENT from the current image scan (e.g. after the pinned image
+//     dropped a batch of CVEs). Fed the current scan's CVE set (the optional
+//     `currentScanCves` param), the report demotes such a stale-open high+
+//     finding from a false `Decision needed` to the non-actionable
+//     `Scanner-cleared`, and never mistakes it for real `VEX drift`. Passing
+//     `null` (the default) disables the cross-check (pre-#210 behavior).
 //   - Flags: the `vulnerable_code_not_in_execute_path` (never-run tools) class,
 //     and un-CVE'd `TEMP-…`/GHSA pseudo-ids that a CVE-keyed record can't match.
 
@@ -97,6 +105,7 @@ export type UnifiedStatus =
   | 'Investigating' // under_investigation record
   | 'VEX drift' // VEX-accepted, but its Code-Scanning alert is still OPEN (dismiss it)
   | 'Undocumented dismissal' // alert DISMISSED (a human hid it) with NO backing .vex/ record
+  | 'Scanner-cleared' // alert still OPEN in the API but ABSENT from the current scan — stale, no action (#210)
   | 'Resolved'; // alert auto-FIXED (finding gone), no .vex/ record — informational, no action
 
 // A status is "actionable" (gets the 🔴 signal) iff it asks a human to do
@@ -125,9 +134,10 @@ const PRIORITY: Record<UnifiedStatus, number> = {
   'VEX drift': 3, // justified, but the Security-tab alert lags — reconcile
   'Stale record': 4, // .vex/ record with no finding — the real PRUNE signal
   Resolved: 5, // auto-fixed this window — news, not work
-  Investigating: 6, // under_investigation — no action yet
-  Accepted: 7, // VEX'd + dismissed — settled noise
-  Tracked: 8, // below floor — settled noise
+  'Scanner-cleared': 6, // open in the API but gone from the current scan — stale news (#210)
+  Investigating: 7, // under_investigation — no action yet
+  Accepted: 8, // VEX'd + dismissed — settled noise
+  Tracked: 9, // below floor — settled noise
 };
 
 /** The prioritization rank for a status (0 = most urgent). */
@@ -300,6 +310,18 @@ export function isRevisitOverdue(
  *   shim passes the last release's date (rolling-window fallback when none).
  *   Injected for the same purity reason as `today`; a non-date drops all
  *   Resolved rows (nothing is "recent" relative to an unknown boundary).
+ * @param currentScanCves the CVE-id set the CURRENT image scan (Grype ∪ Trivy
+ *   SARIFs of THIS run) actually reports — the ground truth the report
+ *   cross-checks the Alerts API against (#210). GitHub only auto-closes an alert
+ *   when a newer analysis for the same ref omits it, so an alert can be `open`
+ *   in the API yet ABSENT from the current scan (a scanner-cleared finding, e.g.
+ *   after the pinned image dropped a batch of CVEs). Passing `null` (the
+ *   DEFAULT) disables the cross-check entirely — the engine behaves exactly as
+ *   before, which is why every legacy caller and the fuzz harness stay valid.
+ *   The check only DEMOTES an uncovered at/above-floor finding from `Decision
+ *   needed` to `Scanner-cleared`; it never invents a finding or hides one the
+ *   scan still reports. Floor-gated because the scan SARIFs carry only high+
+ *   findings, so a CVE's absence is conclusive only at/above the gate floor.
  */
 export function buildReport(
   vexRecords: readonly VexRecord[],
@@ -307,6 +329,7 @@ export function buildReport(
   gateFloor: string,
   today: string,
   resolvedSince: string,
+  currentScanCves: readonly string[] | null = null,
 ): ReportRow[] {
   // `vexRecords`/`findings` are arrays by contract — the CLI shim (the only
   // untrusted-input boundary) parses JSON and passes arrays. ELEMENT-level junk
@@ -317,6 +340,18 @@ export function buildReport(
     if (r && nonEmptyString(r.cve)) vexByCve.set(r.cve.toUpperCase(), r);
   }
   const floorRank = rankOf(normSev(gateFloor));
+
+  // The CURRENT-scan CVE set, upper-cased for a case-insensitive membership test
+  // matching the finding keys (#210). `null` means "no scan ledger supplied" —
+  // the cross-check below is then skipped entirely and every code path behaves
+  // as it did before this parameter existed. An EMPTY set is DIFFERENT from
+  // null: it means the scan ran and found nothing, so every uncovered open alert
+  // is scanner-cleared. Collapsing the two would either resurrect phantoms or
+  // hide real findings, so the distinction is load-bearing.
+  const scanSet =
+    currentScanCves === null
+      ? null
+      : new Set(currentScanCves.map((c) => String(c).toUpperCase()));
 
   // Group findings by id. The second-ledger (alert-state) signals are set only
   // on POSITIVE evidence — an absent `state` means "no alert-ledger opinion"
@@ -393,6 +428,17 @@ export function buildReport(
     const vex = vexByCve.get(id);
     const isCve = isCveId(id);
 
+    // Cross-check the (possibly stale) Alerts API against the CURRENT scan
+    // (#210): an alert is SCANNER-CLEARED when we were given a scan set, the
+    // finding is a real CVE at/above the gate floor, and the current scan does
+    // NOT report it. Floor-gated because the scan SARIFs carry only high+ CVEs,
+    // so a CVE's absence is conclusive only at/above the floor; `isCve` because
+    // only CVE ids can appear in the scan set (a GHSA/TEMP pseudo-id never
+    // would, so absence there proves nothing). A `null` scan set (no ledger
+    // supplied) disables the demotion entirely — pre-#210 behavior.
+    const clearedByScan =
+      scanSet !== null && isCve && maxRank >= floorRank && !scanSet.has(id);
+
     const overdue = isRevisitOverdue(vex?.revisitBy, today);
     let status: UnifiedStatus;
     let suggested: string | null;
@@ -402,9 +448,12 @@ export function buildReport(
       if (overdue) {
         // Revisit takes precedence — the acceptance itself is due for review.
         status = 'Revisit overdue';
-      } else if (suppressing && g.anyOpen) {
-        // Ledger drift: VEX-accepted, yet an alert is still OPEN. The
-        // dismiss-alerts wiring (#186) should have closed it — flag to reconcile.
+      } else if (suppressing && g.anyOpen && !clearedByScan) {
+        // Ledger drift: VEX-accepted, yet an alert is still OPEN *and the current
+        // scan still reports it*. The dismiss-alerts wiring (#186) should have
+        // closed it — flag to reconcile. If the scan has since cleared the CVE,
+        // the open alert is merely stale (not real drift) → fall through to
+        // Accepted; the .vex/ record is still valid, nothing to reconcile.
         status = 'VEX drift';
       } else if (suppressing) {
         status = 'Accepted';
@@ -415,8 +464,15 @@ export function buildReport(
       }
       suggested = vex.justification ?? null;
     } else if (g.anyOpen) {
-      // Uncovered + open: at/above floor needs a decision; below floor is tracked.
-      status = maxRank >= floorRank ? 'Decision needed' : 'Tracked';
+      // Uncovered + open. If the current scan no longer reports this high+ CVE,
+      // the API's `open` is stale — surface it as the non-actionable
+      // Scanner-cleared (#210), NOT a false Decision needed. Otherwise: at/above
+      // floor needs a decision; below floor is tracked.
+      status = clearedByScan
+        ? 'Scanner-cleared'
+        : maxRank >= floorRank
+          ? 'Decision needed'
+          : 'Tracked';
       suggested = suggestJustification([...g.pkgs]);
     } else if (g.anyDismissed) {
       // No `.vex/` record, yet a HUMAN dismissed the alert — a suppression with
@@ -514,6 +570,7 @@ export function summarize(
     Investigating: 0,
     'VEX drift': 0,
     'Undocumented dismissal': 0,
+    'Scanner-cleared': 0,
     Resolved: 0,
   };
   for (const r of rows) acc[r.status] += 1;
@@ -544,6 +601,7 @@ const LEGEND =
   '| Decision needed | uncovered at/above the gate floor — must VEX or fix |\n' +
   '| VEX drift | VEX-accepted but the alert is still open — dismiss it |\n' +
   '| Undocumented dismissal | alert dismissed with no `.vex/` record — justify or reopen |\n' +
+  '| Scanner-cleared | alert still open in the API but gone from the current scan — stale, no action |\n' +
   '| Resolved | alert auto-fixed (finding gone) — informational |\n' +
   '| Revisit overdue | accepted record past its `revisit_by` date |\n' +
   '| Stale record | `.vex/` record with no current alert — prune? |\n' +
@@ -608,6 +666,7 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
     `${s['Revisit overdue']} revisit overdue · ${s['Stale record']} stale · ` +
     `${s['Accepted']} accepted · ${s['Tracked']} tracked` +
     (s['Investigating'] ? ` · ${s['Investigating']} investigating` : '') +
+    (s['Scanner-cleared'] ? ` · ${s['Scanner-cleared']} scanner-cleared` : '') +
     (s['Resolved'] ? ` · ${s['Resolved']} resolved` : '');
 
   // (2) Narrow action table — only rows needing attention; the reviewer's focus.

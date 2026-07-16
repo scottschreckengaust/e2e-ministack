@@ -815,6 +815,20 @@ jobs:
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version: '24.17.0' # matches the mise.toml pin (single-sourced there)
+      # Pull the CURRENT-run image-scan SARIFs (produced by the ministack-image /
+      # trivy-image jobs this run `needs:`) so we can cross-check the Alerts API
+      # against the CURRENT scan (#210) — NO re-scan. Non-fatal if absent (e.g. a
+      # gate job errored before uploading): the report then renders with no scan
+      # ledger (`--scan-cves` omitted → the pre-#210 behavior, no false clears).
+      - name: Download current image-scan SARIFs
+        id: dl-sarifs
+        continue-on-error: true
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: scan-sarifs
+          # Both image-scan artifacts; merge into one dir so the extractor globs them.
+          pattern: '{grype-ministack-image-sarif,trivy-image-reports}'
+          merge-multiple: true
       # Fetch the Code Scanning alerts for THIS ref (all states), then normalize
       # + render. `gh` reads the ref from the run context; on a PR that's the
       # merge ref, on push the branch. REF is passed via env (no interpolation
@@ -859,8 +873,36 @@ jobs:
             resolved_since="$(date -u -d '7 days ago' +%Y-%m-%d)"
           fi
           echo "recently-resolved window since: ${resolved_since}"
+          # Cross-check the (possibly stale) Alerts API against what the CURRENT
+          # image scan actually reports (#210). Extract the CVE-id set from the
+          # image SARIFs this run produced, then pass it via `--scan-cves` so an
+          # alert that is `open` in the API but ABSENT from the current scan is
+          # rendered "Scanner-cleared", not a false "Decision needed".
+          #
+          # We prefer Grype's VEX-FREE `suppressed.sarif` (every high+ CVE, incl.
+          # VEX-covered ones) over the VEX-gated `grype.sarif` — the gated scan
+          # DROPS covered CVEs, which would falsely "clear" a genuine VEX-drift
+          # finding. Trivy has only its gated SARIF; its contribution is a UNION,
+          # and the primary #210 case (uncovered python CVEs) was never VEX-
+          # covered, so gating doesn't hide it. Only pass `--scan-cves` when we
+          # actually extracted a scan set — an empty file must NOT be read as
+          # "the scan found nothing" (which would clear every open alert).
+          scan_arg=""
+          scan_sarifs=()
+          for f in scan-sarifs/grype-ministack-image.suppressed.sarif \
+                   scan-sarifs/trivy-image.sarif; do
+            [ -s "$f" ] && scan_sarifs+=("$f")
+          done
+          if [ "${#scan_sarifs[@]}" -gt 0 ]; then
+            node .github/scripts/sarif-cve-ids.mjs scan-cves.json "${scan_sarifs[@]}"
+            scan_arg="--scan-cves scan-cves.json"
+            echo "current-scan CVE set: $(cat scan-cves.json)"
+          else
+            echo "no current-scan SARIFs found; skipping the stale-open cross-check"
+          fi
+          # shellcheck disable=SC2086  # $scan_arg is an intentional flag pair
           node .github/scripts/vex-report.mjs .vex findings.json \
-            "$(date -u +%Y-%m-%d)" HIGH vex-report.md "${resolved_since}"
+            "$(date -u +%Y-%m-%d)" HIGH vex-report.md "${resolved_since}" $scan_arg
           cat vex-report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload VEX report artifact
         if: always()
