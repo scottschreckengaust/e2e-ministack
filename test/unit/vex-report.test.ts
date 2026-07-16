@@ -1,12 +1,16 @@
 import {
   isCveId,
   isoDayNumber,
+  isoDay,
   isRevisitOverdue,
   isActionable,
+  priorityRank,
+  isRecentlyResolved,
   suggestJustification,
   buildReport,
   summarize,
   renderMarkdown,
+  type ReportRow,
   type VexRecord,
   type ScannerFinding,
   type UnifiedStatus,
@@ -81,6 +85,21 @@ describe('isoDayNumber', () => {
   });
 });
 
+describe('isoDay (display trim)', () => {
+  it('trims an ISO timestamp to its YYYY-MM-DD day', () => {
+    expect(isoDay('2026-07-15T20:08:43Z')).toBe('2026-07-15');
+    expect(isoDay('2026-07-15')).toBe('2026-07-15');
+  });
+  it('returns "—" for null', () => {
+    expect(isoDay(null)).toBe('—');
+  });
+  it('returns a non-ISO-day string unchanged (kills the branch mutant)', () => {
+    // no YYYY-MM-DD prefix => passed through verbatim, not blanked.
+    expect(isoDay('wait-for-image-rebuild')).toBe('wait-for-image-rebuild');
+    expect(isoDay('')).toBe('');
+  });
+});
+
 describe('isActionable', () => {
   it('is true for exactly the three action statuses', () => {
     const all: UnifiedStatus[] = [
@@ -95,6 +114,57 @@ describe('isActionable', () => {
     expect(actionable.sort()).toEqual(
       ['Decision needed', 'Revisit overdue', 'Stale record'].sort(),
     );
+  });
+});
+
+describe('priorityRank', () => {
+  it('ranks every status in the intended act-now → settled order', () => {
+    const order: UnifiedStatus[] = [
+      'Decision needed',
+      'Revisit overdue',
+      'Undocumented dismissal',
+      'VEX drift',
+      'Stale record',
+      'Resolved',
+      'Investigating',
+      'Accepted',
+      'Tracked',
+    ];
+    // ranks are 0..8 in exactly this sequence (strictly increasing).
+    expect(order.map(priorityRank)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('puts every actionable status strictly above Resolved/Accepted/Tracked', () => {
+    const settled = Math.min(
+      priorityRank('Resolved'),
+      priorityRank('Accepted'),
+      priorityRank('Tracked'),
+    );
+    for (const s of [
+      'Decision needed',
+      'Revisit overdue',
+      'Undocumented dismissal',
+      'VEX drift',
+      'Stale record',
+    ] as UnifiedStatus[]) {
+      expect(priorityRank(s)).toBeLessThan(settled);
+    }
+  });
+});
+
+describe('isRecentlyResolved', () => {
+  it('is true when fixed_at day is on/after the boundary', () => {
+    expect(isRecentlyResolved('2026-07-10', '2026-07-01')).toBe(true);
+    expect(isRecentlyResolved('2026-07-01', '2026-07-01')).toBe(true); // on boundary
+  });
+  it('is false when fixed_at day is before the boundary', () => {
+    expect(isRecentlyResolved('2026-06-30', '2026-07-01')).toBe(false);
+  });
+  it('is false for a missing/malformed fixed_at or boundary (NaN fails >=)', () => {
+    expect(isRecentlyResolved(null, '2026-07-01')).toBe(false);
+    expect(isRecentlyResolved('', '2026-07-01')).toBe(false);
+    expect(isRecentlyResolved('not-a-date', '2026-07-01')).toBe(false);
+    expect(isRecentlyResolved('2026-07-10', 'not-a-date')).toBe(false);
   });
 });
 
@@ -164,6 +234,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         [finding(`CVE-2099-${sev}`, 'grype', sev, 'p')],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       );
       expect(rows[0].maxSeverity).toBe(expected);
     }
@@ -187,6 +258,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       [finding('CVE-2099-1', 'grype', 'HIGH', 'p')],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     // Only the real CVE row exists (Accepted); the blank-cve record is dropped.
     expect(rows).toHaveLength(1);
@@ -201,6 +273,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         finding('CVE-2099-2', 'grype', 'HIGH', 'p'),
       ],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows).toHaveLength(1);
@@ -225,6 +298,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows).toHaveLength(1);
     // 42 and '' scanner excluded => only grype becomes a scanner link
@@ -246,6 +320,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     // equal severity => localeCompare by item ascending
     expect(rows.map((r) => r.item)).toEqual(['CVE-2099-A', 'CVE-2099-B']);
@@ -260,6 +335,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].scanners.map((s) => s.scanner)).toEqual(['grype', 'trivy']); // sorted, not insertion order
     expect(rows[0].alertCount).toBe(2); // two alerts collapsed into one CVE
@@ -271,6 +347,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       [{ id: 'CVE-2099-X', scanner: 'g', severity: 42 as unknown as string }],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].maxSeverity).toBe('UNKNOWN');
   });
@@ -280,6 +357,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       [{ cve: 'CVE-2099-Y', status: 'not_affected', justification: 'x' }],
       [],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Stale record');
@@ -294,10 +372,13 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         [],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     // ledger columns: item · status · severity · scanners · revisit_by
-    expect(md).toContain('| CVE-2099-3 | Stale record | UNKNOWN | — | — |');
+    expect(md).toContain(
+      '| [CVE-2099-3](https://github.com/advisories?query=CVE-2099-3) | Stale record | UNKNOWN | — | — |',
+    );
   });
 
   it('the investigating summary suffix text is exact', () => {
@@ -306,6 +387,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         [{ cve: 'CVE-2099-I', status: 'under_investigation' }],
         [finding('CVE-2099-I', 'grype', 'HIGH', 'p')],
         'HIGH',
+        '2026-07-14',
         '2026-07-14',
       ),
     );
@@ -321,6 +403,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         [finding('CVE-2099-T', 'grype', 'LOW', 'zlib1g')],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     expect(md.split('\n')[0]).toBe(
@@ -335,11 +418,14 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
         [finding('CVE-2026-1', 'grype', 'HIGH', 'p')],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     // columns: item · status · severity · scanners · revisit_by. The scanner is
     // unlinked here (no htmlUrl on the finding) so it renders as a bare name.
-    expect(md).toContain('| CVE-2026-1 | Accepted | HIGH | grype | — |');
+    expect(md).toContain(
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Accepted | HIGH | grype | — |',
+    );
   });
 });
 
@@ -359,6 +445,7 @@ describe('buildReport — status mapping', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows.every((r) => r.status === 'Accepted')).toBe(true);
     expect(rows.every((r) => r.actionNeeded === false)).toBe(true);
@@ -376,6 +463,7 @@ describe('buildReport — status mapping', () => {
       [finding('CVE-2026-3', 'grype', 'MEDIUM')],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Tracked');
     expect(rows[0].actionNeeded).toBe(false);
@@ -387,6 +475,7 @@ describe('buildReport — status mapping', () => {
       [finding('CVE-2026-4', 'grype', 'HIGH')],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Investigating');
   });
@@ -396,6 +485,7 @@ describe('buildReport — status mapping', () => {
       [],
       [finding('CVE-2099-1', 'trivy', 'CRITICAL', 'openssl')],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Decision needed');
@@ -408,6 +498,7 @@ describe('buildReport — status mapping', () => {
       [],
       [finding('CVE-2099-2', 'trivy', 'LOW', 'zlib1g')],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Tracked');
@@ -422,6 +513,7 @@ describe('buildReport — status mapping', () => {
       [finding('CVE-2099-AT', 'grype', 'HIGH', 'openssl')],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Decision needed');
   });
@@ -431,6 +523,7 @@ describe('buildReport — status mapping', () => {
       [vex({ cve: 'CVE-2026-5', revisitBy: '2026-01-01' })],
       [finding('CVE-2026-5', 'grype', 'HIGH')],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Revisit overdue');
@@ -444,6 +537,7 @@ describe('buildReport — status mapping', () => {
       [finding('CVE-2026-6', 'grype', 'MEDIUM')],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Revisit overdue');
   });
@@ -453,6 +547,7 @@ describe('buildReport — status mapping', () => {
       [vex({ cve: 'CVE-2026-7', revisitBy: 'wait-for-image-rebuild' })],
       [finding('CVE-2026-7', 'grype', 'HIGH')],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Accepted');
@@ -465,6 +560,7 @@ describe('buildReport — status mapping', () => {
       [vex({ cve: 'CVE-2026-8', revisitBy: '2026-01-01' })],
       [], // no finding
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Stale record');
@@ -480,12 +576,13 @@ describe('buildReport — status mapping', () => {
       [],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Stale record');
     expect(rows[0].suggestedJustification).toBeNull();
     // Stale is actionable, so its "why" column exercises shortJust(null) => "—".
     expect(renderMarkdown(rows)).toContain(
-      '| CVE-2026-88 | Stale record | — |',
+      '| [CVE-2026-88](https://github.com/advisories?query=CVE-2026-88) | Stale record | — |',
     );
   });
 
@@ -501,6 +598,7 @@ describe('buildReport — status mapping', () => {
       ],
       [], // no finding => stale
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Stale record');
@@ -528,6 +626,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Accepted');
     expect(rows[0].actionNeeded).toBe(false);
@@ -538,6 +637,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       [na('CVE-2026-2')],
       [{ id: 'CVE-2026-2', scanner: 'Grype', severity: 'HIGH', state: 'open' }],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('VEX drift');
@@ -558,6 +658,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('VEX drift');
   });
@@ -575,6 +676,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
         },
       ],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Undocumented dismissal');
@@ -594,13 +696,16 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
           severity: 'LOW',
           state: 'fixed',
           pkg: 'zlib1g',
+          fixedAt: '2026-07-14', // within the recency window below
         },
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-01', // resolvedSince: the fixed alert (07-14) is inside the window
     );
     expect(rows[0].status).toBe('Resolved');
     expect(rows[0].actionNeeded).toBe(false);
+    expect(rows[0].resolvedAt).toBe('2026-07-14');
   });
 
   it('no VEX + BOTH a dismissed and a fixed alert (none open) => Undocumented dismissal wins', () => {
@@ -626,6 +731,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Undocumented dismissal');
   });
@@ -645,6 +751,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
         },
       ],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Undocumented dismissal');
@@ -674,6 +781,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     // anyOpen is true, so the undocumented-dismissal branch is skipped; the
     // open critical is a live decision.
@@ -687,6 +795,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       [na('CVE-2026-4')],
       [{ id: 'CVE-2026-4', scanner: 'Grype', severity: 'HIGH' }], // no state
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Accepted');
@@ -705,6 +814,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
         },
       ],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Tracked');
@@ -727,6 +837,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].status).toBe('Decision needed');
     expect(rows[0].suggestedJustification).toBe(
@@ -748,6 +859,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(dismissed[0].status).toBe('Undocumented dismissal');
     expect(dismissed[0].suggestedJustification).toBe(
@@ -762,10 +874,12 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
           severity: 'LOW',
           state: 'fixed',
           pkg: 'tar',
+          fixedAt: '2026-07-14', // inside the window below so the row survives
         },
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-01',
     );
     expect(resolved[0].status).toBe('Resolved');
     expect(resolved[0].suggestedJustification).toBe(
@@ -779,6 +893,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       [],
       [{ id: 'CVE-2099-20', scanner: 'Grype', severity: 'LOW', pkg: 'zlib1g' }],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(belowFloor[0].status).toBe('Tracked');
@@ -794,11 +909,12 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(atFloor[0].status).toBe('Decision needed');
   });
 
-  it('renders a "resolved" suffix in the summary when present', () => {
+  it('renders a "resolved" suffix + a Recently-resolved block when in window', () => {
     const md = renderMarkdown(
       buildReport(
         [],
@@ -809,15 +925,61 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
             severity: 'LOW',
             state: 'fixed',
             pkg: 'zlib1g',
+            fixedAt: '2026-07-13',
           },
         ],
         'HIGH',
         '2026-07-14',
+        '2026-07-01', // window includes 2026-07-13
       ),
     );
     expect(md).toContain(' · 1 resolved');
-    // Resolved is NOT actionable, so the clean-tree line still shows.
+    // Resolved is NOT actionable, so the clean-tree line still shows...
     expect(md).toContain('✅ **No action needed**');
+    // ...and the bounded Recently-resolved block lists it (item · severity · resolved).
+    expect(md).toContain('ℹ️ **Recently resolved (1):**');
+    expect(md).toContain(
+      '| [CVE-2099-22](https://github.com/advisories?query=CVE-2099-22) | LOW | 2026-07-13 |',
+    );
+  });
+
+  it('drops a Resolved row whose fixed_at is OUTSIDE the recency window', () => {
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-23',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'fixed',
+          pkg: 'zlib1g',
+          fixedAt: '2026-06-01', // before the window boundary
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-01',
+    );
+    // The stale resolved alert falls off entirely — no row, no noise.
+    expect(rows).toHaveLength(0);
+  });
+
+  it('drops a Resolved row with NO fixed_at date (undated => outside window)', () => {
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-24',
+          scanner: 'Grype',
+          severity: 'LOW',
+          state: 'fixed',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-01',
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it('an overdue revisit still wins over VEX-drift (acceptance itself is due)', () => {
@@ -825,6 +987,7 @@ describe('buildReport — two-ledger reconciliation (alert state)', () => {
       [{ ...na('CVE-2026-5'), revisitBy: '2026-01-01' }],
       [{ id: 'CVE-2026-5', scanner: 'Grype', severity: 'HIGH', state: 'open' }],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Revisit overdue');
@@ -841,6 +1004,7 @@ describe('buildReport — merging, severity, ordering', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].scanners.map((s) => s.scanner)).toEqual(['grype', 'trivy']);
     expect(rows[0].alertCount).toBe(2); // two alerts collapse into one CVE
@@ -852,6 +1016,7 @@ describe('buildReport — merging, severity, ordering', () => {
       [],
       [finding('CVE-2099-10', 'grype', 'bogus')],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].maxSeverity).toBe('UNKNOWN');
@@ -868,6 +1033,7 @@ describe('buildReport — merging, severity, ordering', () => {
         },
       ],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].maxSeverity).toBe('UNKNOWN');
@@ -886,6 +1052,7 @@ describe('buildReport — merging, severity, ordering', () => {
         { id: 'CVE-2099-13', scanner: 'trivy', severity: 'HIGH', pkg: '' }, // empty pkg
       ],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].suggestedJustification).toBe(
@@ -910,6 +1077,7 @@ describe('buildReport — merging, severity, ordering', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows[0].scanners).toEqual([
       { scanner: 'grype', htmlUrl: 'https://x.test/99' },
@@ -922,6 +1090,7 @@ describe('buildReport — merging, severity, ordering', () => {
       [{ cve: 'CVE-2099-12', status: 'not_affected' }],
       [finding('CVE-2099-12', 'grype', 'HIGH')],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].suggestedJustification).toBeNull();
@@ -937,6 +1106,7 @@ describe('buildReport — merging, severity, ordering', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows.map((r) => r.item)).toEqual([
       'CVE-2099-21',
@@ -945,11 +1115,136 @@ describe('buildReport — merging, severity, ordering', () => {
     ]);
   });
 
+  it('orders by priority rank first — act-now leads, settled sinks', () => {
+    // A Decision-needed (rank 0) CRITICAL vs an Accepted (rank 7) CRITICAL: the
+    // Accepted one has HIGHER severity-tiebreak parity, so ONLY rank can put the
+    // Decision-needed row first. Kills the "rank comparator dropped" mutant.
+    const rows = buildReport(
+      [{ cve: 'CVE-2000-1', status: 'not_affected', justification: 'x' }], // => Accepted
+      [
+        finding('CVE-2000-1', 'grype', 'CRITICAL', 'p'), // Accepted, rank 7
+        finding('CVE-2999-9', 'grype', 'CRITICAL', 'openssl'), // uncovered => Decision needed, rank 0
+      ],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-14',
+    );
+    expect(rows.map((r) => [r.item, r.status])).toEqual([
+      ['CVE-2999-9', 'Decision needed'],
+      ['CVE-2000-1', 'Accepted'],
+    ]);
+  });
+
+  it('within one rank, orders by severity desc (kills the severity-tiebreak mutant)', () => {
+    // Two uncovered CRITICAL/LOW at the SAME rank? No — pick two same-rank rows:
+    // both Decision needed (floor LOW so both qualify), different severity.
+    const rows = buildReport(
+      [],
+      [
+        finding('CVE-2099-A', 'grype', 'MEDIUM', 'openssl'), // Decision needed
+        finding('CVE-2099-B', 'grype', 'CRITICAL', 'openssl'), // Decision needed
+      ],
+      'LOW',
+      '2026-07-14',
+      '2026-07-14',
+    );
+    // same rank (both Decision needed) => CRITICAL before MEDIUM
+    expect(rows.map((r) => r.item)).toEqual(['CVE-2099-B', 'CVE-2099-A']);
+  });
+
+  it('within one rank + severity, orders most-recently-resolved first', () => {
+    // Two Resolved rows, same LOW severity, different fixed_at => newer first.
+    // The item names OPPOSE the resolvedAt order (the newer alert is 'CVE-2099-Z',
+    // which sorts AFTER 'CVE-2099-A' by item), so ONLY the resolvedAt-desc
+    // tiebreak can produce Z-before-A — killing both the `if (ra !== rb)` drop
+    // (→ falls to item sort → A,Z) and the localeCompare-direction mutant.
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-A', // sorts FIRST by item, but resolved OLDER
+          scanner: 'grype',
+          severity: 'LOW',
+          state: 'fixed',
+          fixedAt: '2026-07-02',
+        },
+        {
+          id: 'CVE-2099-Z', // sorts LAST by item, but resolved NEWER
+          scanner: 'grype',
+          severity: 'LOW',
+          state: 'fixed',
+          fixedAt: '2026-07-12',
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-01',
+    );
+    // newer (Z, 07-12) before older (A, 07-02) — resolvedAt wins over item order
+    expect(rows.map((r) => r.item)).toEqual(['CVE-2099-Z', 'CVE-2099-A']);
+  });
+
+  it('a non-fixed row has resolvedAt null (kills the fixedAt-init + guard mutants)', () => {
+    // An uncovered, open finding: no fixed alert => g.fixedAt stays '' => the
+    // row's resolvedAt is null (not '' or a garbage literal).
+    const rows = buildReport(
+      [],
+      [finding('CVE-2099-OPEN', 'grype', 'CRITICAL', 'openssl')],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-01',
+    );
+    expect(rows[0].resolvedAt).toBeNull();
+  });
+
+  it('a stale record row has priorityRank 4 (Stale record tier)', () => {
+    const rows = buildReport(
+      [{ cve: 'CVE-2099-S', status: 'not_affected', justification: 'x' }],
+      [], // no finding => Stale record
+      'HIGH',
+      '2026-07-14',
+      '2026-07-01',
+    );
+    expect(rows[0].status).toBe('Stale record');
+    expect(rows[0].priorityRank).toBe(4);
+  });
+
+  it('an empty fixed_at does NOT clobber a real one on the same CVE (guards the fixedAt guard)', () => {
+    // Two fixed alerts for one CVE: a real fixed_at, then an empty one. The
+    // empty must be IGNORED (nonEmptyString guard) — with `if (true)` the empty
+    // second alert would overwrite g.fixedAt to '' and null the resolvedAt.
+    const rows = buildReport(
+      [],
+      [
+        {
+          id: 'CVE-2099-F',
+          scanner: 'grype',
+          severity: 'LOW',
+          state: 'fixed',
+          fixedAt: '2026-07-13',
+        },
+        {
+          id: 'CVE-2099-F',
+          scanner: 'trivy',
+          severity: 'LOW',
+          state: 'fixed',
+          fixedAt: '', // empty must not clobber the real date above
+        },
+      ],
+      'HIGH',
+      '2026-07-14',
+      '2026-07-01',
+    );
+    expect(rows[0].status).toBe('Resolved');
+    expect(rows[0].resolvedAt).toBe('2026-07-13');
+  });
+
   it('flags an un-CVE-id item (isCve false)', () => {
     const rows = buildReport(
       [],
       [finding('TEMP-1-ABC', 'trivy', 'LOW', 'tar')],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].isCve).toBe(false);
@@ -961,6 +1256,7 @@ describe('buildReport — merging, severity, ordering', () => {
       [],
       [finding('CVE-2099-30', 'grype', 'MEDIUM', 'node-undici')],
       'MEDIUM',
+      '2026-07-14',
       '2026-07-14',
     );
     expect(rows[0].status).toBe('Decision needed');
@@ -979,6 +1275,7 @@ describe('buildReport — merging, severity, ordering', () => {
           { id: 'CVE-2099-40' } as ScannerFinding, // no scanner/severity
         ],
         'HIGH',
+        '2026-07-14',
         '2026-07-14',
       ),
     ).not.toThrow();
@@ -1000,6 +1297,7 @@ describe('buildReport — merging, severity, ordering', () => {
       ],
       'HIGH',
       '2026-07-14',
+      '2026-07-14',
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].item).toBe('CVE-2099-51');
@@ -1008,6 +1306,31 @@ describe('buildReport — merging, severity, ordering', () => {
 });
 
 describe('summarize + renderMarkdown', () => {
+  it('renders an em-dash in the Recently-resolved block when resolvedAt is null', () => {
+    // renderMarkdown is a TOTAL public fn (the fuzz tier feeds it arbitrary
+    // rows). A Resolved row with null resolvedAt must render "—", not "null" —
+    // covers the `resolvedAt ?? '—'` fallback in the resolved block.
+    const row: ReportRow = {
+      item: 'CVE-2099-Z',
+      isCve: true,
+      scanners: [],
+      alertCount: 1,
+      maxSeverity: 'LOW',
+      status: 'Resolved',
+      suggestedJustification: null,
+      revisitBy: null,
+      revisitOverdue: false,
+      actionNeeded: false,
+      priorityRank: priorityRank('Resolved'),
+      resolvedAt: null,
+    };
+    const md = renderMarkdown([row]);
+    expect(md).toContain('ℹ️ **Recently resolved (1):**');
+    expect(md).toContain(
+      '| [CVE-2099-Z](https://github.com/advisories?query=CVE-2099-Z) | LOW | — |',
+    );
+  });
+
   it('summarize counts every status bucket', () => {
     const rows = buildReport(
       [
@@ -1023,6 +1346,7 @@ describe('summarize + renderMarkdown', () => {
         finding('CVE-2099-2', 'trivy', 'LOW', 'zlib1g'), // tracked
       ],
       'HIGH',
+      '2026-07-14',
       '2026-07-14',
     );
     const s = summarize(rows);
@@ -1047,12 +1371,53 @@ describe('summarize + renderMarkdown', () => {
         [finding('CVE-2026-1', 'grype', 'HIGH')],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     expect(md).toContain('✅ **No action needed**');
     expect(md).toContain('<details>');
     expect(md).not.toContain('<details open'); // default-collapsed
     expect(md).toContain('**VEX report** —');
+    // No Resolved rows => the Recently-resolved block is ENTIRELY absent, and
+    // NOTHING sits between the action block and the ledger. The exact join here
+    // kills both the `resolved.length > 0` mutant AND the empty-string init
+    // mutant (a garbage init would appear right here).
+    expect(md).toContain(
+      '✅ **No action needed** — every finding is accepted, tracked, or resolved.\n\n<details>\n<summary>Full VEX ledger',
+    );
+    expect(md).not.toContain('Recently resolved');
+  });
+
+  it('joins multiple Recently-resolved rows with newlines (kills the join mutant)', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [
+          {
+            id: 'CVE-2099-71',
+            scanner: 'grype',
+            severity: 'LOW',
+            state: 'fixed',
+            fixedAt: '2026-07-12',
+          },
+          {
+            id: 'CVE-2099-72',
+            scanner: 'grype',
+            severity: 'LOW',
+            state: 'fixed',
+            fixedAt: '2026-07-10',
+          },
+        ],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-01',
+      ),
+    );
+    expect(md).toContain('ℹ️ **Recently resolved (2):**');
+    // both rows present on their OWN lines (join('\n'), not concatenated)
+    expect(md).toContain(
+      '| [CVE-2099-71](https://github.com/advisories?query=CVE-2099-71) | LOW | 2026-07-12 |\n| [CVE-2099-72](https://github.com/advisories?query=CVE-2099-72) | LOW | 2026-07-10 |',
+    );
   });
 
   it('renders a Needs-attention table (item · status · why) when action is required', () => {
@@ -1069,13 +1434,14 @@ describe('summarize + renderMarkdown', () => {
         [finding('CVE-2026-1', 'grype', 'HIGH')],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     expect(md).toContain('Needs attention (1)');
     expect(md).toContain('| item | status | why |');
     // the actionable row is the overdue acceptance, with its justification as "why"
     expect(md).toContain(
-      '| CVE-2026-1 | Revisit overdue | adversary-unreachable |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | adversary-unreachable |',
     );
   });
 
@@ -1085,6 +1451,7 @@ describe('summarize + renderMarkdown', () => {
         [],
         [finding('TEMP-1-ABC', 'trivy', 'CRITICAL', 'tar')],
         'HIGH',
+        '2026-07-14',
         '2026-07-14',
       ),
     );
@@ -1109,10 +1476,11 @@ describe('summarize + renderMarkdown', () => {
         [finding('CVE-2026-1', 'grype', 'HIGH')],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     expect(md).toContain(
-      '| CVE-2026-1 | Revisit overdue | component_not_present |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | component_not_present |',
     );
   });
 
@@ -1138,6 +1506,7 @@ describe('summarize + renderMarkdown', () => {
         ],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     // scanners column carries a markdown link per scanner (#206 scanner-linking)
@@ -1153,10 +1522,13 @@ describe('summarize + renderMarkdown', () => {
         [finding('CVE-2099-1', 'grype', 'MEDIUM', 'node-undici')], // no htmlUrl
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     // no htmlUrl => bare name, not a markdown link (kills the link-branch mutant)
-    expect(md).toContain('| CVE-2099-1 | Tracked | MEDIUM | grype | — |');
+    expect(md).toContain(
+      '| [CVE-2099-1](https://github.com/advisories?query=CVE-2099-1) | Tracked | MEDIUM | grype | — |',
+    );
     expect(md).not.toContain('[grype](');
   });
 
@@ -1167,6 +1539,7 @@ describe('summarize + renderMarkdown', () => {
         [finding('CVE-2026-1', 'grype', 'HIGH')],
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     expect(withInv).toContain('investigating');
@@ -1175,6 +1548,7 @@ describe('summarize + renderMarkdown', () => {
         [],
         [finding('CVE-2099-2', 'trivy', 'LOW', 'zlib1g')],
         'HIGH',
+        '2026-07-14',
         '2026-07-14',
       ),
     );
@@ -1238,29 +1612,47 @@ describe('summarize + renderMarkdown', () => {
             pkg: 'tar',
             htmlUrl: 'https://x.test/6',
           },
+          // recently-resolved (in the window below) => its own block + ledger row
+          {
+            id: 'CVE-2099-7',
+            scanner: 'grype',
+            severity: 'MEDIUM',
+            state: 'fixed',
+            pkg: 'zlib1g',
+            htmlUrl: 'https://x.test/7',
+            fixedAt: '2026-07-13',
+          },
         ],
         'HIGH',
         '2026-07-14',
+        '2026-07-01', // recently-resolved window boundary
       ),
     );
     const expected = [
-      '**VEX report** — 4 CVE(s) across 6 image-scan alert(s): 1 decision needed · 0 vex drift · 0 undocumented dismissal · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating',
+      '**VEX report** — 5 CVE(s) across 7 image-scan alert(s): 1 decision needed · 0 vex drift · 0 undocumented dismissal · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating · 1 resolved',
       '',
       '**Needs attention (2):**',
       '',
       '| item | status | why |',
       '| --- | --- | --- |',
-      '| CVE-2099-9 | Decision needed | adversary-unreachable |',
-      '| CVE-2026-1 | Revisit overdue | adversary-unreachable |',
+      '| [CVE-2099-9](https://github.com/advisories?query=CVE-2099-9) | Decision needed | adversary-unreachable |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | adversary-unreachable |',
+      '',
+      'ℹ️ **Recently resolved (1):**',
+      '',
+      '| item | severity | resolved |',
+      '| --- | --- | --- |',
+      '| [CVE-2099-7](https://github.com/advisories?query=CVE-2099-7) | MEDIUM | 2026-07-13 |',
       '',
       '<details>',
-      '<summary>Full VEX ledger (4 CVEs) — click to expand</summary>',
+      '<summary>Full VEX ledger (5 CVEs) — click to expand</summary>',
       '',
       '| item | status | severity | scanners | revisit_by |',
       '| --- | --- | --- | --- | --- |',
-      '| CVE-2099-9 | Decision needed | CRITICAL | [grype](https://x.test/5), [trivy](https://x.test/4) | — |',
-      '| CVE-2026-1 | Revisit overdue | HIGH | [grype](https://x.test/1), [trivy](https://x.test/2) | 2026-01-01 |',
-      '| CVE-2026-2 | Investigating | HIGH | [grype](https://x.test/3) | — |',
+      '| [CVE-2099-9](https://github.com/advisories?query=CVE-2099-9) | Decision needed | CRITICAL | [grype](https://x.test/5), [trivy](https://x.test/4) | — |',
+      '| [CVE-2026-1](https://github.com/advisories?query=CVE-2026-1) | Revisit overdue | HIGH | [grype](https://x.test/1), [trivy](https://x.test/2) | 2026-01-01 |',
+      '| [CVE-2099-7](https://github.com/advisories?query=CVE-2099-7) | Resolved | MEDIUM | [grype](https://x.test/7) | — |',
+      '| [CVE-2026-2](https://github.com/advisories?query=CVE-2026-2) | Investigating | HIGH | [grype](https://x.test/3) | — |',
       "| TEMP-1-ABC ⚠️ un-CVE'd | Tracked | LOW | [trivy](https://x.test/6) | — |",
       '',
       '</details>',
@@ -1325,10 +1717,13 @@ describe('summarize + renderMarkdown', () => {
         [], // stale
         'HIGH',
         '2026-07-14',
+        '2026-07-14',
       ),
     );
     expect(md).toContain('Stale record');
     // stale row: item · status · severity · scanners(—) · revisit_by(—)
-    expect(md).toContain('| CVE-2026-9 | Stale record | UNKNOWN | — | — |');
+    expect(md).toContain(
+      '| [CVE-2026-9](https://github.com/advisories?query=CVE-2026-9) | Stale record | UNKNOWN | — | — |',
+    );
   });
 });

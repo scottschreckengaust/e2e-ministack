@@ -3,6 +3,7 @@ import {
   badgeSeverity,
   parseAlerts,
   filterByCategory,
+  mergeAlertLedgers,
   toScannerFindings,
   asRecord,
   asArray,
@@ -60,7 +61,7 @@ describe('parseAlerts', () => {
     ...over,
   });
 
-  it('maps a full alert to {id, scanner, badgeSeverity, state, dismissedReason, category, htmlUrl}', () => {
+  it('maps a full alert to {id, scanner, badgeSeverity, state, dismissedReason, category, htmlUrl, fixedAt}', () => {
     const out = parseAlerts([alert({})]);
     expect(out).toEqual([
       {
@@ -71,8 +72,17 @@ describe('parseAlerts', () => {
         dismissedReason: '',
         category: 'grype-ministack-image',
         htmlUrl: 'https://example.test/alert/1',
+        fixedAt: '', // not fixed => empty
       },
     ]);
+  });
+
+  it('captures fixed_at when the alert is fixed (bounds the recently-resolved window)', () => {
+    const out = parseAlerts([
+      alert({ state: 'fixed', fixed_at: '2026-07-15T20:08:43Z' }),
+    ]);
+    expect(out[0].state).toBe('fixed');
+    expect(out[0].fixedAt).toBe('2026-07-15T20:08:43Z');
   });
 
   it('preserves dismissed state + reason (the second-ledger signal)', () => {
@@ -102,6 +112,7 @@ describe('parseAlerts', () => {
       dismissedReason: '',
       category: '',
       htmlUrl: '',
+      fixedAt: '',
     });
   });
 
@@ -133,6 +144,7 @@ describe('filterByCategory', () => {
     dismissedReason: '',
     category,
     htmlUrl: '',
+    fixedAt: '',
   });
 
   it('keeps only findings in the requested categories', () => {
@@ -153,6 +165,66 @@ describe('filterByCategory', () => {
   });
 });
 
+describe('mergeAlertLedgers (run-ref open + main-ref fixed/dismissed history)', () => {
+  const fa = (
+    id: string,
+    scanner: string,
+    state: string,
+    over: Partial<AlertFinding> = {},
+  ): AlertFinding => ({
+    id,
+    scanner,
+    badgeSeverity: 'HIGH',
+    state,
+    dismissedReason: '',
+    category: 'grype-ministack-image',
+    htmlUrl: '',
+    fixedAt: '',
+    ...over,
+  });
+
+  it('adds main-only findings (the fixed/dismissed history the run ref lacks)', () => {
+    const run = [fa('CVE-1', 'Grype', 'open')];
+    const main = [
+      fa('CVE-1', 'Grype', 'dismissed'), // dup key — run wins, NOT added
+      fa('CVE-2', 'Grype', 'fixed', { fixedAt: '2026-07-15' }), // main-only — added
+    ];
+    const out = mergeAlertLedgers(run, main);
+    expect(out.map((x) => [x.id, x.state])).toEqual([
+      ['CVE-1', 'open'], // run-ref entry wins for the shared key
+      ['CVE-2', 'fixed'], // main-only resolved history brought in
+    ]);
+  });
+
+  it('keys by id AND scanner (same CVE from two scanners are distinct)', () => {
+    const run = [fa('CVE-1', 'Grype', 'open')];
+    const main = [fa('CVE-1', 'Trivy', 'fixed', { fixedAt: '2026-07-15' })];
+    const out = mergeAlertLedgers(run, main);
+    // different scanner => different key => both kept
+    expect(out.map((x) => [x.id, x.scanner])).toEqual([
+      ['CVE-1', 'Grype'],
+      ['CVE-1', 'Trivy'],
+    ]);
+  });
+
+  it('run-ref entries lead, in order; main-only appended after', () => {
+    const run = [fa('CVE-B', 'Grype', 'open'), fa('CVE-A', 'Grype', 'open')];
+    const main = [fa('CVE-C', 'Grype', 'fixed')];
+    expect(mergeAlertLedgers(run, main).map((x) => x.id)).toEqual([
+      'CVE-B',
+      'CVE-A',
+      'CVE-C',
+    ]);
+  });
+
+  it('empty main => run unchanged; empty run => main passthrough', () => {
+    const run = [fa('CVE-1', 'Grype', 'open')];
+    expect(mergeAlertLedgers(run, [])).toEqual(run);
+    const main = [fa('CVE-2', 'Grype', 'fixed')];
+    expect(mergeAlertLedgers([], main)).toEqual(main);
+  });
+});
+
 describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
   const af = (over: Partial<AlertFinding> = {}): AlertFinding => ({
     id: 'CVE-2026-1',
@@ -162,19 +234,23 @@ describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
     dismissedReason: '',
     category: 'grype-ministack-image',
     htmlUrl: 'https://x.test/1',
+    fixedAt: '',
     ...over,
   });
 
-  it('maps badgeSeverity -> severity and carries id/scanner/state/htmlUrl', () => {
+  it('maps badgeSeverity -> severity and carries id/scanner/state/htmlUrl/fixedAt', () => {
     // This is the load-bearing rename: the report reads `severity`, the alert
     // exposes `badgeSeverity`. A wrong mapping makes every CI severity UNKNOWN.
-    expect(toScannerFindings([af()])).toEqual([
+    expect(
+      toScannerFindings([af({ fixedAt: '2026-07-15T00:00:00Z' })]),
+    ).toEqual([
       {
         id: 'CVE-2026-1',
         scanner: 'Grype',
         severity: 'CRITICAL',
         state: 'open',
         htmlUrl: 'https://x.test/1',
+        fixedAt: '2026-07-15T00:00:00Z',
       },
     ]);
   });
@@ -197,6 +273,7 @@ describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
         severity: 'HIGH',
         state: 'open',
         htmlUrl: 'https://x.test/1',
+        fixedAt: '',
       },
       {
         id: 'CVE-2026-2',
@@ -204,6 +281,7 @@ describe('toScannerFindings (the AlertFinding -> ScannerFinding seam)', () => {
         severity: 'MEDIUM',
         state: 'dismissed',
         htmlUrl: 'https://x.test/2',
+        fixedAt: '',
       },
     ]);
   });

@@ -34,6 +34,7 @@ export interface AlertFinding {
   dismissedReason: string; // e.g. "won't fix" | "" when not dismissed
   category: string; // most_recent_instance.category (which scan produced it)
   htmlUrl: string; // alert's Security-tab URL, so the report can link to it
+  fixedAt: string; // `fixed_at` ISO timestamp when state==='fixed', else '' — bounds the "recently resolved" window (#210)
 }
 
 // A CVE token inside a rule id (grype `CVE-2026-1-python`, trivy `CVE-2026-1`),
@@ -81,6 +82,7 @@ export function parseAlerts(alerts: unknown): AlertFinding[] {
       dismissedReason: str(a.dismissed_reason),
       category: str(asRecord(a.most_recent_instance)?.category),
       htmlUrl: str(a.html_url),
+      fixedAt: str(a.fixed_at),
     });
   }
   return out;
@@ -101,6 +103,36 @@ export function filterByCategory(
 }
 
 /**
+ * Merge the run-ref alert set with the default-branch (`main`) set (#210).
+ *
+ * WHY: the Alerts API `state` (open / dismissed / fixed) is anchored per ref,
+ * but `fixed`/`dismissed` history lives on the DEFAULT BRANCH — a PR merge ref
+ * reports 0 fixed and 0 dismissed even when many exist on `main` (dismissal +
+ * auto-fix are repo-global, like the #186 dismiss-alerts step which is
+ * default-branch-only). So on a PR the "recently resolved" and drift signals
+ * would silently vanish. This merges both: OPEN findings come from the RUN ref
+ * (correct on a digest-bump PR, where the new image's open set differs from
+ * main), while `main` supplies the fixed/dismissed history the run ref lacks.
+ *
+ * Keyed by `id|scanner` (one alert per CVE per scanner). The RUN-ref entry wins
+ * when a key exists on both (its open/severity/url reflect what THIS ref scans);
+ * a key present only on `main` is added (the resolved/dismissed history). Order
+ * is deterministic: run-ref entries first (in their order), then main-only ones.
+ */
+export function mergeAlertLedgers(
+  runRef: readonly AlertFinding[],
+  mainRef: readonly AlertFinding[],
+): AlertFinding[] {
+  const key = (f: AlertFinding): string => `${f.id}|${f.scanner}`;
+  const seen = new Set(runRef.map(key));
+  const out = [...runRef];
+  for (const f of mainRef) {
+    if (!seen.has(key(f))) out.push(f);
+  }
+  return out;
+}
+
+/**
  * Adapt Alert findings to the `ScannerFinding` shape the VEX report consumes.
  * The two ledgers name the same concepts differently — the alert's
  * `badgeSeverity` is the report's `severity` — so this is the ONE place the
@@ -117,6 +149,7 @@ export function toScannerFindings(
     severity: f.badgeSeverity,
     state: f.state,
     htmlUrl: f.htmlUrl,
+    fixedAt: f.fixedAt,
   }));
 }
 

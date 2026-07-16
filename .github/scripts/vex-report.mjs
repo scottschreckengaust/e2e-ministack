@@ -9,26 +9,40 @@
 // strips the `.ts` on import — no build step.
 //
 // Usage:
-//   node vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md]
+//   node vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince]
 //
 //   vexDir        directory of `.vex/CVE-*.openvex.json` records (the source of truth)
-//   findings.json a JSON array of {id, scanner, severity, pkg, state} — the
-//                 Code-Scanning alerts normalized by `alerts-findings.mjs`
-//                 (tool-agnostic; `state` carries the second-ledger signal)
+//   findings.json a JSON array of {id, scanner, severity, pkg, state, fixedAt} —
+//                 the Code-Scanning alerts normalized by `alerts-findings.mjs`
+//                 (tool-agnostic; `state`/`fixedAt` carry the second-ledger signal)
 //   today         ISO date (YYYY-MM-DD) for overdue detection; '' to skip
 //   gateFloor     CRITICAL|HIGH|MEDIUM|LOW (default HIGH)
 //   out.md        optional output path; else stdout
+//   resolvedSince ISO date boundary for the "recently resolved" window — a
+//                 Resolved alert older than this falls off the report. The
+//                 workflow passes the LAST RELEASE's published date ("resolved
+//                 since users last saw a release"); '' (default) drops all
+//                 Resolved rows (no release baseline yet). The workflow supplies
+//                 a rolling-window fallback when there is no prior release.
 //
 // The transform never throws; malformed inputs degrade to empty sets.
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildReport, renderMarkdown } from './vex-report.ts';
 
-const [, , vexDir, findingsFile, today = '', gateFloor = 'HIGH', outFile] =
-  process.argv;
+const [
+  ,
+  ,
+  vexDir,
+  findingsFile,
+  today = '',
+  gateFloor = 'HIGH',
+  outFile,
+  resolvedSince = '',
+] = process.argv;
 if (!vexDir || !findingsFile) {
   console.error(
-    'usage: vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md]',
+    'usage: vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince]',
   );
   process.exit(2);
 }
@@ -74,7 +88,7 @@ try {
   // no/!invalid findings file -> empty; report still renders from .vex/ alone.
 }
 
-const rows = buildReport(vexRecords, findings, gateFloor, today);
+const rows = buildReport(vexRecords, findings, gateFloor, today, resolvedSince);
 const md = renderMarkdown(rows);
 
 if (outFile) writeFileSync(outFile, md);
