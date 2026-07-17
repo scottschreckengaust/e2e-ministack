@@ -7,6 +7,35 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as path from 'node:path';
 
+/**
+ * Provenance marker set on the function's Lambda `Description` (#175).
+ *
+ * This is the PRIMARY, distinctive marker that ONLY this construct stamps. The
+ * integration adapter (iac/cdk/deploy.ts) reads it back via `GetFunction` after
+ * deploy — on the verify fast-path AND after a fresh provision — and fails
+ * loudly if it is absent, so a stale or foreign function of the same name can
+ * never let the integration tier green without exercising a freshly-provisioned
+ * `DoublerFunction`. Description is chosen as the primary marker because
+ * `GetFunction` returns it reliably in `Configuration.Description` (a
+ * first-class field of the function configuration MiniStack always echoes),
+ * whereas tags are a side table the emulator may or may not surface on
+ * `GetFunction`. See deploy.ts for the read-back.
+ */
+export const DOUBLER_PROVENANCE_DESCRIPTION =
+  'e2e-ministack compat DoublerFunction (CompatLambdaStack) — provisioned marker #175';
+
+/**
+ * Secondary provenance marker: a CDK tag on the function (#175). Belt-and-braces
+ * alongside {@link DOUBLER_PROVENANCE_DESCRIPTION} — it makes the ownership
+ * claim visible to anyone listing tags and is asserted in the synthesized
+ * template, but the Description is the marker the deploy read-back keys on
+ * because it is the more reliably returned field on MiniStack.
+ */
+export const DOUBLER_PROVENANCE_TAG = {
+  key: 'e2e-ministack:compat',
+  value: 'lambda-doubler',
+} as const;
+
 /** Props for {@link DoublerFunction}. */
 export interface DoublerFunctionProps {
   /**
@@ -117,6 +146,10 @@ export class DoublerFunction extends Construct {
 
     this.fn = new lambda.Function(this, 'Function', {
       functionName,
+      // Provenance marker (#175): the read-back assertion in deploy.ts keys on
+      // this exact string so a stale/foreign function of the same name fails
+      // loudly instead of letting the integration tier green.
+      description: DOUBLER_PROVENANCE_DESCRIPTION,
       runtime: lambda.Runtime.NODEJS_24_X,
       handler: 'index.handler',
       // Reuse the same asset the live stack ships (repo-root lambda/).
@@ -128,5 +161,11 @@ export class DoublerFunction extends Construct {
       deadLetterQueue: dlq, // CKV_AWS_116
       reservedConcurrentExecutions: 5, // CKV_AWS_115
     });
+
+    // Secondary provenance marker (#175): a CDK tag scoped to the function.
+    cdk.Tags.of(this.fn).add(
+      DOUBLER_PROVENANCE_TAG.key,
+      DOUBLER_PROVENANCE_TAG.value,
+    );
   }
 }
