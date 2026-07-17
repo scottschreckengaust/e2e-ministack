@@ -60,7 +60,10 @@ export default {
   // for the step summary (no JUnit reporter exists for Stryker, by design).
   reporters: ['html', 'clear-text', 'progress', 'json'],
   jsonReporter: { fileName: 'reports/mutation/mutation.json' },
-  // CI gate: fail under 80%, warn under 90%.
-  thresholds: { high: 90, low: 80, break: 80 },
+  // CI gate: the bar is ZERO surviving mutants. Equivalent mutants are
+  // refactored away by construction — never `// Stryker disable`d (the
+  // maintainer's binding decision, #205/#217) — so a 100% score is achievable
+  // and enforced: `break: 100` fails CI the instant a single mutant survives.
+  thresholds: { high: 100, low: 100, break: 100 },
   // jest-runner needs JEST_TIER=unit; set via env in the npm script.
 };

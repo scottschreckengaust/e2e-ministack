@@ -51,7 +51,7 @@ npm run test:unit          # fast: Lambda logic + CDK fine-grained assertions (N
 npm run test:integ-snapshot  # @aws-cdk/integ-runner snapshot diff (synth-only; NO emulator)
 npm test                   # alias for test:unit
 npm run test:integration   # AWS SDK tests against deployed MiniStack resources
-npm run test:mutation      # Stryker mutation testing of the Lambda logic (gate: >=80%)
+npm run test:mutation      # Stryker mutation testing of the scoped logic (gate: 0 surviving mutants)
 ```
 
 - **Unit** tests are synth-only — no Docker or emulator required, so they're
