@@ -1,0 +1,75 @@
+name: Stale
+
+# Stale issue / PR management (issue #193). First-party actions/stale (MIT),
+# zero-egress: runs only on a cron schedule (and manual dispatch) with no
+# secrets and no PR checkout, so it is zizmor-clean by construction.
+#
+# Policy (mark-first, conservative auto-close):
+#   - Mark an issue/PR stale after 60 days with no activity (adds the `stale`
+#     label + a friendly comment).
+#   - Auto-close 14 days later if still untouched, UNLESS exempt.
+#   - Any new activity removes the `stale` label and resets the clock.
+#   - Exempt labels (issues AND PRs) shield long-lived / important work from
+#     ever going stale: priority:high, help wanted, good first issue,
+#     license-review, area:security, pinned.
+#   - Assigned or milestoned items are also exempt.
+
+on:
+  schedule:
+    # Daily at 01:00 UTC. operations-per-run caps the API budget per run so
+    # a large backlog is worked through gradually rather than all at once.
+    - cron: '0 1 * * *'
+  workflow_dispatch: # allow a manual sweep
+
+# Least privilege by default.
+permissions:
+  contents: read
+
+# Only one stale sweep at a time.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    name: Mark and close stale issues/PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write # add/remove labels, comment, close
+      pull-requests: write # same for PRs
+    steps:
+      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
+        with:
+          # -- Windows -----------------------------------------------------
+          days-before-stale: 60
+          days-before-close: 14
+          # -- Marker label (must exist; created via `gh label create`) ----
+          stale-issue-label: stale
+          stale-pr-label: stale
+          # -- Messages ----------------------------------------------------
+          stale-issue-message: >
+            This issue has had no activity for 60 days and is now marked
+            `stale`. It will be closed in 14 days if there is no further
+            activity. Comment or update it to keep it open. Exempt it
+            permanently with the `pinned` label (or one of the exempt
+            labels: `priority:high`, `help wanted`, `good first issue`,
+            `license-review`, `area:security`).
+          stale-pr-message: >
+            This pull request has had no activity for 60 days and is now
+            marked `stale`. It will be closed in 14 days if there is no
+            further activity. Push, comment, or rebase to keep it open.
+          close-issue-message: >
+            Closing this issue after 74 days of inactivity (60 to stale +
+            14 to close). Reopen it if it is still relevant -- no context is
+            lost.
+          close-pr-message: >
+            Closing this pull request after 74 days of inactivity. Reopen
+            it if you intend to continue the work.
+          # -- Exemptions (issues AND PRs) ---------------------------------
+          exempt-issue-labels: 'priority:high,help wanted,good first issue,license-review,area:security,pinned'
+          exempt-pr-labels: 'priority:high,help wanted,good first issue,license-review,area:security,pinned'
+          exempt-all-assignees: true
+          exempt-all-milestones: true
+          # -- Rate limiting -----------------------------------------------
+          operations-per-run: 30
