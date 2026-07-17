@@ -413,7 +413,7 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
       ),
     );
     expect(md.split('\n')[0]).toBe(
-      '**VEX report** — 1 CVE(s) across 1 image-scan alert(s): 0 decision needed · 0 vex drift · 0 undocumented dismissal · 0 revisit overdue · 0 stale · 0 accepted · 1 tracked',
+      '**VEX report** — 1 CVE(s) across 1 image-scan alert(s) (1 scanner): 0 decision needed · 0 vex drift · 0 undocumented dismissal · 0 revisit overdue · 0 stale · 0 accepted · 1 tracked',
     );
   });
 
@@ -1636,7 +1636,7 @@ describe('summarize + renderMarkdown', () => {
       ),
     );
     const expected = [
-      '**VEX report** — 5 CVE(s) across 7 image-scan alert(s): 1 decision needed · 0 vex drift · 0 undocumented dismissal · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating · 1 resolved',
+      '**VEX report** — 5 CVE(s) across 7 image-scan alert(s) (2 scanners): 1 decision needed · 0 vex drift · 0 undocumented dismissal · 1 revisit overdue · 0 stale · 0 accepted · 1 tracked · 1 investigating · 1 resolved',
       '',
       '**Needs attention (2):**',
       '',
@@ -1710,6 +1710,62 @@ describe('summarize + renderMarkdown', () => {
         'vulnerable_code_not_in_execute_path',
       );
     }
+  });
+
+  it('header states the distinct-scanner denominator, pluralized (#206 item 6)', () => {
+    // Two scanners on one CVE + one grype-only CVE => 2 distinct scanners.
+    // The header must read "(2 scanners)" so the CVE-vs-alert gap reads as
+    // aggregation across scanners, not a discrepancy.
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [
+          finding('CVE-2099-1', 'grype', 'LOW', 'zlib1g'),
+          finding('CVE-2099-1', 'trivy', 'LOW', 'zlib1g'),
+          finding('CVE-2099-2', 'grype', 'LOW', 'zlib1g'),
+        ],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+      ),
+    );
+    expect(md.split('\n')[0]).toContain(
+      '2 CVE(s) across 3 image-scan alert(s) (2 scanners):',
+    );
+  });
+
+  it('header uses the SINGULAR "scanner" for exactly one (kills the plural mutant)', () => {
+    const md = renderMarkdown(
+      buildReport(
+        [],
+        [finding('CVE-2099-1', 'grype', 'LOW', 'zlib1g')],
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+      ),
+    );
+    expect(md.split('\n')[0]).toContain(
+      '1 CVE(s) across 1 image-scan alert(s) (1 scanner):',
+    );
+    // singular, so NOT the plural form
+    expect(md.split('\n')[0]).not.toContain('(1 scanners)');
+  });
+
+  it('header OMITS the scanner qualifier when no scanners contributed (kills the >0 mutant)', () => {
+    // A stale-record-only report has zero scanner links, so the parenthetical
+    // must be absent entirely — never the nonsensical "(0 scanners)".
+    const md = renderMarkdown(
+      buildReport(
+        [{ cve: 'CVE-2026-9', status: 'not_affected', justification: 'x' }],
+        [], // no findings => Stale record, no scanners
+        'HIGH',
+        '2026-07-14',
+        '2026-07-14',
+      ),
+    );
+    const header = md.split('\n')[0];
+    expect(header).toContain('1 CVE(s) across 0 image-scan alert(s):');
+    expect(header).not.toContain('scanner');
   });
 
   it('renders an em-dash for missing scanners/revisit in a stale row', () => {
