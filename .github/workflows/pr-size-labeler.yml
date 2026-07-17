@@ -1,0 +1,60 @@
+name: PR size labeler
+
+# Label PRs by size (XS/S/M/L/XL) so reviewers can gauge scope at a glance
+# (issue #192, part of the #190 automation epic). Adopts CodelyTV/pr-size-labeler
+# (MIT) — its license isn't in the lockfile, so this is a governance decision:
+# MIT is permissive (no copyleft), it is not single-vendor lock-in, and it
+# satisfies the AGENTS.md tool-adoption line. It is SHA-pinned like every other
+# action here.
+#
+# LABEL-ONLY: `fail_if_xl: false` — this never gates or blocks a PR, it only
+# applies a label. The action reads the PR's diff STATS via the GitHub API and
+# never executes PR code, so (per the CodelyTV README + the labeler.yml #116
+# rationale) `pull_request` — NOT `pull_request_target` — is correct and keeps
+# zizmor's dangerous-triggers audit at ZERO findings. Every PR here is a
+# same-repo branch; fork traffic doesn't exist today.
+#
+# The `size/*` labels are auto-created by the action on first use (that is what
+# the job's `issues: write` scope is for), so no pre-creation is required.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Least privilege — the job below opts into the writes it needs.
+permissions:
+  contents: read
+
+jobs:
+  size-label:
+    name: Label by PR size
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # read the PR's changed-file list via the API
+      pull-requests: write # apply the size label
+      issues: write # create the size/* labels on first use
+    steps:
+      # No checkout step: the action reads the PR diff stats via the GitHub
+      # API, so there is no PR code on disk and no persist-credentials concern.
+      - uses: codelytv/pr-size-labeler@095a41fca88b8764fd9e008ad269bcdb82bb38b9 # v1.10.4
+        with:
+          xs_label: 'size/xs'
+          xs_max_size: '10'
+          s_label: 'size/s'
+          s_max_size: '100'
+          m_label: 'size/m'
+          m_max_size: '500'
+          l_label: 'size/l'
+          l_max_size: '1000'
+          xl_label: 'size/xl'
+          # Label-only — never fail/block the PR on size.
+          fail_if_xl: 'false'
+          # Exclude generated/committed artifacts so they don't skew the size:
+          # the npm lockfile, the integ-runner cloud-assembly snapshots, and
+          # the CI report outputs. Patterns are bash `[[ ==  ]]` globs where `*`
+          # also spans `/`, so these cover nested paths.
+          files_to_ignore: |
+            "package-lock.json"
+            "*.snapshot/*"
+            "reports/*"
