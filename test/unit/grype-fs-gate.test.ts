@@ -1,8 +1,8 @@
 import {
   vexAcceptedIds,
   matchVulnIds,
-  isHighPlus,
-  uncoveredHighVulns,
+  hasSeverity,
+  uncoveredVulns,
   normId,
   asArray,
   asRecord,
@@ -22,6 +22,12 @@ import {
 // the primary `vulnerability.id` with the CVE in `relatedVulnerabilities` (or
 // vice versa), while the `.vex/` records name the CVE and alias the GHSA — the
 // gate must map either direction onto the accepted set.
+//
+// The gate floor is grype's STRICTEST rung (#284, "drop it the most strict"):
+// EVERY severity counts, so `hasSeverity` (not a High/Critical membership test)
+// is the operative predicate — proven necessary because grype's
+// `severity-cutoff`/`--fail-on` only sets the exit code, never filtering the
+// JSON `matches[]`.
 
 // -- small total coercions (mirroring gate-findings.test.ts / sarif-cve-ids) --
 describe('asArray', () => {
@@ -165,25 +171,28 @@ describe('matchVulnIds', () => {
   });
 });
 
-describe('isHighPlus', () => {
-  it('is true for High and Critical (case-insensitive), false below', () => {
-    expect(isHighPlus({ vulnerability: { severity: 'High' } })).toBe(true);
-    expect(isHighPlus({ vulnerability: { severity: 'critical' } })).toBe(true);
-    expect(isHighPlus({ vulnerability: { severity: 'Medium' } })).toBe(false);
-    expect(isHighPlus({ vulnerability: { severity: 'Low' } })).toBe(false);
-    expect(isHighPlus({ vulnerability: { severity: 'Negligible' } })).toBe(
-      false,
+describe('hasSeverity (strictest floor — every severity counts)', () => {
+  it('is true for ANY string severity, including the lowest rungs', () => {
+    expect(hasSeverity({ vulnerability: { severity: 'Critical' } })).toBe(true);
+    expect(hasSeverity({ vulnerability: { severity: 'High' } })).toBe(true);
+    expect(hasSeverity({ vulnerability: { severity: 'Medium' } })).toBe(true);
+    expect(hasSeverity({ vulnerability: { severity: 'Low' } })).toBe(true);
+    expect(hasSeverity({ vulnerability: { severity: 'Negligible' } })).toBe(
+      true,
     );
+    // Even an unrecognized string severity is a real finding at the strictest
+    // floor — the gate errs toward surfacing, not silently dropping.
+    expect(hasSeverity({ vulnerability: { severity: 'Unknown' } })).toBe(true);
   });
-  it('is false for a missing/garbage vulnerability or severity', () => {
-    expect(isHighPlus({})).toBe(false);
-    expect(isHighPlus({ vulnerability: null })).toBe(false);
-    expect(isHighPlus({ vulnerability: { severity: 42 } })).toBe(false);
-    expect(isHighPlus({ vulnerability: {} })).toBe(false);
+  it('is false for a missing/garbage vulnerability or a non-string severity', () => {
+    expect(hasSeverity({})).toBe(false);
+    expect(hasSeverity({ vulnerability: null })).toBe(false);
+    expect(hasSeverity({ vulnerability: { severity: 42 } })).toBe(false);
+    expect(hasSeverity({ vulnerability: {} })).toBe(false);
   });
 });
 
-describe('uncoveredHighVulns (the gate decision)', () => {
+describe('uncoveredVulns (the gate decision — strictest floor)', () => {
   // Grype JSON shape: matches[] with vulnerability.{id,severity} + related[].
   function grypeJson(...matches: unknown[]): unknown {
     return { matches };
@@ -242,7 +251,7 @@ describe('uncoveredHighVulns (the gate decision)', () => {
         relatedVulnerabilities: [{ id: 'CVE-2026-59950' }],
       },
     );
-    expect(uncoveredHighVulns(doc, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns(doc, mcpAccepted)).toEqual([]);
   });
 
   it('accepts a match whether grype reports the CVE OR the GHSA as primary (aliasing both ways)', () => {
@@ -254,18 +263,18 @@ describe('uncoveredHighVulns (the gate decision)', () => {
     const ghsaPrimary = grypeJson({
       vulnerability: { id: 'GHSA-hvrp-rf83-w775', severity: 'Critical' },
     });
-    expect(uncoveredHighVulns(cvePrimary, mcpAccepted)).toEqual([]);
-    expect(uncoveredHighVulns(ghsaPrimary, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns(cvePrimary, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns(ghsaPrimary, mcpAccepted)).toEqual([]);
   });
 
-  it('FAILS on a genuinely NEW uncovered high+ CVE (no .vex/ record)', () => {
+  it('FAILS on a genuinely NEW uncovered CVE (no .vex/ record)', () => {
     const doc = grypeJson({
       vulnerability: { id: 'CVE-2099-99999', severity: 'High' },
     });
-    expect(uncoveredHighVulns(doc, mcpAccepted)).toEqual(['CVE-2099-99999']);
+    expect(uncoveredVulns(doc, mcpAccepted)).toEqual(['CVE-2099-99999']);
   });
 
-  it('reports ONLY the uncovered high+ when accepted and uncovered are mixed', () => {
+  it('reports ONLY the uncovered ids when accepted and uncovered are mixed', () => {
     const doc = grypeJson(
       // accepted (affected mcp)
       {
@@ -277,19 +286,34 @@ describe('uncoveredHighVulns (the gate decision)', () => {
       // uncovered new high
       { vulnerability: { id: 'CVE-2099-22222', severity: 'High' } },
     );
-    expect(uncoveredHighVulns(doc, mcpAccepted)).toEqual([
+    expect(uncoveredVulns(doc, mcpAccepted)).toEqual([
       'CVE-2099-11111',
       'CVE-2099-22222',
     ]);
   });
 
-  it('ignores below-floor findings even when uncovered (severity floor is high)', () => {
+  it('FAILS on uncovered Medium/Low/Negligible findings too (strictest floor, #284)', () => {
+    // The #284 pytest case in miniature: a Medium finding with no .vex/ record
+    // must fail once the floor is dropped to the strictest rung. Low/Negligible
+    // likewise — nothing is below the floor anymore.
     const doc = grypeJson(
       { vulnerability: { id: 'CVE-2099-33333', severity: 'Medium' } },
       { vulnerability: { id: 'CVE-2099-44444', severity: 'Low' } },
       { vulnerability: { id: 'CVE-2099-55555', severity: 'Negligible' } },
     );
-    expect(uncoveredHighVulns(doc, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns(doc, mcpAccepted)).toEqual([
+      'CVE-2099-33333',
+      'CVE-2099-44444',
+      'CVE-2099-55555',
+    ]);
+  });
+
+  it('a VEX-covered low-severity finding still PASSES (coverage, not severity, decides)', () => {
+    const accepted = new Set(['CVE-2099-66666']);
+    const doc = grypeJson({
+      vulnerability: { id: 'CVE-2099-66666', severity: 'Negligible' },
+    });
+    expect(uncoveredVulns(doc, accepted)).toEqual([]);
   });
 
   it('de-duplicates and sorts the uncovered id list deterministically', () => {
@@ -298,29 +322,29 @@ describe('uncoveredHighVulns (the gate decision)', () => {
       { vulnerability: { id: 'CVE-2099-11111', severity: 'High' } },
       { vulnerability: { id: 'CVE-2099-22222', severity: 'Critical' } }, // dup id
     );
-    expect(uncoveredHighVulns(doc, mcpAccepted)).toEqual([
+    expect(uncoveredVulns(doc, mcpAccepted)).toEqual([
       'CVE-2099-11111',
       'CVE-2099-22222',
     ]);
   });
 
-  it('labels an uncovered high match with no readable primary id as (unknown)', () => {
+  it('labels an uncovered match with no readable primary id as (unknown)', () => {
     const doc = grypeJson({ vulnerability: { severity: 'High' } });
-    expect(uncoveredHighVulns(doc, mcpAccepted)).toEqual(['(unknown)']);
+    expect(uncoveredVulns(doc, mcpAccepted)).toEqual(['(unknown)']);
   });
 
   it('is total on malformed grype JSON (non-object doc, bad matches, junk match)', () => {
-    expect(uncoveredHighVulns(null, mcpAccepted)).toEqual([]);
-    expect(uncoveredHighVulns('nope', mcpAccepted)).toEqual([]);
-    expect(uncoveredHighVulns({ matches: 'nope' }, mcpAccepted)).toEqual([]);
-    expect(uncoveredHighVulns({ matches: [null, 5] }, mcpAccepted)).toEqual([]);
-    expect(uncoveredHighVulns({}, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns(null, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns('nope', mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns({ matches: 'nope' }, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns({ matches: [null, 5] }, mcpAccepted)).toEqual([]);
+    expect(uncoveredVulns({}, mcpAccepted)).toEqual([]);
   });
 
-  it('with an EMPTY accepted set, every high+ match is uncovered (fail-closed)', () => {
+  it('with an EMPTY accepted set, every match is uncovered (fail-closed)', () => {
     const doc = grypeJson({
       vulnerability: { id: 'CVE-2026-52869', severity: 'High' },
     });
-    expect(uncoveredHighVulns(doc, new Set())).toEqual(['CVE-2026-52869']);
+    expect(uncoveredVulns(doc, new Set())).toEqual(['CVE-2026-52869']);
   });
 });

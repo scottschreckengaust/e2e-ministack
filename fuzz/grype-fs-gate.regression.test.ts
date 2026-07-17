@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { FuzzedDataProvider } from '@jazzer.js/core/dist/FuzzedDataProvider';
 import {
-  uncoveredHighVulns,
+  uncoveredVulns,
   vexAcceptedIds,
   matchVulnIds,
 } from '../.github/scripts/grype-fs-gate';
@@ -105,7 +105,7 @@ describe('grype-fs-gate — corpus replay (regression)', () => {
 
   it('returns an empty (passing) list on empty/degenerate inputs', () => {
     for (const v of [undefined, null, {}, [], 'x', 42]) {
-      expect(uncoveredHighVulns(v, MCP_ACCEPTED)).toEqual([]);
+      expect(uncoveredVulns(v, MCP_ACCEPTED)).toEqual([]);
     }
   });
 
@@ -115,13 +115,13 @@ describe('grype-fs-gate — corpus replay (regression)', () => {
       const parsed = tryParse(
         fs.readFileSync(path.join(CORPUS_DIR, sanitizeCorpusName(file))),
       );
-      assertWellFormed(uncoveredHighVulns(parsed, MCP_ACCEPTED));
+      assertWellFormed(uncoveredVulns(parsed, MCP_ACCEPTED));
       // An empty accepted set is fail-closed: never fewer uncovered than with
       // the mcp set (an accepted id can only REMOVE entries, never add).
-      const withEmpty = uncoveredHighVulns(parsed, new Set());
+      const withEmpty = uncoveredVulns(parsed, new Set());
       assertWellFormed(withEmpty);
       expect(withEmpty.length).toBeGreaterThanOrEqual(
-        uncoveredHighVulns(parsed, MCP_ACCEPTED).length,
+        uncoveredVulns(parsed, MCP_ACCEPTED).length,
       );
     },
   );
@@ -148,7 +148,7 @@ describe('grype-fs-gate — corpus replay (regression)', () => {
         ],
       };
       expect(() =>
-        assertWellFormed(uncoveredHighVulns(doc, MCP_ACCEPTED)),
+        assertWellFormed(uncoveredVulns(doc, MCP_ACCEPTED)),
       ).not.toThrow();
     }
   });
@@ -162,7 +162,7 @@ describe('grype-fs-gate — corpus replay (regression)', () => {
       'not-an-object',
       [1, 2, 3],
     ]) {
-      expect(() => uncoveredHighVulns(v, MCP_ACCEPTED)).not.toThrow();
+      expect(() => uncoveredVulns(v, MCP_ACCEPTED)).not.toThrow();
       expect(() => matchVulnIds(v)).not.toThrow();
     }
   });

@@ -416,12 +416,23 @@ jobs:
       # the deliberately-`affected` `.vex/mcp-CVE-*.openvex.json` records (#188
       # status-honesty: reachable-but-not-exercised MCP server transport) could
       # not suppress the finding and this REQUIRED gate reddened on main + every
-      # PR. The JSON-derived gate (`grype-fs-gate.mjs`) fails ONLY on a high+
-      # finding NOT covered by ANY `.vex/` record — an `affected` record is an
-      # explicit, reviewed acceptance exactly as a `not_affected` one is — so it
-      # still hard-fails on a genuinely-new uncovered high+ (the actionable
-      # signal) but no longer reds on VEX-accepted CVEs. The mcp records stay
-      # honestly `affected`; the SARIF still uploads so findings stay VISIBLE.
+      # PR. The JSON-derived gate (`grype-fs-gate.mjs`) fails ONLY on a finding
+      # NOT covered by ANY `.vex/` record — an `affected` record is an explicit,
+      # reviewed acceptance exactly as a `not_affected` one is — so it still
+      # hard-fails on a genuinely-new uncovered finding (the actionable signal)
+      # but no longer reds on VEX-accepted CVEs. The mcp records stay honestly
+      # `affected`; the SARIF still uploads so findings stay VISIBLE.
+      #
+      # STRICTEST FLOOR (#284 maintainer directive "drop it the most strict"):
+      # the gate floor is grype's LOWEST rung — EVERY severity counts
+      # (negligible/low/medium/high/critical), not just high+. The floor lives in
+      # the JSON gate (`grype-fs-gate.ts`), NOT in `severity-cutoff`: proven
+      # empirically that grype's `severity-cutoff` only sets the process EXIT CODE
+      # and does NOT filter the JSON `matches[]` or the SARIF results (a Medium
+      # finding is present at cutoff=high just as at cutoff=negligible). Since the
+      # gate reads `fail-build: false` and derives the verdict from the JSON, the
+      # TS floor is authoritative; `severity-cutoff: negligible` is set on both
+      # steps to make intent explicit and keep the exit code consistent.
       # `fail-build: false` so the action never fails the step itself (the SARIF
       # must always upload); the gate is enforced off the outcome file below.
       #
@@ -442,10 +453,10 @@ jobs:
           grype-version: v0.114.0
           path: '.'
           fail-build: false # gate is derived from the JSON below, not fail-build
-          severity-cutoff: high
+          severity-cutoff: negligible # strictest floor (#284); the TS gate is authoritative
           output-format: json
-      # Compute the gate from the JSON: FAIL iff a high+ finding is NOT covered by
-      # ANY `.vex/` record (affected OR not_affected — both are reviewed
+      # Compute the gate from the JSON: FAIL iff a finding AT ANY SEVERITY is NOT
+      # covered by ANY `.vex/` record (affected OR not_affected — both are reviewed
       # acceptances). Handles GHSA↔CVE aliasing (grype may report the GHSA with the
       # CVE in `relatedVulnerabilities`, or vice versa; the `.vex/` records name the
       # CVE + alias the GHSA). Logic is the 100%-covered + mutation-tested + fuzzed
@@ -477,7 +488,7 @@ jobs:
           grype-version: v0.114.0
           path: '.'
           fail-build: false # visibility only; gate is derived from the JSON above
-          severity-cutoff: high
+          severity-cutoff: negligible # strictest floor (#284) — surface every severity
           output-format: sarif
       - name: Upload SARIF to Security tab
         if: always()
@@ -494,11 +505,11 @@ jobs:
             ${{ steps.grype.outputs.sarif }}
             ${{ steps.grype-json.outputs.json }}
           if-no-files-found: warn
-      - name: Enforce Grype FS result (hard-fail on any uncovered high+ CVE)
+      - name: Enforce Grype FS result (hard-fail on any uncovered CVE, any severity)
         if: always()
         run: |
           source grype-fs.outcome
-          echo "grype FS scan outcome=$outcome (fails on any high+ CVE not covered by a .vex/ record)"
+          echo "grype FS scan outcome=$outcome (fails on any CVE, at any severity, not covered by a .vex/ record)"
           test "$outcome" = "success"
 
   # ── Third-party container image (MiniStack emulator) ───────────────────

@@ -15,11 +15,13 @@
 //
 // Reads the grype JSON and every `.vex/` record, then writes the gate outcome to
 // `grype-fs.outcome` (KEY=VALUE lines the enforce step `source`s) and prints the
-// uncovered high+ ids. Exit is always 0 — the workflow's produce → always-upload
-// → ENFORCE pattern reads the `.outcome` file in a later `if: always()` step, so
+// uncovered ids. The floor is grype's STRICTEST rung — EVERY severity counts
+// (#284, "drop it the most strict") — so any finding not covered by a `.vex/`
+// record fails. Exit is always 0 — the workflow's produce → always-upload →
+// ENFORCE pattern reads the `.outcome` file in a later `if: always()` step, so
 // this shim never fails the job directly (the SARIF must always upload first).
 import { readFileSync, writeFileSync } from 'node:fs';
-import { uncoveredHighVulns, vexAcceptedIds } from './grype-fs-gate.ts';
+import { uncoveredVulns, vexAcceptedIds } from './grype-fs-gate.ts';
 
 const [grypeFile, ...vexFiles] = process.argv.slice(2);
 if (!grypeFile) {
@@ -41,7 +43,7 @@ function readJson(file) {
 
 const grype = readJson(grypeFile);
 const accepted = vexAcceptedIds(vexFiles.map(readJson));
-const uncovered = uncoveredHighVulns(grype, accepted);
+const uncovered = uncoveredVulns(grype, accepted);
 
 // HONEST fail-closed: if the grype JSON could not be read at all, we cannot
 // prove the scan was clean — fail so a broken scan never passes silently
@@ -54,12 +56,12 @@ if (grype === undefined) {
 
 if (uncovered.length === 0) {
   console.error(
-    `grype-fs-gate: 0 uncovered high+ findings (${accepted.size} VEX-accepted id(s)) — PASS`,
+    `grype-fs-gate: 0 uncovered findings at any severity (${accepted.size} VEX-accepted id(s)) — PASS`,
   );
   writeFileSync('grype-fs.outcome', 'outcome=success\n');
 } else {
   console.error(
-    `grype-fs-gate: ${uncovered.length} uncovered high+ finding(s) NOT covered by any .vex/ record — FAIL:`,
+    `grype-fs-gate: ${uncovered.length} uncovered finding(s) NOT covered by any .vex/ record — FAIL:`,
   );
   for (const id of uncovered) console.error(`  - ${id}`);
   writeFileSync('grype-fs.outcome', 'outcome=failure\n');

@@ -34,20 +34,37 @@ As of **#284** the `grype` FS gate is **JSON-derived and VEX-aware for BOTH
 statuses**, mirroring the `ministack-image` job: the scan action runs
 `fail-build: false` (SARIF still uploads to the Security tab, so findings stay
 visible) and the gate is computed from grype's JSON by
-`.github/scripts/grype-fs-gate.ts` — it FAILS only on a high+ finding **not
-covered by any `.vex/` record** (an `affected` record is an explicit, reviewed
-acceptance exactly as a `not_affected` one is). Why the change: grype's go-vex
-only moves `not_affected`/`fixed` to `ignoredMatches[]`; an `affected` record
-STAYS in `matches[]` (its `AugmentMatches` re-surfaces it — see below), so once
-the floating DB began rating the 3 `mcp` GHSAs high, the deliberately-`affected`
+`.github/scripts/grype-fs-gate.ts` — it FAILS only on a finding **not covered by
+any `.vex/` record** (an `affected` record is an explicit, reviewed acceptance
+exactly as a `not_affected` one is). Why the change: grype's go-vex only moves
+`not_affected`/`fixed` to `ignoredMatches[]`; an `affected` record STAYS in
+`matches[]` (its `AugmentMatches` re-surfaces it — see below), so once the
+floating DB began rating the 3 `mcp` GHSAs high, the deliberately-`affected`
 `mcp` records could not suppress the finding and the **required** FS gate went
 red repo-wide. The JSON gate keeps the `mcp` records honestly `affected`
-(#188), still hard-fails on a genuinely-new uncovered high+, and handles
+(#188), still hard-fails on a genuinely-new uncovered finding, and handles
 GHSA↔CVE aliasing (grype may report the GHSA with the CVE in
 `relatedVulnerabilities`, or vice versa; each record names the CVE + aliases the
 GHSA). The `GRYPE_VEX_DOCUMENTS`-fed SARIF is retained as the Security-tab
 visibility view (a `not_affected` FS record like `ecdsa` is suppressed there; an
 `affected` `mcp` record still shows — honest, just no longer gate-failing).
+
+**Strictest floor — the FS ratchet is complete (#284).** Per the maintainer
+directive, the FS gate floor was dropped to grype's **lowest** rung: **every**
+severity now counts (negligible → critical), not just high+. This is safe
+_because_ the gate is VEX-aware — anything with a `.vex/` record stays accepted
+at any severity, so lowering the floor only adds genuinely-uncovered findings.
+The floor lives in the TS gate, not grype's `severity-cutoff`: that flag only
+sets grype's exit code and does NOT filter the JSON `matches[]`/SARIF (proven
+empirically), and the gate reads the JSON with `fail-build: false`, so
+`grype-fs-gate.ts` (which counts every match with a severity) is authoritative;
+`severity-cutoff: negligible` is set on the steps for explicit intent. The one
+finding this surfaced beyond the accepted `mcp`/`ecdsa` set —
+**CVE-2025-71176 / GHSA-6w46-j5rx-g56g (Medium) on `pytest@8.4.2`**, cataloged
+only from `aws-cdk`'s bundled `cdk init` Python scaffolding templates (pytest is
+never installed/run here) — is recorded as an honest `not_affected` (see the
+`pytest` note below). This completes the high → medium → low ratchet documented
+in AGENTS.md for the **filesystem** surface.
 
 Beyond the CI gate, these records also drive the **GitHub Security-tab** state:
 a covered CVE is surfaced as a _dismissed_ alert whose suppression is derived
@@ -242,10 +259,33 @@ the FS surface — the `ecdsa` record is now listed in `trivy.yaml` too).
   file) makes the FS gate **JSON-derived and VEX-aware for both statuses**: it no
   longer reds on any CVE covered by a `.vex/` record (an `affected` acceptance is
   as explicit and reviewed as a `not_affected` one), while still hard-failing on
-  a genuinely-new uncovered high+. **These three records stay honestly
+  a genuinely-new uncovered finding. **These three records stay honestly
   `affected`** — the #188 status-honesty stance is unchanged; only the gate
   mechanism changed. They still show as (un-suppressed) findings in the
   Security-tab SARIF, so visibility is preserved.
+
+### `pytest` (filesystem-surface — surfaced by the strictest floor, #284)
+
+- **`pytest-CVE-2025-71176.openvex.json`** (GHSA-6w46-j5rx-g56g, insecure
+  tmpdir handling; fixed upstream in pytest 9.0.3) — `status: not_affected` /
+  justification `vulnerable_code_not_present` for `pkg:pypi/pytest@8.4.2`.
+  Surfaced only when the FS gate floor was dropped to its **strictest** rung in
+  #284 (it is a Medium, below the former `high` floor). grype catalogs
+  `pytest@8.4.2` **solely** because the `aws-cdk` npm package bundles Python
+  project **scaffolding templates**
+  (`node_modules/aws-cdk/lib/init-templates/{app,sample-app}/python/requirements-dev.txt`)
+  that `cdk init --language python` copies to generate a NEW, separate Python
+  project. This is a TypeScript/Node repo: pytest is never installed into a
+  Python environment, never imported, never executed — the template files are
+  inert data inside a dependency, so the vulnerable code is **not present** in
+  anything this repo runs. Like the `ecdsa` record, it is modeled as a **direct
+  pypi product purl** (not an `aws-cdk` subcomponent) because go-vex only
+  suppresses when the statement's product purl matches the scanned component, and
+  the FS scanners catalog `pytest` as a top-level component of the template
+  requirements file. Being `not_affected`, it is natively suppressed into grype's
+  `ignoredMatches[]` (verified). Revisit when `aws-cdk` bumps the pytest pin in
+  its bundled init-templates — cosmetic here, since it changes no code this repo
+  executes.
 
 ### MiniStack image base CVEs (`CVE-*.openvex.json`, #84)
 

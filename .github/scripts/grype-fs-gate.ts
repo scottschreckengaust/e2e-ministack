@@ -118,40 +118,44 @@ export function matchVulnIds(match: unknown): Set<string> {
   return ids;
 }
 
-// Severities at or above the gate's `high` floor. A Set (not a comparison
-// operator) so there is no `>=`/`>` boundary for Stryker to flip into an
-// equivalent survivor — membership is the honest test.
-const HIGH_PLUS = new Set(['HIGH', 'CRITICAL']);
-
 /**
- * Whether a grype `matches[]` entry is at or above the `high` severity floor.
- * Reads `vulnerability.severity` (grype Title-case: High/Critical/…),
- * case-insensitively. Missing/garbage severity is below the floor (false).
+ * Whether a grype `matches[]` entry has a real (string) severity — i.e. is a
+ * bona-fide finding the STRICTEST gate should evaluate (#284, "drop it the most
+ * strict"). The gate floor is grype's LOWEST rung (`negligible`), so EVERY
+ * severity counts (negligible/low/medium/high/critical) — there is no
+ * severity-membership test to mutate. WHY the floor lives here, not in grype's
+ * `severity-cutoff`: proven empirically (PR #285 review) that grype's
+ * `--fail-on`/`severity-cutoff` only sets the process EXIT CODE — it does NOT
+ * filter the JSON `matches[]` or the SARIF results (a Medium finding is present
+ * at `--fail-on high` and `--fail-on critical` alike). Since the gate reads
+ * `fail-build: false` and derives the verdict from the JSON, this predicate is
+ * the operative floor. Only a missing/non-string severity is excluded (a
+ * degenerate record that isn't an actionable finding), which keeps the function
+ * total and the `typeof` guard observable.
  */
-export function isHighPlus(match: unknown): boolean {
+export function hasSeverity(match: unknown): boolean {
   const m = asRecord(match);
   if (m === null) return false;
   const vuln = asRecord(m.vulnerability);
   if (vuln === null) return false;
-  const sev = vuln.severity;
-  if (typeof sev !== 'string') return false;
-  return HIGH_PLUS.has(sev.toUpperCase());
+  return typeof vuln.severity === 'string';
 }
 
 /**
- * The GATE DECISION: the sorted, de-duplicated list of high+ vulnerability ids
- * in a grype JSON document (`grype -o json`) that are NOT covered by any `.vex/`
- * record. An empty list means the gate PASSES; a non-empty list means it FAILS
- * (each id is a genuinely-new, uncovered high+ finding — VEX-accept it or fix
- * it). A match is COVERED iff any of its ids (primary + related) is in the
- * accepted set, so an `affected` mcp record (reported by its GHSA, CVE in
- * related) is correctly treated as accepted.
+ * The GATE DECISION: the sorted, de-duplicated list of vulnerability ids in a
+ * grype JSON document (`grype -o json`), AT ANY SEVERITY (strictest floor,
+ * #284), that are NOT covered by any `.vex/` record. An empty list means the
+ * gate PASSES; a non-empty list means it FAILS (each id is a genuinely-new,
+ * uncovered finding — VEX-accept it with a truthful record or fix it). A match
+ * is COVERED iff any of its ids (primary + related) is in the accepted set, so
+ * an `affected` mcp record (reported by its GHSA, CVE in related) is correctly
+ * treated as accepted.
  *
  * The reported id for an uncovered match is its primary `vulnerability.id`
  * (falling back to the first related id, then `(unknown)`), so the workflow log
  * names the actionable CVE/GHSA. TOTAL: malformed JSON yields an empty list.
  */
-export function uncoveredHighVulns(
+export function uncoveredVulns(
   grypeJson: unknown,
   accepted: ReadonlySet<string>,
 ): string[] {
@@ -159,7 +163,7 @@ export function uncoveredHighVulns(
   const doc = asRecord(grypeJson);
   if (doc === null) return [];
   for (const rawMatch of asArray(doc.matches)) {
-    if (!isHighPlus(rawMatch)) continue;
+    if (!hasSeverity(rawMatch)) continue;
     const ids = matchVulnIds(rawMatch);
     // Covered iff ANY of the match's ids (primary or related) is accepted.
     let covered = false;

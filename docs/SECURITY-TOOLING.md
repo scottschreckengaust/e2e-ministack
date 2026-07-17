@@ -635,13 +635,36 @@ on `main` and every PR, blocking all merges.
 **The fix (Option 3, maintainer-recommended) mirrors the `ministack-image` Grype
 job:** run the scan action with `fail-build: false` (so the SARIF always uploads
 — findings stay VISIBLE on the Security tab) and **derive the gate from grype's
-JSON** via `.github/scripts/grype-fs-gate.ts`. The gate fails ONLY on a high+
-finding **not covered by any `.vex/` record** — where "covered" treats **both**
+JSON** via `.github/scripts/grype-fs-gate.ts`. The gate fails ONLY on a finding
+**not covered by any `.vex/` record** — where "covered" treats **both**
 `affected` and `not_affected` as an explicit, reviewed acceptance (an `affected`
 record is as deliberate a governance decision as a `not_affected` one). This does
-**not** weaken the gate: it still hard-fails on a genuinely-new uncovered high+
+**not** weaken the gate: it still hard-fails on a genuinely-new uncovered finding
 (VEX-accept it or fix it) — it just stops red-ing on CVEs the repo has already
 reviewed and accepted, making the FS scan consistent with the image scan.
+
+**Severity floor: the STRICTEST rung (#284).** Per the maintainer directive
+("drop it the most strict"), the FS gate floor is grype's lowest rung — **every**
+severity counts (negligible / low / medium / high / critical), not just high+.
+The VEX-aware design makes this safe: anything with a `.vex/` record stays
+accepted at any severity, so dropping the floor only adds _genuinely-uncovered_
+findings as failures. **Where the floor lives:** proven empirically that grype's
+`severity-cutoff` (a.k.a. `--fail-on`) only sets the process **exit code** — it
+does **not** filter the JSON `matches[]` or the SARIF results (a Medium finding
+is present at `severity-cutoff: high` exactly as at `negligible`). Because the
+gate runs `fail-build: false` and reads the JSON, the **TS gate is the
+authoritative floor** (`grype-fs-gate.ts` counts every match with a severity);
+`severity-cutoff: negligible` is set on both grype steps to make intent explicit
+and keep the exit code aligned. **This completes the high → medium → low ratchet
+documented in AGENTS.md — the FS gate now sits at its strictest rung.** Empirical
+scan at the strictest floor (grype v0.114.0, VEX-fed, current tree): the only
+finding beyond the accepted `mcp`/`ecdsa` set was **CVE-2025-71176 /
+GHSA-6w46-j5rx-g56g (Medium) on `pytest@8.4.2`** — cataloged solely because the
+`aws-cdk` npm package bundles `cdk init` Python **scaffolding templates**
+(`node_modules/aws-cdk/lib/init-templates/{app,sample-app}/python/requirements-dev.txt`);
+pytest is never installed or run in this Node/TS repo. Recorded as an honest
+`not_affected` (`vulnerable_code_not_present`) in
+`.vex/pytest-CVE-2025-71176.openvex.json`, so the strictest gate is clean.
 
 The gate handles **GHSA↔CVE aliasing** (the crux): grype may report the GHSA as
 the primary `vulnerability.id` with the CVE in `relatedVulnerabilities[]` (or
