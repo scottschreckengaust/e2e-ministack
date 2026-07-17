@@ -44,6 +44,27 @@ then run the loop (§4).
 This split exists **because only one actor (the orchestrator) ever counts slots** — so there is
 no race on "how many PRs are ready."
 
+### Lean orchestrator / context hygiene
+
+The orchestrator's context window is a **scarce, shared resource** — keep it small **because** when
+it fills, the harness summarizes, and summarization can silently drop this skill's own behavioral
+instructions (roles, caps, gotchas), after which the orchestrator re-interprets the pipeline
+wrongly.
+
+- **Delegate any large-output op to a short-lived subagent that returns ONLY a one-line verdict** —
+  CI-log inspection (`gh run view --log`/`--log-failed`, log tails), `gh pr diff`/large `git diff`,
+  and any `--watch` stream. The subagent reads the volume; the orchestrator receives just
+  `{ state: real|transient, one-line reason, failing test:line }` **because** the raw logs/diffs
+  must never accumulate in the main loop. This is the symmetric partner of the "real red → wake the
+  subagent to fix" rule: delegate the **diagnosis** the same way you already delegate the **fix**.
+- **Prefer compact, single-shot structured reads over verbose or streaming output** — one
+  `gh pr view <pr> --json statusCheckRollup` (or `gh pr checks <pr> --json`) per poll, NEVER
+  `gh pr checks --watch`, **because** a single JSON snapshot costs a few lines while a watch stream
+  re-dumps the whole check table every interval.
+- **Trust the ledger (§5) instead of re-listing everything each loop** — reconcile from the durable
+  state you already hold and touch GitHub only for what changed, **because** re-fetching full lists
+  every wakeup floods context (and quota) for no new information.
+
 ---
 
 ## 2. Authoritative config (the operating defaults)
