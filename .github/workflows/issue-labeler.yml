@@ -1,0 +1,44 @@
+name: Issue Labeler
+
+# Auto-label ISSUES from their title/body content (issue #191, part of the
+# #190 automation epic) using the keyword→label map in
+# .github/issue-labeler.yml. This is the ISSUE analog of the path-based PR
+# labeler (.github/workflows/labeler.yml, #116) — same additive-only posture,
+# different trigger (`issues`) and mechanism (regex keyword match).
+#
+# ZERO-EGRESS: no model, no external API — the action just runs regex over the
+# issue text via github/issue-labeler (tier 1 of #191). The LLM label-triage
+# route is explicitly deferred behind the parent's egress sign-off (#190).
+#
+# Labels are ADDITIVE (`sync-labels: 0`) so hand-applied labels (priority:*,
+# effort:*, help wanted) are never stripped, mirroring the PR labeler's
+# `sync-labels: false` decision. The map targets ONLY labels that already
+# exist in the repo — the action never creates labels.
+
+on:
+  issues:
+    types: [opened, edited]
+
+# Least privilege — the job below opts into issues: write.
+permissions:
+  contents: read
+
+jobs:
+  label:
+    name: Label by content
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # read .github/issue-labeler.yml via the API
+      issues: write # apply labels to the issue
+    steps:
+      # No checkout step: the action reads the config file via the GitHub API
+      # when it isn't present on the runner, so there are no
+      # persist-credentials concerns.
+      - uses: github/issue-labeler@c1b0f9f52a63158c4adc09425e858e87b32e9685 # v3.4
+        with:
+          configuration-path: .github/issue-labeler.yml
+          repo-token: ${{ github.token }}
+          enable-versioned-regex: 0
+          include-title: 1 # match the map against the title as well as the body
+          sync-labels: 0 # additive only — never remove a human-applied label
