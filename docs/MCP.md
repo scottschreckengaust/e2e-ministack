@@ -72,8 +72,13 @@ Two further `X-MCP-*` toggles are **not** set in either file but available:
 add it to committed MCP JSON.)
 
 **Drift gate:** `scripts/check-mcp-parity.sh` (also `npm run check:mcp-parity`) fails
-CI if the two files diverge on server names, the threat-composer pin, `github.url`,
-or non-`Authorization` headers. Full multi-agent generation is still [#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111).
+CI if an agent config diverges from the canonical `.mcp.json` on server names, the
+threat-composer pin, `github.url`/`type`, or non-`Authorization` headers.
+`.cursor/mcp.json` is always checked; `.vscode/mcp.json` and `.gemini/settings.json`
+are checked **only when present** (the gate never obliges those files to exist), and
+the checker accounts for VS Code keying its server map under `servers` rather than
+`mcpServers`. Full one-source generation of all per-agent files is still
+[#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111).
 
 > **Why remote (PoC decision).** The issue thread (#72) settled on the **remote
 > server with all toolsets** as the proof-of-concept: it is GitHub's recommended
@@ -207,3 +212,12 @@ A generator that keeps per-vendor files in sync from one canonical block is
 tracked separately ([#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111)).
 Until that lands, `.mcp.json` (Claude) and `.cursor/mcp.json` (Cursor) are
 maintained in parallel with the same servers but vendor-specific interpolation.
+
+**Drift coverage today.** `scripts/check-mcp-parity.sh` treats `.mcp.json` as the
+canonical source and validates each **present** agent config against it:
+`.cursor/mcp.json` always, and `.vscode/mcp.json` / `.gemini/settings.json` when they
+exist. Because VS Code keys its server map under `servers` (not `mcpServers`), the
+checker reads that file through the `servers` path. If you add a `.vscode/mcp.json` or
+`.gemini/settings.json`, the gate will start enforcing it automatically — no wiring
+change needed. Codex TOML (`~/.codex/config.toml`) and Windsurf (global-only) are not
+yet covered; they await the generator in #111.
