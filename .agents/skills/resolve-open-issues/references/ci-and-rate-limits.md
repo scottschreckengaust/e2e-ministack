@@ -13,6 +13,11 @@ Each loop, for every DRAFT/READY PR, read `gh pr checks <pr>` (or `statusCheckRo
   below): a transient failure is re-run, NOT fixed; a real failure wakes the subagent. Don't
   promote either way.
 
+Read status with a **compact single-shot** call — `gh pr view <pr> --json statusCheckRollup` (or
+`gh pr checks <pr> --json`) — never `gh pr checks --watch`, **because** a JSON snapshot costs a few
+lines per poll while a watch stream re-dumps the full check table every interval into the
+orchestrator's context (see SKILL.md § Lean orchestrator / context hygiene).
+
 A worker **does not poll its own CI** at all, **because** it would busy-wait ~15–30 min burning its
 context for no work, it has already signed out, and its local gates already caught instant
 lint/unit breaks before the push — so a self-check would only duplicate the orchestrator's first
@@ -22,6 +27,13 @@ poll one cycle later. The orchestrator's single timer covers _all_ open PRs at o
 
 Background subagents **cannot self-schedule** a wakeup, so the split is: **orchestrator schedules
 the re-check; the subagent performs the fix.**
+
+**Never tail the CI log inline in the orchestrator to diagnose the red.** Log-fetching /
+`--log-failed` / log tails are large-output ops — delegate them to a short-lived subagent that
+reads the log and returns ONLY a one-line classification (`{ state: real|transient, one-line
+reason, failing test:line }`), **because** dumping a 60-line log into the main loop fills context
+and risks summarizing this skill's instructions away (SKILL.md § Lean orchestrator / context
+hygiene). Then act on that verdict:
 
 - **Warm resume** (its `agentId` is still live & recent per the ledger): `SendMessage` the failing
   check + log tail and "fix on your existing branch/worktree, push, then report" — keeps its
@@ -66,8 +78,10 @@ concurrent-job/runner-minute caps queueing or cancelling jobs.
 
 **Protocol — ALWAYS inspect before re-running:**
 
-1. **Inspect** the failed check's log: `gh pr checks <PR> | grep -i fail`, then
-   `gh run view <run-id> --log-failed`.
+1. **Inspect** the failed check's log **in a delegated short-lived subagent, not inline** — hand it
+   `gh pr checks <PR> | grep -i fail` + `gh run view <run-id> --log-failed` and have it return ONLY
+   the one-line classification; the raw log stays out of the orchestrator's context (SKILL.md
+   § Lean orchestrator / context hygiene).
 2. **Classify.** _Transient_ (re-run, don't fix): `rate limit`, `429`, `toomanyrequests`,
    `TLS handshake timeout`, `i/o timeout`, `connection reset`, `pull access ... denied` after a
    throttle, a job `cancelled` by a concurrency cap. _Real_ (test/lint/build/scan finding): wake the
