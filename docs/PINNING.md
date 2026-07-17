@@ -133,6 +133,46 @@ above, re-run the relevant gate locally to confirm, and commit. For digests:
 `docker buildx imagetools inspect ministackorg/ministack:full` shows the
 current manifest digest; for Action SHAs, `git ls-remote <repo> refs/tags/<tag>`.
 
+### `mise run update:ministack` — the MiniStack digest fan-out (#152)
+
+The MiniStack image digest is duplicated across several pin sites, so a manual
+bump is easy to get partially wrong (workflows on a new digest, docs on the old
+one — split-brain). `mise run update:ministack` automates it as **repo-owned
+scripting** (no AGPL tooling): it resolves the current multi-arch OCI **index**
+digest of `ministackorg/ministack:full` and fans it out from the single source
+of truth (`services/_registry/ministack-pin.json`) to every pin site, then
+self-verifies with the #212 drift guard.
+
+```bash
+mise run update:ministack             # resolve + fan out + self-verify
+mise run update:ministack -- --dry-run  # report the diff only; write nothing
+mise run update                       # umbrella: runs every update:* task
+```
+
+- **What it rewrites** — exactly the site set the drift guard
+  (`.github/scripts/check-ministack-digest-drift.sh`) checks: the registry
+  `.digest` field, the three workflows (`ci.yml`, `security.yml` ×2,
+  `ministack-compat.yml`), and the two docs (`AGENTS.md`, `README.md`). It
+  substitutes the **literal** full `sha256:<64hex>` pin, so the truncated prose
+  form (`636c4ef5…`) is left untouched.
+- **What it deliberately leaves alone** — `services/_registry/provisioning.json`'s
+  `lastVerifiedDigest` is a _semantic_ record (a bump invalidates the compat
+  catalog), so it is not blindly rewritten; update it via the compat re-verify
+  flow. The `.vex/` set likewise needs a manual reconcile per `.vex/README.md`
+  after a real bump.
+- **Index digest, not per-arch** — CI runs amd64 and dev machines are arm64, so
+  the pin must be the platform-agnostic OCI _index_ digest
+  (`docker buildx imagetools inspect … --format '{{json .Manifest.Digest}}'`),
+  not a per-arch manifest digest.
+- **Structure** — pure fan-out logic lives in `scripts/update-ministack.ts`
+  (jest-gated, 100% coverage); the docker/network resolution + file writes +
+  guard run live in the un-gated `scripts/update-ministack.mjs` shim (the same
+  `.ts`+`.mjs` split as `ministack-upstream.*`). Because `docker buildx` isn't
+  available in the unit CI job, the task is exercised by humans / a scheduled
+  workflow. This is the ergonomics surface of the #78 pin-sync updater;
+  `update:node` / `update:actions` / `update:scanners` compose into `update`
+  the same way as they land.
+
 ### Drift audit (2026-06, issue #83)
 
 A toolchain-drift audit (issue #83) checked every pin above against its upstream
