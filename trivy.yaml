@@ -27,17 +27,22 @@ scan:
 # record is enumerated below. This list feeds BOTH trivy jobs (auto-discovered
 # from CWD): the MiniStack-image `CVE-*` records target deb/generic image-package
 # purls and drive the hard-fail `trivy-image` gate while being inert on the
-# report-only `trivy-fs` source scan; the pypi-surface `ecdsa` record is the
-# mirror — it suppresses the `ecdsa` finding in the relocated pip requirements
-# file on `trivy-fs` and is inert on the image (#226 wired the FS surface to VEX;
+# report-only `trivy-fs` source scan; the pypi-surface `ecdsa` and `pytest`
+# records are the mirror — they suppress the `ecdsa` (relocated pip requirements)
+# and `pytest` (aws-cdk bundled init-template requirements-dev.txt) findings on
+# `trivy-fs` and are inert on the image (#226 wired the FS surface to VEX;
 # previously ecdsa was excluded here because no VEX-consuming FS scan cataloged
-# it). Only `not_affected`/`fixed` records suppress; a future `affected` record
+# it; #284 added pytest when the Grype FS floor dropped to its strictest rung).
+# Only `not_affected`/`fixed` records suppress; a future `affected` record
 # (e.g. mcp) deliberately still surfaces. Keep this list in lockstep with the
-# `.vex/*.openvex.json` set (add/remove a file -> add/remove a line here); #76
-# audits the drift. See .vex/README.md and docs/SECURITY-TOOLING.md.
+# `.vex/*.openvex.json` set (add/remove a file -> add/remove a line here) EXCEPT
+# the `affected` mcp records, which are intentionally omitted (they don't
+# suppress in any scanner by design — #188); #76 audits the drift. See
+# .vex/README.md and docs/SECURITY-TOOLING.md.
 vulnerability:
   vex:
     - .vex/ecdsa-CVE-2024-23342.openvex.json
+    - .vex/pytest-CVE-2025-71176.openvex.json
     - .vex/CVE-2005-2541.openvex.json
     - .vex/CVE-2017-18018.openvex.json
     - .vex/CVE-2018-20796.openvex.json
