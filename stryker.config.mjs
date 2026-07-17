@@ -43,6 +43,13 @@ export default {
     '.github/scripts/license-verdict.ts',
     'scripts/ministack-upstream.ts',
   ],
+  // Exclude the agent-config tree from Stryker's sandbox copy. `.claude/skills/`
+  // holds committed symlinks (mode 120000) to `../../.agents/skills/<name>` DIRS;
+  // Stryker (no `--inPlace`) copies the project into `.stryker-tmp/sandbox-*` and
+  // `fs.copyFile` follows a symlink-to-directory and throws `EISDIR`, crashing at
+  // startup before any mutant runs. `.claude/` is agent config, irrelevant to the
+  // mutated unit tier, so drop it from the sandbox entirely (#266).
+  ignorePatterns: ['.claude'],
   // Speed: cache verdicts and re-test only mutants in changed files.
   incremental: true,
   incrementalFile: 'reports/mutation/incremental.json',
