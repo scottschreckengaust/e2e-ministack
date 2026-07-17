@@ -133,6 +133,43 @@ Run the local gates that mirror CI so you don't bounce off a red build:
 
 CI runs the same sequence — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
+## Stacked PRs (recommended: git-town)
+
+Large changes are easier to review as a **stack** of small, dependent PRs than
+as one big branch. This is a per-developer workflow choice — it touches no CI or
+repo config — so you're free to use whatever you like, but the recommendation
+here is [**git-town**](https://www.git-town.com/).
+
+- **Why git-town:** it is **MIT-licensed**, a **CLI-only** tool (no SaaS
+  account, no third-party push access, no data egress), and git-native — it
+  drives ordinary branches and works with GitHub's normal PR/merge UI, so there
+  are no synthetic branches to lock you in. It's actively maintained and has
+  first-class support for stacked changes.
+- **Alternative:** [**spr**](https://github.com/ejoffe/spr) (also MIT, CLI-only)
+  is a clean choice if you prefer a one-commit-per-PR model.
+- **Rejected:** [Graphite](https://graphite.dev) was evaluated and **rejected**.
+  It is a proprietary, single-vendor SaaS that requires third-party push access
+  and data egress — the same single-vendor / lock-in concern that governs tool
+  and Action adoption in this repo (see `AGENTS.md` § Security checks; the same
+  line that rejected k6 and removed Renovate).
+
+Neither git-town nor spr is installed or wired into CI — this is a workflow
+recommendation, not an adopted dependency. Install git-town per its
+[docs](https://www.git-town.com/install) and a typical stacked flow looks like:
+
+```bash
+git town sync                 # pull main and rebase your stack onto it
+git town append feat-part-1   # start the first branch in the stack
+# ...commit work...
+git town append feat-part-2   # stack the next branch on top of the previous
+git town propose              # open a PR for the current branch
+git town sync                 # keep the whole stack rebased as review progresses
+```
+
+Each branch in the stack becomes its own PR; merge them bottom-up through the
+normal GitHub UI. Revisit this recommendation if GitHub's native stacked-PR
+feature (currently private preview) reaches general availability for this repo.
+
 ## How CI reports results (good to know)
 
 Both workflows follow an **observability convention**: every gate writes a
