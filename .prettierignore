@@ -23,6 +23,7 @@ trivy-image.txt
 npm-audit.json
 clamdscan.txt
 sonar-issues.json
+suppression-inventory.txt
 reports/
 .fuzz-corpus/
 # Committed fuzz corpora (#165) are byte-exact fixtures, not source to format.

@@ -52,6 +52,17 @@ executing a full audit. Run it when convenient and file the findings.
 - Pinning claims vs. actual pinned versions/digests ("everything pinnable is pinned").
 - License / governance statements (the AGPL-avoidance stance; any tool/dep/action adopted
   vs. the documented decision).
+- **In-code suppressions vs. the no-silent-suppression posture** (#202, the in-code-comment
+  arm of the suppression-governance program #167). Run the inventory
+  (`node .github/scripts/suppression-inventory.mjs`, also the report-only
+  `suppression-inventory` job in `security.yml`) and re-check its three buckets: any **raw**
+  hit (an unregistered in-code suppression — `nosemgrep`, `eslint-disable`, `@ts-ignore`,
+  `# shellcheck disable`, a `--exclude-rule`, and — per the maintainer's binding decision —
+  any `// Stryker disable`) is drift to burn down or migrate into the #167 registry; the
+  **registered** bucket (checkov Metadata skip, gitleaks allowlist, dependency-review license
+  allow, the `.vex/` OpenVEX records) is the tracked/allowed set; **wiring** (VEX-feed config,
+  tool-defining docs) is expected. The point is that new silent suppressions cannot accrete
+  between passes without being surfaced.
 
 ## Single source of truth (canonical sources)
 

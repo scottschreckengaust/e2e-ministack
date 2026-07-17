@@ -1535,3 +1535,56 @@ jobs:
         with:
           persist-credentials: false
       - uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
+
+  # ── In-code suppression inventory (report-only) ─────────────────────────
+  # #202 (the in-code-comment arm of the suppression-governance program #167):
+  # ripgrep the documented suppression-token catalog across the tree and
+  # classify each hit into three buckets — raw (unregistered in-code
+  # suppression, the debt this sweep exists to kill), registered (reason-bearing,
+  # revisit-tracked exception — checkov Metadata skip, gitleaks allowlist,
+  # dependency-review license allow, the .vex/ OpenVEX records — candidates to
+  # MIGRATE into #167), and wiring (VEX-feed config / tool-defining docs — not a
+  # suppression). ripgrep ships preinstalled on ubuntu-latest; the classifier +
+  # SARIF/text builders are the jest-gated .github/scripts/suppression-inventory.ts
+  # (100% coverage #124), driven by the thin .mjs shim.
+  #
+  # REPORT-ONLY (mirrors trivy-fs / sonarqube's report-first posture): it never
+  # fails the job — it produces the report and always-uploads it (raw-bucket
+  # SARIF at level=warning surfaces on the Security tab without gating). The
+  # documented ratchet to hard-fail on the `raw` bucket lands once the
+  # reason-bearing suppressions are triaged into the #167 registry.
+  suppression-inventory:
+    name: Suppression inventory (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # inventory uses Node built-ins + ripgrep only; no deps
+      - name: Run suppression inventory (report-only — never fails)
+        run: |
+          rg --version | head -1
+          node .github/scripts/suppression-inventory.mjs \
+            --sarif suppression-inventory.sarif \
+            --text suppression-inventory.txt
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: suppression-inventory.sarif
+          category: suppression-inventory
+      - name: Upload inventory reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: suppression-inventory
+          path: |
+            suppression-inventory.sarif
+            suppression-inventory.txt
+          if-no-files-found: warn

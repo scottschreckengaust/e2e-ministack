@@ -70,6 +70,8 @@ sbom.cdx.json
 # ClamAV + SonarQube report files (SARIF/outcome already covered above)
 clamdscan.txt
 sonar-issues.json
+# Suppression-inventory text report (#202; SARIF already covered above)
+suppression-inventory.txt
 # CI-downloaded scanner binaries
 /gitleaks
 /osv-scanner
