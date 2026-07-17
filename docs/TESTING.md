@@ -34,7 +34,7 @@ unless its **Status** says **Implemented**.
 | Functional — infra                | unit tier — Jest + CDK `Template` (`test/unit/stack.test.ts`)                                       | Fine-grained CDK assertions (security/structural intent) **and** a fast-tier cdk-nag `AwsSolutions` assertion via `validateScope(stack)`; synth-only, no emulator                                                                            | **Implemented**                                   |
 | Functional — infra snapshot       | integ — `@aws-cdk/integ-runner` (`integ/integ.ministack-stack.ts`)                                  | Cloud-assembly snapshot baseline in `integ/*.js.snapshot/`; synth-only PR gate via `npm run test:integ-snapshot`; refresh with `npm run test:integ-snapshot:update` on MiniStack (#168)                                                      | **Implemented**                                   |
 | Functional — properties           | unit tier — fast-check (`@fast-check/jest`)                                                         | Property tests over the handler; **seed pinned** in `test/setup.fast-check.ts` for reproducible gates                                                                                                                                        | **Implemented**                                   |
-| Functional — robustness           | mutation — Stryker (`npm run test:mutation`)                                                        | Mutates `lambda/index.js` against the unit tier; CI breaks under **80%** (currently 100%)                                                                                                                                                    | **Implemented**                                   |
+| Functional — robustness           | mutation — Stryker (`npm run test:mutation`)                                                        | Mutates the scoped logic against the unit tier; the bar is **zero surviving mutants** (`break: 100` in `stryker.config.mjs`)                                                                                                                 | **Implemented**                                   |
 | Functional — robustness           | fuzz regression — corpus replay (`fuzz/handler.regression.test.js`, `npm run test:fuzz-regression`) | Replays the committed `fuzz/corpus/` seeds through the handler as plain Jest tests (same invariants); emits `reports/junit/fuzz.xml`. Runs in the **PR-gating unit path**; a pinned crash input fails the tier. Plain Jest (no native addon) | **Implemented**                                   |
 | Functional — robustness           | fuzzing — jazzer.js (`fuzz/handler.fuzz.js`, `npm run fuzz`)                                        | Coverage-guided fuzz: handler never throws, never returns a non-finite `doubled`. **Exploratory**, schedule / `workflow_dispatch` only; needs GLIBC ≥ 2.38                                                                                   | **Implemented**                                   |
 | Functional — integration          | integration tier — Jest + AWS SDK v3 (`test/integration/`)                                          | Exercises deployed MiniStack resources via `AWS_ENDPOINT_URL`; assumes `cdk deploy` already ran                                                                                                                                              | **Implemented**                                   |
@@ -63,7 +63,7 @@ for the scanners). `jest.config.js` selects a tier directory via the
   `npm run test:integ-snapshot:update` against MiniStack (see
   [`CONTRIBUTING.md`](../CONTRIBUTING.md)).
 - `npm run test:integration` — AWS SDK v3 against deployed MiniStack resources.
-- `npm run test:mutation` — Stryker over the Lambda logic (≥ 80% gate).
+- `npm run test:mutation` — Stryker over the scoped logic (zero-surviving-mutants gate).
 - `npm run test:fuzz-regression` — replays the committed `fuzz/corpus/` seed
   inputs through the handler as plain Jest tests (own config,
   `jest.fuzz.config.js`), asserting the same invariants as the exploratory
@@ -131,7 +131,7 @@ the `.mjs` shim, uncollectable in-process by the same convention that excludes
   `.mjs` CLI shim), which is also what makes Stryker mutate the file jest
   actually loads.
 - `stryker.config.mjs` `mutate:` lists the four modules; the maintainer bar for
-  #165 is **0 surviving mutants** (not merely ≥ 80%). The handful of genuinely
+  #165 is **0 surviving mutants** (`break: 100`). The handful of genuinely
   **equivalent** mutants (e.g. a caught-then-discarded `throw` message, a
   regex anchor made redundant by a downstream re-validation, a defensive
   `?? []` fallback) are marked with an inline `// Stryker disable next-line

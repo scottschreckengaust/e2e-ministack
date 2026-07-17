@@ -12,8 +12,8 @@ the `.vex/CVE-*.openvex.json` set. The feed channel differs per scanner (neither
 `--vex` accepts a bare directory): **Grype** reads them via the
 `GRYPE_VEX_DOCUMENTS` env (a comma-separated file list the `anchore/scan-action`
 forwards natively); **Trivy** reads them from the committed `trivy.yaml`
-`vulnerability.vex` list, which trivy auto-discovers from the CWD — the
-`aquasecurity/trivy-action` v0.36.0 has no `vex` input and does not forward a
+`vulnerability.vex` list, which trivy auto-discovers from the CWD — the pinned
+`aquasecurity/trivy-action` has no `vex` input and does not forward a
 `TRIVY_VEX` env, so the config file is the channel that actually loads them (see
 `docs/SECURITY-TOOLING.md` § MiniStack image scan). The image gate fails on any
 **new** high+ CVE not covered by a record here, and passes on the accepted set.
@@ -352,12 +352,7 @@ bumped past it.
 
 ## Cross-references
 
-- **#84** — per-CVE OpenVEX for the MiniStack image base CVEs + the hard-fail
-  flip (this section); the `ecdsa` record was the `not_affected` example #84
-  built on.
-- **#133** — Trivy adoption (a `--vex`-capable consumer); the report-only
-  foundation this flip builds on.
-- **#155** — the ecdsa accepted-risk decision + Dependabot #13 dismissal.
-- **#160** — the proof that `affected` cannot suppress → `not_affected` is the
-  honest working path.
-- **#76** — `.vex/` drift/staleness audit.
+- **#84** — the design issue: per-CVE OpenVEX for the MiniStack image base CVEs +
+  the hard-fail flip. Start here for the rationale behind this whole directory.
+- **#76** — the recurring `.vex/` drift/staleness audit (the ongoing process that
+  keeps these records in lockstep with live findings).

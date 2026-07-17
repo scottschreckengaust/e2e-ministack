@@ -239,7 +239,7 @@ jobs:
           path: cdk.out/
           if-no-files-found: warn
 
-  # Mutation testing of the Lambda logic. Fails under the break threshold (80%).
+  # Mutation testing of the scoped logic. Fails if any mutant survives (break: 100).
   mutation:
     name: Mutation testing (Stryker)
     needs: changes
