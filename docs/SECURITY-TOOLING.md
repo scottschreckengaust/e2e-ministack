@@ -384,8 +384,7 @@ MiniStack ships a fix).
 
 **Why `not_affected`, not `affected`.** The intuitive record for "we accept this
 risk" is `status: affected` + `action_statement`. **Neither Grype nor Trivy will
-suppress an `affected` finding** — proven empirically at the pinned versions in
-**PR #160**:
+suppress an `affected` finding** — proven empirically at the pinned versions:
 
 - Grype (`anchore/scan-action`): `grype/vex/openvex/`
   `implementation.go` `FilterMatches` moves only `not_affected`/`fixed` to the
@@ -405,8 +404,8 @@ crafted input that would reach the vulnerable code. The full accepted-risk prose
 and fix state live in each record's `impact_statement`. This is an **honest,
 machine-readable, per-CVE risk acceptance** — the sanctioned form, distinct from a
 blanket `nosemgrep`/ignore that asserts false safety (see "Remediating a scanner
-finding" above). The 7 fixed-upstream python CVEs carry a distinct "awaiting a
-MiniStack image rebuild" note plus an upstream advisory link and are dropped the
+finding" above). Any fixed-upstream python CVE carries a distinct "awaiting a
+MiniStack image rebuild" note plus an upstream advisory link and is dropped the
 moment a rebuilt digest ships patched python.
 
 **How the records are fed (the channels differ per scanner — this is a real
@@ -417,11 +416,11 @@ bare directory or globs), but the two CI actions surface it differently:
   comma-separated list at runtime and passes it via the **`GRYPE_VEX_DOCUMENTS`
   env**, which the `anchore/scan-action` forwards to grype natively (grype reads
   its whole config from env). Verified working in CI.
-- **Trivy** — the `aquasecurity/trivy-action` v0.36.0 has **no `vex` input and
+- **Trivy** — the pinned `aquasecurity/trivy-action` has **no `vex` input and
   does NOT forward a `TRIVY_VEX` env** to trivy's `--vex` flag (its entrypoint
   runs `trivy <type> <ref>` with no extra flags), so the env route silently loads
   **zero** VEX docs and the gate wrongly fires. The working channel is the
-  committed **`trivy.yaml`'s `vulnerability.vex` list** (the 50 image CVE file
+  committed **`trivy.yaml`'s `vulnerability.vex` list** (the image CVE file
   paths), which trivy **auto-discovers from the CWD** regardless of the action.
   Because `trivy.yaml` is shared with the report-only `trivy-fs` job, the records
   are image-package purls that don't match any source-tree component, so they're
@@ -586,7 +585,7 @@ with a matching rationale, and re-opens the moment an upstream fix ships.
   principal check; task-handler cancellation) in `mcp==1.23.3`, a transitive
   dependency of Semgrep pinned in `.github/scanner-requirements/semgrep.txt`.
   **No fix to bump to:** semgrep **hard-pins `mcp==1.23.3` unconditionally** in
-  every release through the latest (1.170.0) and bundles it to back the
+  every release through the latest and bundles it to back the
   `semgrep mcp` server subcommand, so it cannot be raised without breaking
   semgrep's `--require-hashes` resolution — this is why it is a VEX acceptance,
   not a version bump. Upstream tracks making mcp an optional extra in
@@ -626,8 +625,8 @@ The `grype` **FS scan** (`security.yml`) is a **required** Code-Scanning gate.
 It was `fail-build: true` and fed the whole `.vex/` set via
 `GRYPE_VEX_DOCUMENTS`, relying on grype to drop VEX-covered findings. But grype's
 go-vex only moves `not_affected`/`fixed` to the ignored set; an `affected` record
-STAYS in `matches[]` (its `AugmentMatches` re-surfaces it — proven in #160). So
-when grype's floating DB advanced and began rating the 3 `mcp` server-transport
+STAYS in `matches[]` (its `AugmentMatches` re-surfaces it — proven empirically at
+the pinned versions). So when grype's floating DB advanced and began rating the 3 `mcp` server-transport
 GHSAs high — CVEs the repo deliberately accepts as `status: affected` under the
 status-honesty policy of #188 (reachable-but-not-exercised) — the gate went red
 on `main` and every PR, blocking all merges.
@@ -656,10 +655,10 @@ gate runs `fail-build: false` and reads the JSON, the **TS gate is the
 authoritative floor** (`grype-fs-gate.ts` counts every match with a severity);
 `severity-cutoff: negligible` is set on both grype steps to make intent explicit
 and keep the exit code aligned. **This completes the high → medium → low ratchet
-documented in AGENTS.md — the FS gate now sits at its strictest rung.** Empirical
-scan at the strictest floor (grype v0.114.0, VEX-fed, current tree): the only
-finding beyond the accepted `mcp`/`ecdsa` set was **CVE-2025-71176 /
-GHSA-6w46-j5rx-g56g (Medium) on `pytest@8.4.2`** — cataloged solely because the
+documented in AGENTS.md — the FS gate now sits at its strictest rung.** When the
+floor was dropped, the only finding beyond the accepted `mcp`/`ecdsa` set was
+**CVE-2025-71176 / GHSA-6w46-j5rx-g56g (Medium) on `pytest@8.4.2`** — cataloged
+solely because the
 `aws-cdk` npm package bundles `cdk init` Python **scaffolding templates**
 (`node_modules/aws-cdk/lib/init-templates/{app,sample-app}/python/requirements-dev.txt`);
 pytest is never installed or run in this Node/TS repo. Recorded as an honest
@@ -681,10 +680,10 @@ JSON-derived.
 ## Pinning
 
 All scanner tools are pinned (action SHA / binary checksum / pinned version) per
-[PINNING.md](PINNING.md). The two actions added for the supply-chain work
-(`dependency-review-action` v5.0.0, `sbom-action` v0.24.0) are SHA-pinned like
-every other `uses:` and are registered as future targets of the #78 pin-sync
-updater. `trivy-action` (v0.36.0, added in #133) is likewise SHA-pinned and is
-also a #78 pin-sync target; its vuln **database floats** by design (like
-Grype's), so newly disclosed CVEs are caught without a repo change — the DB is
-cached across runs via `actions/cache` (see PINNING.md).
+[PINNING.md](PINNING.md) — that inventory holds the current versions. The two
+actions added for the supply-chain work (`dependency-review-action`,
+`sbom-action`) are SHA-pinned like every other `uses:` and are registered as
+future targets of the #78 pin-sync updater. `trivy-action` (added in #133) is
+likewise SHA-pinned and is also a #78 pin-sync target; its vuln **database
+floats** by design (like Grype's), so newly disclosed CVEs are caught without a
+repo change — the DB is cached across runs via `actions/cache` (see PINNING.md).
