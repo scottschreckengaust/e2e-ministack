@@ -85,6 +85,12 @@ describe('CompatLambdaStack — self-provisioned compat stack', () => {
         }),
       ]),
     });
+    // The matcher above THROWS on drift (a function without the exact marker),
+    // so reaching this line means it is present; assert the compat stack has
+    // exactly one doubler carrying it.
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')),
+    ).toHaveLength(1);
   });
 
   it('pins the deploy target to the MiniStack account/region unconditionally', () => {

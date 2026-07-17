@@ -85,6 +85,12 @@ describe('DoublerFunction construct — fine-grained synth assertions', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
       Description: DOUBLER_PROVENANCE_DESCRIPTION,
     });
+    // The matcher above THROWS on drift (a function without the exact marker),
+    // so reaching this line means the marker is present; assert the single
+    // doubler carries it (a foreign second function would break the count).
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')),
+    ).toHaveLength(1);
   });
 
   it('stamps the provenance CDK tag on the function (#175)', () => {
@@ -96,6 +102,11 @@ describe('DoublerFunction construct — fine-grained synth assertions', () => {
         }),
       ]),
     });
+    // As above: the tag matcher throws on drift, so this documents that exactly
+    // one doubler carries the provenance tag.
+    expect(
+      Object.keys(template.findResources('AWS::Lambda::Function')),
+    ).toHaveLength(1);
   });
 
   it('honors an explicit functionName prop', () => {
