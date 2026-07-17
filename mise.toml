@@ -1,2 +1,23 @@
 [tools]
 node = "24.17.0"
+
+# Pin-sync tasks (#152, the ergonomics surface of the #78 pin-sync updater).
+# `mise run update` is the single, discoverable local entrypoint for bumping the
+# repo's coupled pins; it fans out to per-pin `update:*` tasks. Each `update:*`
+# task resolves the current upstream value and rewrites every pin site from the
+# single source of truth, then self-verifies. Repo-owned scripting only — no
+# AGPL tooling (Renovate), per the governance line in AGENTS.md/docs/PINNING.md.
+[tasks."update:ministack"]
+description = "Resolve the current ministackorg/ministack:full index digest and fan it out to every pin site (self-verifies via the #212 drift guard)"
+# Node 24 imports the sibling `.ts` logic module natively (no build step); the
+# `.mjs` shim does the docker/network resolution + file writes + guard run. Pass
+# extra flags (e.g. --dry-run, --digest sha256:…) through mise: `mise run
+# update:ministack -- --dry-run`.
+run = "node scripts/update-ministack.mjs"
+
+[tasks.update]
+description = "Umbrella: bump every coordinated pin (fans out to update:* tasks)"
+# Composes the per-pin updaters. Add future pins here as they land, e.g.
+# update:node (the mise.toml↔workflow node-version couple), update:actions,
+# update:scanners (#78).
+depends = ["update:ministack"]
