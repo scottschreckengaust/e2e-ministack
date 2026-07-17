@@ -17,6 +17,15 @@
       "oracles": { "sdk": "pass", "cli": "pass" },
       "lastVerifiedDigest": "sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9",
       "notes": "self-provisions its own CompatS3Stack (compat-s3-bucket + a dedicated access-log bucket) via verify-or-provision; decoupled from the demo stack (#139)"
+    },
+    {
+      "service": "dynamodb",
+      "resource": "AWS::DynamoDB::Table",
+      "iac": "cdk",
+      "deploy": "pass",
+      "oracles": { "sdk": "pass", "cli": "pass" },
+      "lastVerifiedDigest": "sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9",
+      "notes": "self-provisions its own CompatDynamoStack (compat-dynamo-table; hardened with PITR + customer-managed KMS encryption) via verify-or-provision with a DescribeTable provenance-marker read-back; decoupled from the demo stack (#140)"
     }
   ]
 }
