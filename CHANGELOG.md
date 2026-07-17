@@ -10,6 +10,23 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.8.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.7.0...v0.8.0) (2026-07-17)
+
+
+### Features
+
+* **agentic:** expose .agents/skills via .claude/skills symlinks ([#276](https://github.com/scottschreckengaust/e2e-ministack/issues/276)) ([8a671ab](https://github.com/scottschreckengaust/e2e-ministack/commit/8a671ab7164644c5b46f7762f3e45eb331927048)), closes [#266](https://github.com/scottschreckengaust/e2e-ministack/issues/266)
+* **agentic:** extend MCP parity gate to optional VS Code/Gemini configs ([#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111)) ([#280](https://github.com/scottschreckengaust/e2e-ministack/issues/280)) ([a4ac747](https://github.com/scottschreckengaust/e2e-ministack/commit/a4ac747e9abb7d2b789078a0373e75d915e2e48c))
+* **ci:** mise run update:ministack digest fan-out (+ update umbrella) ([#152](https://github.com/scottschreckengaust/e2e-ministack/issues/152)) ([#282](https://github.com/scottschreckengaust/e2e-ministack/issues/282)) ([456644f](https://github.com/scottschreckengaust/e2e-ministack/commit/456644f9a88083454787029314e554f9cf5f3ae5))
+* **compat:** add DynamoDB compat vertical (CDK, self-provisioning) ([#279](https://github.com/scottschreckengaust/e2e-ministack/issues/279)) ([66d67ee](https://github.com/scottschreckengaust/e2e-ministack/commit/66d67ee9f14264734f6ea930faece91dcf7476a2)), closes [#140](https://github.com/scottschreckengaust/e2e-ministack/issues/140)
+* **compat:** S3 compat vertical (CDK) ([#139](https://github.com/scottschreckengaust/e2e-ministack/issues/139)) ([#272](https://github.com/scottschreckengaust/e2e-ministack/issues/272)) ([08bc50a](https://github.com/scottschreckengaust/e2e-ministack/commit/08bc50a7b522e186c8d497991d949dca01145917))
+* **security:** report-only in-code suppression inventory ([#202](https://github.com/scottschreckengaust/e2e-ministack/issues/202)) ([#283](https://github.com/scottschreckengaust/e2e-ministack/issues/283)) ([756161d](https://github.com/scottschreckengaust/e2e-ministack/commit/756161dc79ff60ef5e93fc02a8f542b7fe69f225))
+
+
+### Bug Fixes
+
+* **ci:** VEX-aware JSON-derived Grype FS gate at the strictest floor ([#284](https://github.com/scottschreckengaust/e2e-ministack/issues/284)) ([#285](https://github.com/scottschreckengaust/e2e-ministack/issues/285)) ([90e680d](https://github.com/scottschreckengaust/e2e-ministack/commit/90e680d7dbfec9018a7629cc2aed4147b8173e56))
+
 ## [0.7.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.6.0...v0.7.0) (2026-07-17)
 
 
