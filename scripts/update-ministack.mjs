@@ -130,7 +130,10 @@ function usage(stream = console.error) {
   );
 }
 
-function main(argv) {
+/**
+ * Parse argv into `{ dryRun, explicitDigest }`. Exits 2 on an unknown flag.
+ */
+function parseArgs(argv) {
   let dryRun = false;
   let explicitDigest;
   for (let i = 0; i < argv.length; i++) {
@@ -143,21 +146,17 @@ function main(argv) {
       process.exit(2);
     }
   }
+  return { dryRun, explicitDigest };
+}
 
-  const oldDigest = readPinnedDigest();
-  if (!isValidDigest(oldDigest)) {
-    console.error(
-      `pinned digest in ${PIN_PATH} is not a legal sha256:<64hex>: ${JSON.stringify(
-        oldDigest,
-      )}`,
-    );
-    process.exit(3);
-  }
-
-  let newDigest;
-  if (explicitDigest !== undefined) {
-    newDigest = explicitDigest;
-  } else {
+/**
+ * Return the validated new digest: the explicit `--digest` if given, otherwise
+ * the resolved index digest. Fails closed (exit 3) if resolution throws or the
+ * result isn't a legal `sha256:<64hex>`.
+ */
+function resolveNewDigest(explicitDigest) {
+  let newDigest = explicitDigest;
+  if (newDigest === undefined) {
     try {
       newDigest = resolveIndexDigest();
     } catch (err) {
@@ -179,16 +178,14 @@ function main(argv) {
     );
     process.exit(3);
   }
+  return newDigest;
+}
 
-  const files = readPinSites();
-  const { results, total } = fanOut(files, oldDigest, newDigest);
-  console.log(formatReport(results, oldDigest, newDigest));
-
-  if (dryRun) {
-    console.log('\n--dry-run: nothing written.');
-    return;
-  }
-
+/**
+ * Write the substituted pin sites, then self-verify with the drift guard.
+ * Fails closed (exit 3) if the guard reports drift after the fan-out.
+ */
+function applyAndVerify(results, total) {
   if (total === 0) {
     console.log('\nNothing to write (0 replacements).');
   } else {
@@ -213,6 +210,33 @@ function main(argv) {
     );
     process.exit(3);
   }
+}
+
+function main(argv) {
+  const { dryRun, explicitDigest } = parseArgs(argv);
+
+  const oldDigest = readPinnedDigest();
+  if (!isValidDigest(oldDigest)) {
+    console.error(
+      `pinned digest in ${PIN_PATH} is not a legal sha256:<64hex>: ${JSON.stringify(
+        oldDigest,
+      )}`,
+    );
+    process.exit(3);
+  }
+
+  const newDigest = resolveNewDigest(explicitDigest);
+
+  const files = readPinSites();
+  const { results, total } = fanOut(files, oldDigest, newDigest);
+  console.log(formatReport(results, oldDigest, newDigest));
+
+  if (dryRun) {
+    console.log('\n--dry-run: nothing written.');
+    return;
+  }
+
+  applyAndVerify(results, total);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
