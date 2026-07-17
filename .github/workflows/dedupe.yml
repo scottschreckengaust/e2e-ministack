@@ -1,0 +1,59 @@
+name: Duplicate Issue Detection
+
+# Flag likely-duplicate ISSUES (issue #194, part of the #190 automation epic).
+# On a new/edited issue this computes title similarity against recent issues
+# IN-RUNNER and, when a match clears the threshold, comments the candidate
+# links and applies the `potential-duplicate` label.
+#
+# ZERO-EGRESS (the preferred path in #194): no model, no external API, no
+# secret — actions-cool/issues-similarity-analysis runs a string-similarity
+# algorithm over issue titles fetched via the GitHub API only. The LLM /
+# embedding route (FastMCP prior art in #194) is DEFERRED behind the parent's
+# data-egress sign-off (#190); it is intentionally NOT wired here.
+#
+# TOOL GOVERNANCE (AGENTS.md § Security checks tool-adoption line): the action
+# is MIT (permissive, no copyleft), org-backed (actions-cool, not a solo repo
+# — avoids single-vendor lock-in), on the node20 runtime, and SHA-pinned.
+# The commonly-cited wow-actions/potential-duplicates was rejected: also MIT
+# but stuck on the deprecated node16 runtime with no code change since 2022
+# (an unmaintained-tool governance risk).
+#
+# Additive / non-gating: this never fails CI, never removes labels, and never
+# closes issues — it only advises. The `potential-duplicate` label must
+# pre-exist in the repo (created out-of-band; the action does not create it).
+
+on:
+  issues:
+    types: [opened, edited]
+
+# Least privilege — the job below opts into issues: write.
+permissions:
+  contents: read
+
+jobs:
+  dedupe:
+    name: Detect potential duplicates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # read recent issues via the API for the similarity scan
+      issues: write # comment candidates + apply the potential-duplicate label
+    steps:
+      # No checkout step: the action reads issue data via the GitHub API, so
+      # there are no persist-credentials concerns (zizmor-clean).
+      - name: Analyze title similarity
+        id: analysis
+        uses: actions-cool/issues-similarity-analysis@0a5ea211e6a178915f0f754968fc94ff845bcb41 # v1.3.2
+        with:
+          filter-threshold: 0.7
+          comment-title: '### Potential duplicates'
+          comment-body: '- #${number} (similarity ${similarity})'
+
+      # The action comments the candidate links; add the label so the issue is
+      # also filterable. Gated on a match, so clean issues are untouched.
+      - name: Apply potential-duplicate label
+        if: steps.analysis.outputs.similar-issues-found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: gh issue edit "$ISSUE_URL" --add-label potential-duplicate
