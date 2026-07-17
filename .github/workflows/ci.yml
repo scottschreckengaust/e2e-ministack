@@ -29,6 +29,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       shell: ${{ steps.filter.outputs.shell }}
+      pin: ${{ steps.filter.outputs.pin }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -45,6 +46,16 @@ jobs:
               - '**/*.sh'
               - '**/*.bash'
               - '.github/workflows/ci.yml'
+            # Files that carry the pinned MiniStack image digest. Any change to
+            # a pin site (or to the guard itself) re-runs the drift check (#212).
+            pin:
+              - '.github/scripts/check-ministack-digest-drift.sh'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/security.yml'
+              - '.github/workflows/ministack-compat.yml'
+              - 'AGENTS.md'
+              - 'README.md'
+              - 'services/_registry/ministack-pin.json'
             code:
               - 'bin/**'
               - 'lib/**'
@@ -536,3 +547,23 @@ jobs:
           printf 'Linting %d shell script(s):\n' "${#scripts[@]}"
           printf '  %s\n' "${scripts[@]}"
           shellcheck "${scripts[@]}"
+
+  # Guard against a partial MiniStack image digest bump (#212). The pinned
+  # `ministackorg/ministack:full@sha256:...` digest is duplicated across several
+  # files (workflows, AGENTS.md, README.md, the compat registry). Updating some
+  # but not all would silently drift. This fail-closed check greps every real
+  # full-digest pin, adds the registry's `digest` field, and fails if the unique
+  # set has more than one value. Dependency-free (git/grep/sed/jq — jq is already
+  # required by check-mcp-parity), so it adds no new tool or gate.
+  ministack-digest-drift:
+    name: MiniStack digest drift guard
+    needs: changes
+    if: needs.changes.outputs.pin == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Assert all MiniStack image digests are identical
+        run: .github/scripts/check-ministack-digest-drift.sh
