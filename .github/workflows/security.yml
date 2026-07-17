@@ -785,25 +785,33 @@ jobs:
       # NOTE: this digest MUST match the image pinned in ci.yml and the Grype
       # ministack-image job above (ministackorg/ministack:full@sha256:636c4ef5...).
       # Keep all three in sync; if ci.yml bumps the digest, bump it here too.
+      # SCAN ONCE (#263): a single Trivy image scan emits JSON — the richest
+      # format — and the SARIF (Security tab) + human table are DERIVED from that
+      # saved JSON via `trivy convert`, with NO re-scan. Previously this job ran
+      # THREE full image scans (SARIF gate + table + JSON for #208); the image
+      # analysis is identical each time, so that was ~2 wasted full scans/run.
+      # JSON also carries the distro/gate severity the #208 column needs (SARIF
+      # does not), so JSON is the correct single source.
       - id: trivy
-        name: Run Trivy image (SARIF; hard-fail, VEX-gated)
-        continue-on-error: true # keep failure OFF the step so SARIF always uploads; enforced below
+        name: Run Trivy image (JSON; hard-fail, VEX-gated)
+        continue-on-error: true # keep failure OFF the step so the report always derives + uploads; enforced below
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          # Pin the trivy ENGINE (#183) — see the trivy FS job for rationale
-          # (explicit == the action's own v0.70.0 default; DB still floats). This
-          # step INSTALLS trivy; the report-table step below reuses it.
+          # Pin the trivy ENGINE (#183) — explicit == the action's own v0.70.0
+          # default; DB still floats. This step INSTALLS trivy; the convert steps
+          # below reuse the binary (skip-setup-trivy) + cached result.
           version: v0.70.0
           scan-type: image
           image-ref: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
-          format: sarif
-          output: trivy-image.sarif
+          format: json
+          output: trivy-image.json
           cache-dir: ${{ github.workspace }}/.cache/trivy
-          # Severity floor + hard-fail via inputs; limit-severities-for-sarif keeps
-          # the action from unsetting the severity filter on SARIF output.
+          # Severity floor + hard-fail via inputs. VEX auto-loads from the
+          # committed trivy.yaml, so `exit-code: 1` fires iff a HIGH,CRITICAL
+          # remains UNCOVERED by a `.vex/` record — the gate signal, captured
+          # below. The JSON already carries the distro/gate severity for #208.
           severity: 'HIGH,CRITICAL'
           exit-code: '1'
-          limit-severities-for-sarif: 'true'
       - name: Record outcome
         if: always()
         # Pass the (trusted, enum-valued) step outcome via env rather than inline
@@ -811,39 +819,24 @@ jobs:
         env:
           TRIVY_OUTCOME: ${{ steps.trivy.outcome }}
         run: echo "outcome=$TRIVY_OUTCOME" > trivy-image.outcome
-      - name: Emit human-readable table (report artifact)
+      # Derive SARIF (Security tab) + the human table from the saved JSON — NO
+      # re-scan. `trivy convert` re-renders a saved result into any format; the
+      # JSON was already severity-filtered + VEX-gated, so both derived outputs
+      # reflect the gated view. skip-setup-trivy reuses the binary from the scan.
+      - name: Convert Trivy JSON to SARIF + table (no re-scan)
         if: always()
         continue-on-error: true
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
-          format: table
-          output: trivy-image.txt
-          cache-dir: ${{ github.workspace }}/.cache/trivy
-          # Same severity floor so the table reflects the gated view; no exit-code
-          # (display-only — enforcement is off the SARIF step's outcome). VEX is
-          # auto-loaded from trivy.yaml. `table` isn't SARIF, so severity isn't unset.
-          severity: 'HIGH,CRITICAL'
-          skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
-      # Emit trivy JSON carrying the GATE (distro) severity per CVE, for the VEX
-      # report's gate-vs-badge column (#208). Reuses the installed trivy +
-      # cached DB (skip-setup-trivy) — no re-fetch. VEX auto-loads from
-      # trivy.yaml, so covered CVEs are filtered; that's fine because the grype
-      # JSON above is VEX-free and supplies gate severity for the accepted set —
-      # trivy's contribution is a UNION, higher-rank-wins. Report-only.
-      - name: Emit Trivy JSON (gate severity for the VEX report, #208)
-        if: always()
-        continue-on-error: true
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
-          format: json
-          output: trivy-image.json
-          cache-dir: ${{ github.workspace }}/.cache/trivy
-          severity: 'HIGH,CRITICAL'
-          skip-setup-trivy: 'true'
+        env:
+          TRIVY_JSON: trivy-image.json
+        run: |
+          # If the scan produced no JSON (e.g. install failed), emit nothing —
+          # the enforce step below fails on the recorded non-success outcome.
+          if [ ! -s "$TRIVY_JSON" ]; then
+            echo "no Trivy JSON produced; skipping convert"
+            exit 0
+          fi
+          trivy convert --format sarif --output trivy-image.sarif "$TRIVY_JSON"
+          trivy convert --format table "$TRIVY_JSON" | tee trivy-image.txt
       - name: Upload SARIF to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
