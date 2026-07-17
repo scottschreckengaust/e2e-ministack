@@ -486,70 +486,83 @@ jobs:
       - name: Gather VEX documents
         id: vex
         run: echo "docs=$(printf '%s,' .vex/CVE-*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
+      # SCAN ONCE (#263): the image is ANALYZED once — Syft builds an SBOM of the
+      # pinned digest — and every grype pass below scans that SBOM (`sbom:` input),
+      # a cheap DB match, instead of re-pulling/unpacking the image 3x. Verified:
+      # `grype sbom:` yields the IDENTICAL high+ set as `grype <image>` on this
+      # digest (43 high+, exact match), and GRYPE_VEX_DOCUMENTS suppresses on the
+      # SBOM the same way — so the gate is unchanged.
       # NOTE: this digest MUST match the image pinned in ci.yml
-      # (ministackorg/ministack:full@sha256:636c4ef5...). Keep them in sync;
-      # if ci.yml bumps the digest, bump it here too.
+      # (ministackorg/ministack:full@sha256:636c4ef5...). Keep them in sync.
+      - name: Build image SBOM (once)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
+          format: syft-json
+          output-file: image.sbom.json
+          upload-artifact: false
+      # ── The GATE (VEX-fed) — derive the fail decision from the JSON, NOT from
+      # grype's `fail-build` (#261). fail-build:true made grype print a FALSE
+      # "Failed minimum severity level" warning reporting the PRE-VEX findings
+      # even though the gate passed; we drop it and instead read the VEX-fed JSON,
+      # where every VEX-covered CVE moves to `ignoredMatches[]` and `matches[]`
+      # holds ONLY genuinely-uncovered findings (verified: 53 → ignoredMatches,
+      # 0 → matches). The gate fails iff `matches[]` has a high+ entry.
       - id: grype
-        # continue-on-error so an UNCOVERED high+ finding fails the STEP (records
-        # outcome=failure) WITHOUT stopping the job — the SARIF must still upload.
-        # Enforcement is off the saved outcome (produce → always-upload → enforce).
-        continue-on-error: true
+        name: Grype gate scan (VEX-fed JSON, from the SBOM)
+        continue-on-error: true # never stop the job here; enforced off the outcome below
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         env:
-          # Grype reads its config from env too; feed the whole `.vex/` set.
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
-          # Pin the grype ENGINE (#183) — see the grype FS job for the rationale
-          # (action SHA alone floats grype to latest; DB still floats by design).
+          # Pin the grype ENGINE (#183) — action SHA alone floats grype to latest.
           grype-version: v0.114.0
-          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
-          # fail-build:true so the action calls core.setFailed (→ step outcome
-          # `failure`) on any high+ CVE left after VEX; with `fail-build:false`
-          # it only WARNS (outcome stays `success`) and the gate wouldn't fire.
-          # Severity floor stays `high` (ratchets down to medium/low over time —
-          # each step its own PR; see docs).
-          fail-build: true
+          sbom: image.sbom.json
+          fail-build: false # gate is derived from the JSON below, not fail-build
           severity-cutoff: high
-          output-format: sarif
-      # Capture the step's real outcome (success = no UNCOVERED high+ CVE, since
-      # VEX-accepted ones are ignored). Passed via env, not inline interpolation,
-      # per the repo's zizmor-clean / no-template-injection rule.
-      - name: Record outcome
+          output-format: json
+      # Compute the gate from the VEX-fed JSON: fail iff any high+/critical remains
+      # in `matches[]` (i.e. NOT covered by a `.vex/` record). VEX-covered CVEs are
+      # in `ignoredMatches[]` and correctly don't count. Node built-in only.
+      - name: Derive gate outcome from VEX-fed JSON
         if: always()
         env:
-          GRYPE_OUTCOME: ${{ steps.grype.outcome }}
-        run: echo "outcome=$GRYPE_OUTCOME" > grype-image.outcome
+          GATE_JSON: ${{ steps.grype.outputs.json }}
+        run: |
+          if [ -z "$GATE_JSON" ] || [ ! -f "$GATE_JSON" ]; then
+            echo "no gate JSON produced (scan failed to run)"
+            echo "outcome=failure" > grype-image.outcome
+            exit 0
+          fi
+          uncovered="$(node -e '
+            const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const hi = new Set(["High", "Critical"]);
+            const n = (d.matches || []).filter((m) => hi.has(m?.vulnerability?.severity)).length;
+            process.stdout.write(String(n));
+          ' "$GATE_JSON")"
+          echo "uncovered high+ in matches[]: $uncovered"
+          if [ "$uncovered" = "0" ]; then
+            echo "outcome=success" > grype-image.outcome
+          else
+            echo "outcome=failure" > grype-image.outcome
+          fi
       # ── Security-tab VEX coupling (issue #181) ──────────────────────────────
-      # The GATE above feeds VEX to grype, which DROPS the covered high+ CVEs
-      # from its SARIF — so the accepted CVEs would never appear in the Security
-      # tab (no audit trail), while a manual "Dismiss" would be a sticky second
-      # ledger that outlives its `.vex/` record. Instead we run a SECOND grype
-      # scan WITHOUT the VEX feed (so every high+ CVE is present), then inject
-      # `suppressions[] {kind:external}` from `.vex/` into that SARIF and upload
-      # THAT to the Security tab. A covered CVE becomes a dismissed alert whose
-      # suppression is DERIVED from `.vex/`; drop the record and the next scan
-      # omits the suppression, which advanced-security/dismiss-alerts re-opens.
-      # This is visibility-only: it does NOT feed the hard-fail gate (that stays
-      # on the VEX-fed scan's outcome above), so the security posture is unchanged.
+      # A VEX-FREE SARIF (every high+ present) with `.vex/`-derived suppressions[]
+      # injected, uploaded to the Security tab so a covered CVE becomes a dismissed
+      # alert whose suppression is DERIVED from `.vex/` (drop the record → next
+      # scan omits the suppression → dismiss-alerts re-opens). Visibility-only;
+      # does NOT feed the gate. From the SAME SBOM — no re-analysis.
       - id: grype-full
-        name: Grype image scan WITHOUT VEX feed (for Security-tab suppression view)
+        name: Grype VEX-free SARIF (Security-tab suppression view, from the SBOM)
         if: always()
         continue-on-error: true # visibility path only; never fails the job
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          # MUST match the gate scan's digest above — this VEX-free scan feeds
-          # the Security-tab alert store, so a stale digest here re-opens alerts
-          # for CVEs on an OLD image the gate no longer uses (#210: the py3.12
-          # base's CVE-2026-6100 et al. kept reappearing because #182's digest
-          # bump missed this one line). Keep in lockstep with the gate scan.
-          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
+          grype-version: v0.114.0
+          sbom: image.sbom.json
           fail-build: false # do not gate on this scan
           severity-cutoff: high
           output-format: sarif
-      # Inject VEX-derived suppressions[] into the un-fed SARIF. The CLI never
-      # throws and reports the uncovered-CVE set on stderr (the gate above is the
-      # authority on uncovered high+; this is informational here). FULL_SARIF is
-      # passed via env (not inline interpolation) per the no-injection rule.
       - name: Inject VEX suppressions into SARIF
         if: always()
         env:
@@ -562,25 +575,20 @@ jobs:
           fi
           node .github/scripts/vex-to-sarif-suppressions.mjs \
             "$FULL_SARIF" grype-ministack-image.suppressed.sarif .vex/CVE-*.openvex.json
-      # Emit grype JSON carrying the GATE (distro) severity per CVE, for the VEX
-      # report's gate-vs-badge column (#208). VEX-FREE (no GRYPE_VEX_DOCUMENTS)
-      # so the ACCEPTED base-image CVEs — exactly the ones whose badge overstates
-      # the distro rating — are present with their gate severity, not dropped.
-      # Report-only; never gates. Same digest as the gate scan above.
+      # VEX-FREE JSON carrying the distro/gate severity per CVE for the VEX report's
+      # gate-vs-badge column (#208) — accepted base-image CVEs present with their
+      # gate severity. From the SAME SBOM. Report-only.
       - id: grype-json
-        name: Grype image scan as JSON (gate severity for the VEX report, #208)
+        name: Grype VEX-free JSON (gate severity for the VEX report #208, from the SBOM)
         if: always()
         continue-on-error: true # report-only; must not fail the gate job
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
           grype-version: v0.114.0
-          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
+          sbom: image.sbom.json
           fail-build: false
           severity-cutoff: high
           output-format: json
-      # Stage the JSON under a stable name for the artifact (the action writes a
-      # runner-path filename in its `json` output). Empty file if the scan
-      # produced none, so the downstream glob/upload stays warn-not-error.
       - name: Stage grype JSON for the gate-severity artifact
         if: always()
         env:
@@ -617,7 +625,7 @@ jobs:
         with:
           name: grype-ministack-image-sarif
           path: |
-            ${{ steps.grype.outputs.sarif }}
+            ${{ steps.grype.outputs.json }}
             grype-ministack-image.suppressed.sarif
             grype-ministack-image.json
           if-no-files-found: warn
