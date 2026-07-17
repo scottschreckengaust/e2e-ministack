@@ -24,8 +24,10 @@ name: License review poller
 #
 # The allow-list is NOT duplicated here — it is extracted at runtime from
 # security.yml's `allow-licenses:` value (single source of truth). SPDX
-# satisfiability lives in .github/scripts/license-verdict.mjs (Node built-ins
-# only; conservative: unparseable/NOASSERTION → not satisfiable).
+# satisfiability lives in .github/scripts/license-verdict.mjs, which delegates
+# to the vetted `spdx-satisfies` library (#222); `npm ci` runs below so the dep
+# is available at runtime (conservative: unparseable/NOASSERTION → not
+# satisfiable).
 
 on:
   workflow_dispatch: # manual runs (e.g. right after a harvest completes)
@@ -54,10 +56,11 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      # Pinned Node for license-verdict.mjs (built-ins only — no npm ci).
+      # Pinned Node + `npm ci` so license-verdict.mjs can load `spdx-satisfies`
+      # (the vetted SPDX satisfiability library the verdict now delegates to,
+      # #222 — the script is no longer Node-built-ins-only). A few seconds of
+      # install is an acceptable cost for a weekly cron.
       - uses: ./.github/actions/setup
-        with:
-          npm-ci: 'false'
       - name: Poll ClearlyDefined and resolve license-review issues
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
-import { isAcceptable, tokenize } from '../../.github/scripts/license-verdict';
+import { isAcceptable } from '../../.github/scripts/license-verdict';
 
 // Unit tests for .github/scripts/license-verdict.ts (#127 Leg B2, gated under
 // #165): SPDX allow-list satisfiability, mirroring the dependency-review PR
@@ -81,12 +81,12 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
   });
 
   it('rejects unparseable garbage (conservative fallback)', () => {
-    // Junk characters → tokenize() returns null → reject.
+    // Junk characters → parser throws → reject.
     expect(
       isAcceptable('??? not an spdx expression !!!', REPO_ALLOW_LIST),
     ).toBe(false);
     expect(isAcceptable('MIT@1.0', REPO_ALLOW_LIST)).toBe(false); // '@' is junk
-    // Structurally-broken but tokenizable → parse throws → reject.
+    // Structurally-broken → parser throws → reject.
     expect(isAcceptable('MIT OR', REPO_ALLOW_LIST)).toBe(false); // dangling op
     expect(isAcceptable('(MIT OR Apache-2.0', REPO_ALLOW_LIST)).toBe(false); // unbalanced (
     expect(isAcceptable('MIT Apache-2.0', REPO_ALLOW_LIST)).toBe(false); // missing op
@@ -96,21 +96,31 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
     expect(isAcceptable('()', REPO_ALLOW_LIST)).toBe(false); // empty group
   });
 
-  it('matches ids case-insensitively (both sides)', () => {
-    expect(isAcceptable('mit', REPO_ALLOW_LIST)).toBe(true);
-    expect(isAcceptable('MIT', 'mit, apache-2.0')).toBe(true);
-    expect(isAcceptable('apache-2.0 AND mit', REPO_ALLOW_LIST)).toBe(true);
-    // Lower-case operators must still be recognised as operators.
-    expect(isAcceptable('mit or gpl-3.0-only', REPO_ALLOW_LIST)).toBe(true);
-    expect(isAcceptable('mit and gpl-3.0-only', REPO_ALLOW_LIST)).toBe(false);
+  it('requires canonical-case SPDX license ids (case-sensitive per spec)', () => {
+    // PARITY CHANGE (#222): the old bespoke parser lower-cased both sides and
+    // matched case-insensitively — non-standard. SPDX license ids are
+    // case-sensitive: `MIT` is a valid id, `mit` is not. `spdx-satisfies`
+    // (via `spdx-expression-parse`) rejects a non-canonical id, and our
+    // conservative fallback maps that to UNACCEPTABLE. This is the correct,
+    // stricter behavior — the old case-insensitive verdicts were a bug.
+    expect(isAcceptable('mit', REPO_ALLOW_LIST)).toBe(false);
+    expect(isAcceptable('MIT', 'mit, apache-2.0')).toBe(false); // allow-list id also must be canonical
+    expect(isAcceptable('apache-2.0 AND mit', REPO_ALLOW_LIST)).toBe(false);
+    // Canonical-case ids on both sides are accepted.
+    expect(isAcceptable('MIT', 'MIT, Apache-2.0')).toBe(true);
+    expect(isAcceptable('Apache-2.0 AND MIT', REPO_ALLOW_LIST)).toBe(true);
   });
 
-  it('treats suffixed ids as needing an exact allow-list entry', () => {
-    // Conservative: Apache-2.0+ is NOT satisfied by Apache-2.0 on the list.
-    expect(isAcceptable('Apache-2.0+', REPO_ALLOW_LIST)).toBe(false);
-    expect(isAcceptable('GPL-3.0-or-later', REPO_ALLOW_LIST)).toBe(false);
-    // …but an exact suffixed entry on the allow-list does satisfy it.
+  it('honours the `+` "or later" range operator (SPDX semantics)', () => {
+    // PARITY CHANGE (#222): the bespoke parser treated `Apache-2.0+` as a
+    // distinct opaque id needing an exact `Apache-2.0+` allow entry. Per SPDX,
+    // `Apache-2.0+` means "Apache-2.0 or later", which IS satisfied by
+    // `Apache-2.0` on the allow-list — the standard `spdx-satisfies` verdict.
+    expect(isAcceptable('Apache-2.0+', REPO_ALLOW_LIST)).toBe(true);
+    // An exact suffixed allow entry naturally satisfies it too.
     expect(isAcceptable('Apache-2.0+', 'Apache-2.0+')).toBe(true);
+    // A not-on-the-list copyleft id is still rejected.
+    expect(isAcceptable('GPL-3.0-or-later', REPO_ALLOW_LIST)).toBe(false);
   });
 
   it('rejects WITH exception expressions unless a branch avoids them', () => {
@@ -165,22 +175,28 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
     expect(isAcceptable(undefined, REPO_ALLOW_LIST)).toBe(false);
   });
 
-  // ── Mutation-hardening: pin every branch/operator so no mutant survives ──
+  // ── Behavior-parity cases (#222): these were authored against the old
+  // bespoke parser and now pin the SAME verdicts against the vetted
+  // `spdx-satisfies` delegate (comments describe the SPDX-spec behavior, not
+  // the deleted tokenizer/recursive-descent internals). ──
 
-  it('recognises AND/OR/WITH only as whole upper/lower-case operator tokens', () => {
+  it('recognises AND/OR/WITH only as whole UPPER-CASE operator tokens (SPDX spec)', () => {
     // A bare id that merely CONTAINS an operator substring is still just an id.
-    // "MIT" allow-listed; "ANDES" is a plain id (not on the list) → false.
+    // "MIT" allow-listed; "ANDES" is not a valid SPDX id → false.
     expect(isAcceptable('ANDES', REPO_ALLOW_LIST)).toBe(false);
-    // Mixed-case operators are honoured (guards the toUpperCase() calls on the
-    // peeked operator tokens).
-    expect(isAcceptable('MIT Or GPL-3.0-only', REPO_ALLOW_LIST)).toBe(true);
-    expect(isAcceptable('MIT aNd GPL-3.0-only', REPO_ALLOW_LIST)).toBe(false);
-    expect(isAcceptable('mit or apache-2.0', REPO_ALLOW_LIST)).toBe(true);
+    // PARITY CHANGE (#222): SPDX operators are case-sensitive UPPER-CASE
+    // keywords (`AND`/`OR`/`WITH`). The old bespoke parser accepted mixed/lower
+    // case (`Or`, `aNd`, `or`) — non-standard. `spdx-satisfies` rejects them, so
+    // our fallback returns UNACCEPTABLE. Canonical upper-case operators work.
+    expect(isAcceptable('MIT Or GPL-3.0-only', REPO_ALLOW_LIST)).toBe(false);
+    expect(isAcceptable('mit or apache-2.0', REPO_ALLOW_LIST)).toBe(false);
+    expect(isAcceptable('MIT OR GPL-3.0-only', REPO_ALLOW_LIST)).toBe(true);
+    expect(isAcceptable('MIT AND GPL-3.0-only', REPO_ALLOW_LIST)).toBe(false);
   });
 
-  it('rejects an operator token used where a primary is expected', () => {
-    // Guards `primary()`'s `tok === ')' || OPERATORS.has(tok.toUpperCase())`
-    // rejection: each operator or a bare ) as the FIRST token is a parse error.
+  it('rejects an operator/paren where a license id is expected', () => {
+    // A bare operator or `)` where the grammar expects a license id is a
+    // malformed expression → parser throws → UNACCEPTABLE.
     expect(isAcceptable('AND', REPO_ALLOW_LIST)).toBe(false);
     expect(isAcceptable('OR', REPO_ALLOW_LIST)).toBe(false);
     expect(isAcceptable('WITH', REPO_ALLOW_LIST)).toBe(false);
@@ -191,8 +207,8 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
   });
 
   it('AND is left-of and right-of a satisfiable id — both conjuncts checked', () => {
-    // Kills the `withExpr() && ok` order/short-circuit mutants: BOTH a good&bad
-    // and bad&good must be false, and good&good must be true.
+    // AND requires EVERY conjunct to be allow-listed: good&bad and bad&good
+    // must both be false, good&good true (guards the SPDX AND semantics).
     expect(isAcceptable('MIT AND Apache-2.0', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('MIT AND ISC AND 0BSD', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('MIT AND ISC AND GPL-3.0-only', REPO_ALLOW_LIST)).toBe(
@@ -204,8 +220,8 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
   });
 
   it('OR keeps a satisfiable branch even when a later branch fails, and vice-versa', () => {
-    // Kills the `andExpr() || ok` order/short-circuit mutants: satisfiable in
-    // EITHER position must win; both-fail must lose.
+    // OR is satisfiable if ANY branch is allow-listed: a satisfiable branch in
+    // EITHER position must win; all-branches-fail must lose.
     expect(isAcceptable('MIT OR GPL-3.0-only', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('GPL-3.0-only OR MIT', REPO_ALLOW_LIST)).toBe(true);
     expect(
@@ -220,16 +236,17 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
   });
 
   it('a parenthesised group returns its own satisfiability (both truth values)', () => {
-    // Kills the `orExpr()` return inside `primary()` being forced true/false.
+    // A parenthesised sub-expression evaluates to its own satisfiability.
     expect(isAcceptable('(MIT)', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('(GPL-3.0-only)', REPO_ALLOW_LIST)).toBe(false);
     expect(isAcceptable('(MIT AND GPL-3.0-only)', REPO_ALLOW_LIST)).toBe(false);
     expect(isAcceptable('((MIT))', REPO_ALLOW_LIST)).toBe(true);
   });
 
-  it('a WITH rider makes an OTHERWISE-satisfiable id unsatisfiable (ok=false)', () => {
-    // Kills the `ok = false` block mutants in withExpr: an allow-listed id, once
-    // ridered, must flip to false; and the surrounding structure still parses.
+  it('a WITH rider makes an OTHERWISE-satisfiable id unsatisfiable', () => {
+    // A `<id> WITH <exception>` unit never matches a plain-id allow-list entry:
+    // an allow-listed id, once ridered, is unsatisfiable; surrounding grammar
+    // still parses.
     expect(isAcceptable('MIT', REPO_ALLOW_LIST)).toBe(true);
     expect(
       isAcceptable('MIT WITH Autoconf-exception-3.0', REPO_ALLOW_LIST),
@@ -247,16 +264,23 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
     ).toBe(false);
   });
 
-  it('accepts a whitespace-only-separated / multi-space expression (tokenizer \\s+)', () => {
-    // Guards the `\s+` whitespace-run alternative and the `^\s+$` skip: runs of
-    // spaces/tabs between tokens are collapsed, not treated as junk.
-    expect(isAcceptable('MIT   OR\tGPL-3.0-only', REPO_ALLOW_LIST)).toBe(true);
+  it('accepts multi-space-separated / space-padded expressions', () => {
+    // Runs of ordinary spaces between tokens are valid SPDX whitespace, and
+    // leading/trailing spaces are trimmed before evaluation.
+    expect(isAcceptable('MIT   OR   GPL-3.0-only', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('  MIT  ', REPO_ALLOW_LIST)).toBe(true);
+    // PARITY CHANGE (#222): the SPDX grammar's inter-token separator is the
+    // SPACE character only. The old bespoke tokenizer treated any `\s` (tabs,
+    // newlines) as a separator — non-standard; `spdx-satisfies` rejects a TAB
+    // between tokens, so our fallback returns UNACCEPTABLE. Real declared
+    // expressions from ClearlyDefined are space-separated, so this is inert in
+    // practice while being spec-correct.
+    expect(isAcceptable('MIT\tOR\tGPL-3.0-only', REPO_ALLOW_LIST)).toBe(false);
   });
 
-  it('rejects a single junk character anywhere (tokenizer catch-all)', () => {
-    // Guards the final `.` catch-all → return null path: any character outside
-    // [A-Za-z0-9.+-()\s] makes the whole expression unparseable.
+  it('rejects a single junk character anywhere', () => {
+    // Any character outside the SPDX grammar makes the whole expression
+    // unparseable → parser throws → UNACCEPTABLE.
     expect(isAcceptable('MIT & Apache-2.0', REPO_ALLOW_LIST)).toBe(false); // &
     expect(isAcceptable('MIT/Apache-2.0', REPO_ALLOW_LIST)).toBe(false); // /
     expect(isAcceptable('MIT,Apache-2.0', REPO_ALLOW_LIST)).toBe(false); // ,
@@ -264,103 +288,95 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
   });
 
   it('accepts every allow-listed id shape, including dotted/plus/dash and 0-prefixed', () => {
-    // Guards the id character class `[A-Za-z0-9.+-]+`: dots, digits, dashes and
-    // a leading digit are all valid id characters.
+    // Dotted, digit, dash and leading-digit SPDX ids are all valid.
     expect(isAcceptable('BSD-2-Clause', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('0BSD', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('CC-BY-4.0', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('BlueOak-1.0.0', REPO_ALLOW_LIST)).toBe(true);
   });
 
-  it('distinguishes NOASSERTION/NONE from a genuine allow-listed id (exact compare)', () => {
-    // Guards the `upper === 'NOASSERTION' || upper === 'NONE'` short-circuit
-    // and its string operands: a near-miss id is NOT swallowed by that clause.
-    expect(isAcceptable('NOASSERTIONX', REPO_ALLOW_LIST)).toBe(false); // not on list, but NOT via the NOASSERTION clause
+  it('distinguishes NOASSERTION/NONE from a genuine allow-listed id', () => {
+    // A near-miss token is not a valid SPDX id → parser throws → UNACCEPTABLE.
+    expect(isAcceptable('NOASSERTIONX', REPO_ALLOW_LIST)).toBe(false);
     expect(isAcceptable('NON', REPO_ALLOW_LIST)).toBe(false);
-    // A custom allow-list that literally contains "None" as an id still must be
-    // rejected, because NONE is intercepted before tokenizing.
+    // The SPDX markers NONE / NOASSERTION are not license ids: they are rejected
+    // even if an allow-list literally (and invalidly) lists them.
     expect(isAcceptable('NONE', 'MIT, None')).toBe(false);
     expect(isAcceptable('NOASSERTION', 'MIT, NOASSERTION')).toBe(false);
   });
 
-  it('empty-after-trim expression short-circuits before tokenizing (expr === "")', () => {
-    // Guards `if (expr === '') return false` and the trim() on the expression.
+  it('rejects an all-whitespace expression', () => {
+    // A whitespace-only expression carries no license → parser throws → false.
     expect(isAcceptable('\t\n  ', REPO_ALLOW_LIST)).toBe(false);
   });
 
-  it('rejects a leftover-tokens expression (trailing content after a valid parse)', () => {
-    // Guards the `pos !== tokens.length` trailing-token throw.
+  it('rejects an expression with two ids and no operator', () => {
+    // Two adjacent ids with no connecting operator is malformed SPDX → false.
     expect(isAcceptable('MIT Apache-2.0', REPO_ALLOW_LIST)).toBe(false);
     expect(isAcceptable('(MIT) MIT', REPO_ALLOW_LIST)).toBe(false);
   });
 
-  // ── Adversarial allow-lists: the ONLY way to observe several internal
-  // guards from the boolean return. If a guard is mutated away, a junk /
-  // operator / paren token would be looked up in the allow-list instead of
-  // being rejected — so an allow-list that literally contains that token flips
-  // the verdict, killing the mutant. (These allow-lists are synthetic probes,
-  // not the repo's real list.)
-  it('a junk char is rejected by the tokenizer even when the allow-list contains it', () => {
-    // Kills the tokenizer catch-all guard (`return null` else-branch) and the
-    // id-vs-junk classification: '&' must NEVER be a usable token, even if the
-    // allow-list has it. The catch-all path returns null → false.
+  // ── Adversarial allow-lists: a malformed token must NEVER become a usable
+  // allow-list match. These use synthetic allow-lists that literally contain
+  // the malformed token to prove the parser rejects the whole expression rather
+  // than looking the token up — spdx-satisfies rejects an invalid allow-list id
+  // too, so the verdict stays UNACCEPTABLE. (Not the repo's real allow-list.)
+  it('a junk char is rejected even when the allow-list contains it', () => {
+    // '&' is never a valid SPDX id, on either side → UNACCEPTABLE.
     expect(isAcceptable('&', '&,mit')).toBe(false);
     expect(isAcceptable('MIT & GPL', 'mit,&,gpl')).toBe(false);
-    // A whitespace token is skipped (not junk): a space-separated pair is a
-    // "missing operator" parse error, not a junk-null — still false, but via a
-    // different path (guards the `^\s+$` skip vs the catch-all).
+    // A space-separated id pair with no operator is malformed → UNACCEPTABLE.
     expect(isAcceptable('MIT GPL', 'mit,gpl')).toBe(false);
   });
 
-  it('an operator token is rejected as a primary even if the allow-list contains it', () => {
-    // Kills the `tok === ')' || OPERATORS.has(tok.toUpperCase())` rejection in
-    // primary(): with an allow-list literally containing "and"/"or"/"with"/")" ,
-    // a mutant that drops the rejection would `allow.has(...)` → true. The real
-    // parser must still THROW (→ false) on an operator/paren where a primary is
-    // due.
+  it('an operator/paren where an id is due is rejected even if the allow-list lists it', () => {
+    // A bare operator or `)` where the grammar expects an id is malformed →
+    // parser throws → UNACCEPTABLE, regardless of allow-list contents.
     expect(isAcceptable('AND', 'and,mit')).toBe(false);
     expect(isAcceptable('OR', 'or,mit')).toBe(false);
     expect(isAcceptable('WITH', 'with,mit')).toBe(false);
     expect(isAcceptable(')', ')')).toBe(false);
-    // Mixed-case operator, allow-list has the lower-case form (guards the
-    // `.toUpperCase()` on the primary rejection AND the `.toLowerCase()` lookup).
     expect(isAcceptable('and', 'and,mit')).toBe(false);
   });
 
-  it('a WITH exception token is rejected even if the allow-list contains it', () => {
-    // Kills the WITH-exception validation guards (L86 disjunction / L89
-    // OPERATORS.has(exception.toUpperCase())): an operator/paren as the
-    // exception is a parse error → false, regardless of allow-list contents.
+  it('a bogus WITH exception token is rejected even if the allow-list lists it', () => {
+    // An operator/paren as the WITH exception is malformed → parser throws →
+    // false, regardless of allow-list contents.
     expect(isAcceptable('MIT WITH AND', 'mit,and')).toBe(false);
     expect(isAcceptable('MIT WITH OR', 'mit,or')).toBe(false);
     expect(isAcceptable('MIT WITH WITH', 'mit,with')).toBe(false);
     expect(isAcceptable('MIT WITH )', 'mit')).toBe(false);
     expect(isAcceptable('MIT WITH (', 'mit')).toBe(false);
-    // A VALID exception id parses (then the WITH unit is unsatisfiable) — proves
-    // the guard lets a real exception through rather than always throwing.
-    expect(isAcceptable('MIT WITH GCC-exception-3.1', 'mit')).toBe(false);
-    // …and inside an OR the sibling still rescues it, proving the WITH parsed
-    // (didn't abort the whole expression).
+    // A VALID exception id parses; the WITH unit itself never matches a plain
+    // allow-list id, so it is unsatisfiable on its own.
+    expect(isAcceptable('MIT WITH GCC-exception-3.1', 'MIT')).toBe(false);
+    // …and inside an OR the sibling still rescues it, proving the WITH parsed.
     expect(
-      isAcceptable('MIT OR (Apache-2.0 WITH GCC-exception-3.1)', 'mit'),
+      isAcceptable('MIT OR (Apache-2.0 WITH GCC-exception-3.1)', 'MIT'),
     ).toBe(true);
   });
 
-  it('consumes the WITH rider (peek guard) so trailing tokens do not leak', () => {
-    // Kills the `peek()?.toUpperCase() === 'WITH'` guard being forced false: if
-    // the WITH clause is skipped, its `<id> WITH <exc>` tokens are left
-    // unconsumed → a trailing-token parse error. A WITH unit inside a
-    // satisfiable OR must therefore be CONSUMED and the OR must succeed.
+  it('validates the WITH exception id against the SPDX exception list', () => {
+    // PARITY CHANGE (#222): the old bespoke parser accepted ANY token after
+    // WITH as an "exception" (it never checked the SPDX exception registry), so
+    // `Apache-2.0 WITH Foo OR MIT` parsed and the OR-sibling MIT rescued it →
+    // true. `spdx-satisfies` (via `spdx-expression-parse`) rejects `Foo` as an
+    // unknown exception id and throws → our conservative fallback returns
+    // UNACCEPTABLE. Correct: an expression referencing a bogus exception should
+    // not silently pass on a sibling. A VALID exception id still parses (the OR
+    // sibling then rescues) — proven in the WITH-exception test above.
     expect(isAcceptable('Apache-2.0 WITH Foo OR MIT', REPO_ALLOW_LIST)).toBe(
-      true,
+      false,
     );
+    // With a real exception id the OR sibling rescues (rider unit is unsat).
+    expect(
+      isAcceptable('Apache-2.0 WITH LLVM-exception OR MIT', REPO_ALLOW_LIST),
+    ).toBe(true);
   });
 
-  it('consumes chained AND / OR operators (loop guards) rather than leaking them', () => {
-    // Kills the `while (peek() === 'AND')` / `while (peek() === 'OR')` guards
-    // being forced false: an all-satisfiable AND/OR chain must succeed. If the
-    // loop never runs, the second operand's tokens are left over → trailing
-    // parse error → false, which these true-expectations detect.
+  it('evaluates chained AND / OR operators (three+ operands)', () => {
+    // A multi-operand AND/OR chain evaluates fully: an all-satisfiable chain
+    // succeeds regardless of length.
     expect(isAcceptable('MIT AND Apache-2.0', REPO_ALLOW_LIST)).toBe(true);
     expect(isAcceptable('MIT AND Apache-2.0 AND ISC', REPO_ALLOW_LIST)).toBe(
       true,
@@ -371,24 +387,19 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
     ).toBe(true);
   });
 
-  it('trims the expression BEFORE the NONE/NOASSERTION marker check', () => {
-    // Kills the `.trim()` on the expression being removed: a padded marker like
-    // "  NONE  " must still be recognised as NONE (→ false) rather than parsed
-    // as an id. Probed with an allow-list that literally contains "none" so the
-    // difference is observable: trimmed → marker → false; untrimmed → id lookup
-    // → true.
+  it('rejects the padded SPDX NONE / NOASSERTION markers', () => {
+    // A whitespace-padded NONE / NOASSERTION marker is not a license id — the
+    // parser throws → UNACCEPTABLE, even against an allow-list that (invalidly)
+    // lists a "none"/"noassertion" token.
     expect(isAcceptable('  NONE  ', 'none, mit')).toBe(false);
     expect(isAcceptable('\tNOASSERTION\t', 'noassertion, mit')).toBe(false);
   });
 
   it('a malformed WITH-exception ABORTS the whole expression, not just its unit', () => {
-    // Kills the WITH-exception validation guards (L86 disjunction + L89
-    // OPERATORS.has(exception.toUpperCase())): when the exception is itself an
-    // operator/paren, the guard must THROW — aborting the ENTIRE parse → false —
-    // rather than quietly setting ok=false and letting an OR sibling rescue it.
-    // These inputs are the ONLY way to observe the throw-vs-quiet difference
-    // from the boolean return (an OR sibling would flip false→true if the guard
-    // were removed).
+    // When the WITH exception is itself an operator/paren the expression is
+    // malformed and the parser throws — aborting the ENTIRE parse → false —
+    // rather than letting an OR sibling rescue it. (A sibling would flip
+    // false→true if the whole expression were not rejected.)
     expect(isAcceptable('MIT OR (Apache-2.0 WITH AND)', REPO_ALLOW_LIST)).toBe(
       false,
     );
@@ -414,61 +425,12 @@ describe('license-verdict — SPDX allow-list satisfiability (in-process)', () =
     );
   });
 
-  it('the OPERATORS set members are each load-bearing (AND/OR/WITH)', () => {
-    // Kills mutating the OPERATORS Set literal (L32): if any operator id is
-    // dropped from the set, that operator stops being REJECTED as a primary, so
-    // an allow-list containing it would flip a leading-operator expression to
-    // true. Probe each member.
-    expect(isAcceptable('AND MIT', 'and,mit')).toBe(false); // AND in set
-    expect(isAcceptable('OR MIT', 'or,mit')).toBe(false); // OR in set
-    expect(isAcceptable('MIT WITH', 'mit,with')).toBe(false); // WITH in set (dangling)
-  });
-});
-
-// Direct tokenizer tests (tokenize is exported for exactly this): assert the
-// EXACT token arrays so the split boundary, the ID_RE `^…$` anchors, and the
-// junk-`[]` return are all OBSERVABLE — the mutation gate then kills the mutants
-// that a verdict-only test leaves equivalent.
-describe('license-verdict — tokenize (direct)', () => {
-  it('splits ids, operators and parentheses into exact tokens', () => {
-    expect(tokenize('MIT')).toEqual(['MIT']);
-    expect(tokenize('MIT OR Apache-2.0')).toEqual(['MIT', 'OR', 'Apache-2.0']);
-    // Parens tokenize on their own even when glued to ids (padded then split).
-    expect(tokenize('(MIT OR ISC) AND BSD-3-Clause')).toEqual([
-      '(',
-      'MIT',
-      'OR',
-      'ISC',
-      ')',
-      'AND',
-      'BSD-3-Clause',
-    ]);
-    // Suffixed ids keep their +/-/. characters as one token.
-    expect(tokenize('GPL-3.0-or-later+')).toEqual(['GPL-3.0-or-later+']);
-  });
-
-  it('collapses arbitrary whitespace runs and yields no empty tokens', () => {
-    // Multiple spaces/tabs/newlines between tokens must produce clean tokens.
-    expect(tokenize('MIT   OR\t\tISC')).toEqual(['MIT', 'OR', 'ISC']);
-    expect(tokenize('  MIT  ')).toEqual(['MIT']); // leading/trailing padding
-  });
-
-  it('returns [] tokens for an empty / all-whitespace expression', () => {
-    // `.match` returns null when nothing matches — that branch must yield the
-    // empty token list (the caller then rejects it as unparseable).
-    expect(tokenize('')).toEqual([]);
-    expect(tokenize('   \t\n ')).toEqual([]);
-  });
-
-  it('returns [] on any junk character (kills the []/else/anchor mutants)', () => {
-    // A piece containing a non-SPDX char must make the WHOLE expression
-    // unparseable — an unanchored ID_RE would accept the `MIT` of `MIT;GPL` and
-    // wrongly tokenize; the `^…$` anchors reject it, returning [].
-    expect(tokenize('MIT;GPL')).toEqual([]);
-    expect(tokenize('MIT & ISC')).toEqual([]); // '&' is junk
-    expect(tokenize('a=b')).toEqual([]);
-    // A valid expression must NOT return [] (proves [] is the junk path only).
-    expect(tokenize('MIT').length).toBeGreaterThan(0);
+  it('rejects a leading/dangling AND/OR/WITH operator', () => {
+    // An operator at the start (AND/OR) or a dangling WITH is malformed SPDX →
+    // parser throws → UNACCEPTABLE, even if the allow-list lists the keyword.
+    expect(isAcceptable('AND MIT', 'and,mit')).toBe(false); // leading AND
+    expect(isAcceptable('OR MIT', 'or,mit')).toBe(false); // leading OR
+    expect(isAcceptable('MIT WITH', 'mit,with')).toBe(false); // dangling WITH
   });
 });
 
