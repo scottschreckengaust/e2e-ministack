@@ -53,6 +53,7 @@ import {
   fanOut,
   formatReport,
   isValidDigest,
+  resolveBin,
 } from './update-ministack.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -78,12 +79,15 @@ function readPinnedDigest() {
  * so the pin MUST be the platform-agnostic index digest — `.Manifest.Digest`
  * from imagetools is exactly that top-level index digest (a per-arch manifest
  * digest would break the other architecture). Argv array → execFileSync (no
- * shell). Throws on any docker/network failure so the caller can fail closed.
+ * shell); the `docker` binary is resolved to an ABSOLUTE path via `resolveBin`
+ * (no `$PATH` lookup — S4036), honoring an absolute `DOCKER_BIN` override.
+ * Throws on any docker/network failure so the caller can fail closed.
  * @returns {string} `sha256:<64hex>`
  */
 function resolveIndexDigest() {
+  const dockerBin = resolveBin('docker', process.env.DOCKER_BIN, existsSync);
   const out = execFileSync(
-    'docker',
+    dockerBin,
     [
       'buildx',
       'imagetools',
@@ -112,7 +116,10 @@ function runDriftGuard() {
     throw new Error(`drift guard not found at ${DRIFT_GUARD}`);
   }
   // Inherit stdio so the guard's own OK/DRIFT report is visible to the operator.
-  execFileSync('bash', [DRIFT_GUARD], { stdio: 'inherit' });
+  // `bash` is resolved to an ABSOLUTE path via `resolveBin` (no `$PATH` lookup —
+  // S4036), honoring an absolute `BASH_BIN` override.
+  const bashBin = resolveBin('bash', process.env.BASH_BIN, existsSync);
+  execFileSync(bashBin, [DRIFT_GUARD], { stdio: 'inherit' });
 }
 
 // ── CLI entry (skipped when imported as a module) ────────────────────────────

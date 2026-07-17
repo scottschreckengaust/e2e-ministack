@@ -26,6 +26,65 @@
 export const MINISTACK_IMAGE = 'ministackorg/ministack:full';
 
 /**
+ * Standard absolute directories the `docker` / `bash` binaries install into, in
+ * preference order (apt/dpkg, /usr/local, the POSIX `/bin`, macOS Homebrew,
+ * Homebrew-on-Linux). Deliberately an ALLOW-LIST of fixed, root-owned locations
+ * — NOT `$PATH` (SonarQube S4036: an attacker-writable PATH entry must never
+ * decide which binary runs). Mirrors `GH_BIN_DIRS` in `ministack-upstream.ts`.
+ */
+export const BIN_DIRS: readonly string[] = [
+  '/usr/bin',
+  '/usr/local/bin',
+  '/bin',
+  '/opt/homebrew/bin',
+  '/home/linuxbrew/.linuxbrew/bin',
+];
+
+/**
+ * Resolve a command to an ABSOLUTE path WITHOUT consulting `$PATH` (SonarQube
+ * S4036). The `.mjs` shim spawns `docker` and `bash`; passing a bare name lets
+ * a writable/attacker-planted PATH entry choose the binary, so resolve to a
+ * fixed location first. Resolution order:
+ *
+ *   1. An explicit `override` (e.g. `DOCKER_BIN` / `BASH_BIN`) — but ONLY if it
+ *      is an ABSOLUTE path to an existing file. A bare name or relative path is
+ *      REJECTED, because honoring it would re-introduce a `$PATH`/cwd lookup —
+ *      the exact thing this removes. A strictly TIGHTER contract than the bare
+ *      name it replaces.
+ *   2. Otherwise the first existing `<dir>/<name>` under the fixed
+ *      {@link BIN_DIRS} allow-list (standard, root-owned install locations).
+ *
+ * Throws a clear, actionable error when the binary is in none of them.
+ *
+ * `fileExists` is injected (the real `existsSync` lives in the `.mjs` shim) so
+ * this stays a PURE, in-process-testable function under the coverage + mutation
+ * gates. Same shape as `resolveGhBin`.
+ */
+export function resolveBin(
+  name: string,
+  override: string | undefined,
+  fileExists: (p: string) => boolean,
+): string {
+  // Absolute + existing only. A leading '/' is the POSIX absolute marker and
+  // BIN_DIRS are POSIX (this tool is documented Linux/macOS).
+  if (
+    override !== undefined &&
+    override.startsWith('/') &&
+    fileExists(override)
+  ) {
+    return override;
+  }
+  for (const dir of BIN_DIRS) {
+    const candidate = `${dir}/${name}`;
+    if (fileExists(candidate)) return candidate;
+  }
+  throw new Error(
+    `${name} not found in a standard location (${BIN_DIRS.join(', ')}); ` +
+      `install it or set its absolute path in the override env var`,
+  );
+}
+
+/**
  * The pin sites the fan-out rewrites — the SAME set the drift guard
  * (`.github/scripts/check-ministack-digest-drift.sh`) verifies:
  *   - the registry `.digest` field (canonical source),

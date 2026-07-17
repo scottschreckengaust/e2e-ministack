@@ -43,6 +43,7 @@ export default {
     '.github/scripts/grype-fs-gate.ts',
     '.github/scripts/license-verdict.ts',
     'scripts/ministack-upstream.ts',
+    'scripts/update-ministack.ts',
   ],
   // Exclude the agent-config tree from Stryker's sandbox copy. `.claude/skills/`
   // holds committed symlinks (mode 120000) to `../../.agents/skills/<name>` DIRS;

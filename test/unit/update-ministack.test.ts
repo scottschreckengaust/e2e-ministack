@@ -1,9 +1,11 @@
 import {
+  BIN_DIRS,
   MINISTACK_IMAGE,
   PIN_SITE_FILES,
   fanOut,
   formatReport,
   isValidDigest,
+  resolveBin,
   substituteDigest,
 } from '../../scripts/update-ministack';
 
@@ -35,6 +37,16 @@ describe('isValidDigest', () => {
     expect(isValidDigest(null)).toBe(false);
     expect(isValidDigest(123)).toBe(false);
     expect(isValidDigest({})).toBe(false);
+  });
+
+  it('rejects a NON-string whose toString would match the pattern', () => {
+    // A single-element array String()-coerces to its element's text, so
+    // `String([digest]) === digest`. `.test()` coerces its arg, so if the
+    // `typeof === 'string'` guard were dropped this array would slip through.
+    // Asserting FALSE here kills the ConditionalExpression→true mutant on the
+    // typeof guard (which a plain `{}`/number can't, since those coerce to a
+    // non-matching string and fail the regex anyway).
+    expect(isValidDigest([OLD])).toBe(false);
   });
 
   it('rejects a wrong-length hex', () => {
@@ -152,23 +164,202 @@ describe('fanOut', () => {
 });
 
 describe('formatReport', () => {
-  it('lists the old→new digests, per-file counts, and the totals', () => {
+  it('renders the EXACT report: header, per-file counts, and totals', () => {
+    // Full-string equality (not toContain) pins every line and its ordering, so
+    // a blanked literal, a run-together `join('')`, a dropped no-op guard, or a
+    // corrupted `total` reduce all change the string and are killed.
     const results = [
       { path: 'a.yml', content: '', replacements: 1 },
       { path: 'b.md', content: '', replacements: 2 },
     ];
     const report = formatReport(results, OLD, NEW);
-    expect(report).toContain(OLD);
-    expect(report).toContain(NEW);
-    expect(report).toContain('a.yml');
-    expect(report).toContain('b.md');
-    expect(report).toContain('3'); // total replacements
-    expect(report).toContain('2'); // file count
+    expect(report).toBe(
+      [
+        `MiniStack image: ${MINISTACK_IMAGE}`,
+        `  old: ${OLD}`,
+        `  new: ${NEW}`,
+        '',
+        'Pin sites (2 files):',
+        '  1x  a.yml',
+        '  2x  b.md',
+        '',
+        'Total replacements: 3 across 2 files',
+      ].join('\n'),
+    );
   });
 
-  it('flags a no-op run when old and new digests are identical', () => {
+  it('computes total by SUMMING (not subtracting) the per-file counts', () => {
+    // A single positive total that cannot be produced by `sum - r` (which would
+    // go negative), so the ArithmeticOperator mutant on the reduce is killed —
+    // the `-3` a subtraction yields still "contains 3", so only an exact number
+    // check distinguishes them.
+    const results = [
+      { path: 'a.yml', content: '', replacements: 2 },
+      { path: 'b.md', content: '', replacements: 3 },
+    ];
+    expect(formatReport(results, OLD, NEW)).toContain(
+      'Total replacements: 5 across 2 files',
+    );
+  });
+
+  it('reports a zero total (not undefined) when nothing was replaced', () => {
+    // Kills the ArrowFunction mutant that replaces the reduce callback with
+    // `() => undefined`: the seed is 0, so a no-op callback would surface
+    // `undefined` here rather than 0.
+    const results = [{ path: 'a.yml', content: '', replacements: 0 }];
+    expect(formatReport(results, OLD, NEW)).toContain(
+      'Total replacements: 0 across 1 files',
+    );
+  });
+
+  it('flags a no-op run when old and new digests are identical (EXACT)', () => {
     const results = [{ path: 'a.yml', content: '', replacements: 1 }];
     const report = formatReport(results, OLD, OLD);
-    expect(report).toMatch(/no change|already current|unchanged/i);
+    expect(report).toBe(
+      [
+        `MiniStack image: ${MINISTACK_IMAGE}`,
+        `  old: ${OLD}`,
+        `  new: ${OLD}`,
+        '  (no change — pin already current; fan-out is a no-op)',
+        '',
+        'Pin sites (1 files):',
+        '  1x  a.yml',
+        '',
+        'Total replacements: 1 across 1 files',
+      ].join('\n'),
+    );
+  });
+
+  it('omits the no-op line when old and new digests differ', () => {
+    // The complement of the guard: with distinct digests the "(no change …)"
+    // line must be ABSENT. Kills the ConditionalExpression→true mutant that
+    // would always push it.
+    const report = formatReport(
+      [{ path: 'a.yml', content: '', replacements: 1 }],
+      OLD,
+      NEW,
+    );
+    expect(report).not.toContain('no change');
+  });
+});
+
+describe('resolveBin (S4036: never consult $PATH)', () => {
+  // A fake fileExists over a controlled set of "present" absolute paths.
+  const existsIn = (present: string[]) => (p: string) => present.includes(p);
+
+  it('honors an ABSOLUTE, existing override before the allow-list', () => {
+    const seen: string[] = [];
+    const fileExists = (p: string) => {
+      seen.push(p);
+      return p === '/opt/custom/docker';
+    };
+    expect(resolveBin('docker', '/opt/custom/docker', fileExists)).toBe(
+      '/opt/custom/docker',
+    );
+    // The override is checked FIRST and short-circuits — the allow-list dirs
+    // are never probed once it matches.
+    expect(seen).toEqual(['/opt/custom/docker']);
+  });
+
+  it('REJECTS a bare-name override EVEN WHEN it "exists" (no $PATH/cwd trust)', () => {
+    // fileExists returns TRUE for the bare `docker` too. The real code still
+    // rejects it (fails the `startsWith('/')` absolute check) and falls through
+    // to the allow-list. Kills the mutant that weakens the absolute guard to
+    // `startsWith('')` (always true), which would accept the bare name and
+    // re-introduce a $PATH/cwd lookup.
+    const found = resolveBin(
+      'docker',
+      'docker',
+      existsIn(['docker', '/usr/bin/docker']),
+    );
+    expect(found).toBe('/usr/bin/docker');
+  });
+
+  it('REJECTS a relative-path override EVEN WHEN it "exists" (cwd-plantable)', () => {
+    const found = resolveBin(
+      'docker',
+      './docker',
+      existsIn(['./docker', '/usr/local/bin/docker']),
+    );
+    expect(found).toBe('/usr/local/bin/docker');
+  });
+
+  it('REJECTS an absolute override that does NOT exist (falls through)', () => {
+    const found = resolveBin(
+      'docker',
+      '/nope/docker',
+      existsIn(['/usr/bin/docker']),
+    );
+    expect(found).toBe('/usr/bin/docker');
+  });
+
+  it('ignores an undefined override and uses the allow-list', () => {
+    const found = resolveBin('bash', undefined, existsIn(['/usr/bin/bash']));
+    expect(found).toBe('/usr/bin/bash');
+  });
+
+  it('falls back to the first existing allow-list dir, in order', () => {
+    // Present in BOTH the 4th and 5th dirs — must return the EARLIER one,
+    // proving order is honored (kills a loop-order / array-reversal mutant).
+    const found = resolveBin(
+      'docker',
+      undefined,
+      existsIn([
+        '/opt/homebrew/bin/docker',
+        '/home/linuxbrew/.linuxbrew/bin/docker',
+      ]),
+    );
+    expect(found).toBe('/opt/homebrew/bin/docker');
+  });
+
+  it('resolves from the POSIX /bin dir when it is the only one', () => {
+    const found = resolveBin('bash', undefined, existsIn(['/bin/bash']));
+    expect(found).toBe('/bin/bash');
+  });
+
+  it('appends /<name> to each allow-list dir (probes the exact expected paths)', () => {
+    const seen: string[] = [];
+    expect(() =>
+      resolveBin('docker', undefined, (p) => {
+        seen.push(p);
+        return false;
+      }),
+    ).toThrow();
+    expect(seen).toEqual(BIN_DIRS.map((d) => `${d}/docker`));
+  });
+
+  it('throws a clear, actionable error when the binary is nowhere', () => {
+    expect(() => resolveBin('docker', undefined, () => false)).toThrow(
+      /docker not found/,
+    );
+    // The message names the escape hatch so the operator knows the fix.
+    expect(() => resolveBin('docker', undefined, () => false)).toThrow(
+      /override/,
+    );
+    // It lists the probed dirs COMMA-separated (kills the `.join('')` mutant
+    // that would run the dir names together into an unreadable blob).
+    expect(() => resolveBin('docker', undefined, () => false)).toThrow(
+      '/usr/bin, /usr/local/bin',
+    );
+  });
+
+  it('interpolates the requested name into the error (not a literal)', () => {
+    // Kills a mutant that replaces the `${name}` interpolation with a literal
+    // by proving the SAME function reports different names.
+    expect(() => resolveBin('bash', undefined, () => false)).toThrow(
+      /bash not found/,
+    );
+  });
+
+  it('exposes the expected fixed allow-list (no $PATH-derived entries)', () => {
+    expect(BIN_DIRS).toEqual([
+      '/usr/bin',
+      '/usr/local/bin',
+      '/bin',
+      '/opt/homebrew/bin',
+      '/home/linuxbrew/.linuxbrew/bin',
+    ]);
+    // Every entry is an absolute, fixed path.
+    for (const d of BIN_DIRS) expect(d.startsWith('/')).toBe(true);
   });
 });
