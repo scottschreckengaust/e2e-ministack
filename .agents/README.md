@@ -70,6 +70,16 @@ but new shared skills should land under `.agents/skills/`.
 Nested `.agents/skills/` (or `.cursor/skills/`) under a monorepo subdirectory
 scopes skills to files in that subtree.
 
+**Claude Code** does **not** scan `.agents/skills/` — it discovers project skills only
+under `.claude/skills/<name>/SKILL.md`. To expose the canonical skills without
+duplicating them, `.claude/skills/<name>` is a committed **relative symlink** to the
+`.agents/skills/<name>` source (e.g. `.claude/skills/resolve-open-issues` →
+`../../.agents/skills/resolve-open-issues`), so each is invocable as a Claude Code
+slash command (`/resolve-open-issues`, `/repo-revisit`) with one source of truth.
+`.agents/skills/` stays the source of truth; **a new skill needs a matching symlink**
+(`ln -s ../../.agents/skills/<name> .claude/skills/<name>`) — the skills analog of the
+per-agent MCP config in [#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111).
+
 ## Skills — `SKILL.md` contract
 
 Each skill is a **folder** with a required `SKILL.md`:
