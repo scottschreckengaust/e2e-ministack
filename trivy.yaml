@@ -1,48 +1,21 @@
-# Trivy configuration (auto-discovered when trivy runs in this directory).
+# GENERATED FILE — do NOT edit by hand.
 #
-# Scan POLICY — severity gating, exit codes, scanners, output format — lives in
-# the workflow flags (.github/workflows/security.yml, trivy-fs / trivy-image
-# jobs), NOT here, so a config value can't silently conflict with the CI
-# invocation. The ONE exception is the VEX list below (see its note).
-#
-# Failure policy is set in the jobs: trivy-fs is report-only; trivy-image is
-# hard-fail + VEX-gated (#84). Do NOT add `severity:` / `exit-code:` here — a
-# value here would apply to BOTH jobs; trivy-image sets severity + exit-code via
-# the trivy-action's `severity`/`exit-code`/`limit-severities-for-sarif` inputs.
+# Trivy's VEX suppression dialect, generated from the canonical
+# .vex/*.openvex.json ledger by .github/scripts/vex-dialects.ts (#251).
+# Add/remove an acceptance by editing a .vex/*.openvex.json record,
+# then regenerate: `node .github/scripts/vex-dialects.mjs write`.
+# CI (security.yml) fails if this file drifts from the generator.
+# Only not_affected/fixed records suppress; affected records (e.g.
+# the mcp CVEs, #226/#227) are omitted so they stay visible. See
+# .vex/README.md — the single authoring surface.
 
-# Skip generated / vendored trees the source scan shouldn't flag. cdk.out is
-# synthesized CloudFormation (already covered by checkov/cfn-lint); node_modules
-# is the dependency tree (already covered by the lockfile scanners).
 scan:
   skip-dirs:
     - node_modules
     - cdk.out
 
-# OpenVEX finding suppression (#84). Trivy reads this file NATIVELY from the CWD
-# (the trivy-action invokes `trivy <type> <ref>` with no explicit flags and does
-# NOT forward the `--vex` flag / `TRIVY_VEX` env — verified against
-# trivy-action v0.36.0's entrypoint), so the VEX file list MUST live here, not in
-# a workflow env, to actually reach trivy. `vulnerability.vex` takes explicit
-# FILE paths (it rejects a bare directory and does not glob), so every accepted
-# record is enumerated below. This list feeds BOTH trivy jobs (auto-discovered
-# from CWD): the MiniStack-image `CVE-*` records target deb/generic image-package
-# purls and drive the hard-fail `trivy-image` gate while being inert on the
-# report-only `trivy-fs` source scan; the pypi-surface `ecdsa` and `pytest`
-# records are the mirror — they suppress the `ecdsa` (relocated pip requirements)
-# and `pytest` (aws-cdk bundled init-template requirements-dev.txt) findings on
-# `trivy-fs` and are inert on the image (#226 wired the FS surface to VEX;
-# previously ecdsa was excluded here because no VEX-consuming FS scan cataloged
-# it; #284 added pytest when the Grype FS floor dropped to its strictest rung).
-# Only `not_affected`/`fixed` records suppress; a future `affected` record
-# (e.g. mcp) deliberately still surfaces. Keep this list in lockstep with the
-# `.vex/*.openvex.json` set (add/remove a file -> add/remove a line here) EXCEPT
-# the `affected` mcp records, which are intentionally omitted (they don't
-# suppress in any scanner by design — #188); #76 audits the drift. See
-# .vex/README.md and docs/SECURITY-TOOLING.md.
 vulnerability:
   vex:
-    - .vex/ecdsa-CVE-2024-23342.openvex.json
-    - .vex/pytest-CVE-2025-71176.openvex.json
     - .vex/CVE-2005-2541.openvex.json
     - .vex/CVE-2017-18018.openvex.json
     - .vex/CVE-2018-20796.openvex.json
@@ -89,12 +62,14 @@ vulnerability:
     - .vex/CVE-2026-54369.openvex.json
     - .vex/CVE-2026-54370.openvex.json
     - .vex/CVE-2026-54371.openvex.json
+    - .vex/CVE-2026-5450.openvex.json
     - .vex/CVE-2026-57432.openvex.json
     - .vex/CVE-2026-57433.openvex.json
-    - .vex/CVE-2026-5450.openvex.json
     - .vex/CVE-2026-5928.openvex.json
     - .vex/CVE-2026-6734.openvex.json
     - .vex/CVE-2026-7017.openvex.json
     - .vex/CVE-2026-8376.openvex.json
     - .vex/CVE-2026-9538.openvex.json
     - .vex/CVE-2026-9697.openvex.json
+    - .vex/ecdsa-CVE-2024-23342.openvex.json
+    - .vex/pytest-CVE-2025-71176.openvex.json

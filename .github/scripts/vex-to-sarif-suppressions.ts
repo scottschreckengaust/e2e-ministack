@@ -87,7 +87,13 @@ export function extractCve(value: unknown): string | null {
 // scanner filters: `not_affected` and `fixed` (see .vex/README.md § "Why
 // not_affected"). Any other status (e.g. `affected`, `under_investigation`)
 // does NOT suppress.
-const SUPPRESSING_STATUSES = new Set(['not_affected', 'fixed']);
+//
+// EXPORTED as the single source of truth for the suppression predicate: the
+// scanner-dialect generator (`vex-dialects.ts`, #251) imports THIS set rather
+// than re-deriving it, so trivy.yaml / osv-scanner.toml / the SARIF injector
+// can never disagree on which statuses suppress (the `affected` mcp records
+// must stay visible in every dialect — #188).
+export const SUPPRESSING_STATUSES = new Set(['not_affected', 'fixed']);
 
 /**
  * The vulnerability NAME from a statement's `vulnerability` field, which OpenVEX
