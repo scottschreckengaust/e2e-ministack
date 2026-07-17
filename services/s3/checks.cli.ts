@@ -54,6 +54,13 @@ export async function checkCli(c: S3Contract): Promise<void> {
         key,
         '--body',
         bodyFile,
+        // Pin the checksum algorithm: AWS CLI v2 now DEFAULTS to CRC64NVME,
+        // which the pinned MiniStack build REJECTS ("Checksum algorithm not
+        // supported ... CRC64NVME. Supported: SHA256, SHA1, CRC32"). SHA256 is
+        // MiniStack-supported, so request it explicitly. (get-object /
+        // delete-object below carry no checksum arg, so no change needed there.)
+        '--checksum-algorithm',
+        'SHA256',
       ],
       { env: ministackEnv },
     );
