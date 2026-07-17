@@ -60,6 +60,14 @@ duplicates AGENTS.md content, that's drift.
 - Workflow/posture prose vs. the actual `.github/workflows/*.yml` jobs
 - Pinning claims vs. actual pinned versions/digests (does "everything pinnable is pinned" still hold?)
 - License/governance statements (e.g. the AGPL-tooling stance; tool/dep/action adopted vs. policy)
+- In-code suppressions vs. the no-silent-suppression posture (#202 → #167): run
+  `node .github/scripts/suppression-inventory.mjs` (the report-only `suppression-inventory`
+  job in `security.yml`) and re-check its buckets — any **raw** hit (unregistered in-code
+  suppression: `nosemgrep`, `eslint-disable`, `@ts-ignore`, `# shellcheck disable`,
+  `--exclude-rule`, and — per the maintainer's binding decision — any `// Stryker disable`)
+  is drift to burn down or migrate into #167; **registered** (checkov Metadata skip, gitleaks
+  allowlist, dep-review license allow, `.vex/` OpenVEX records) is the tracked/allowed set;
+  **wiring** (VEX-feed config, tool-defining docs) is expected.
 
 ## 4. The drift taxonomy
 
