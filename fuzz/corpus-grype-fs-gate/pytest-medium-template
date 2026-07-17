@@ -1,0 +1,1 @@
+{"matches":[{"vulnerability":{"id":"GHSA-6w46-j5rx-g56g","severity":"Medium"},"relatedVulnerabilities":[{"id":"CVE-2025-71176"}],"artifact":{"name":"pytest","version":"8.4.2","type":"python"}}]}

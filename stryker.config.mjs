@@ -40,6 +40,7 @@ export default {
     '.github/scripts/alerts-findings.ts',
     '.github/scripts/sarif-cve-ids.ts',
     '.github/scripts/gate-findings.ts',
+    '.github/scripts/grype-fs-gate.ts',
     '.github/scripts/license-verdict.ts',
     'scripts/ministack-upstream.ts',
   ],

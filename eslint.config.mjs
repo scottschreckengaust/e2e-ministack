@@ -27,6 +27,14 @@ export default tseslint.config(
         // the service already covers them.)
         projectService: {
           allowDefaultProject: ['fuzz/*.regression.test.ts'],
+          // typescript-eslint caps the inferred default program at 8 matched
+          // files by default; the fuzz-regression `.ts` targets (one per logic
+          // module) crossed that ceiling at #284 (the grype-fs-gate target is the
+          // 9th). These are tiny corpus-replay specs, so the perf cost of a
+          // slightly larger default program is negligible — raise the cap rather
+          // than move them into an emitting tsconfig (which would resurrect the
+          // `.js`-shadows-`.ts` problem #165 avoids).
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 20,
         },
         tsconfigRootDir: import.meta.dirname,
       },
