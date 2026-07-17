@@ -22,6 +22,9 @@ describe('HardenedBucket construct — fine-grained synth assertions', () => {
 
   it('provisions exactly two buckets (data + dedicated access-log bucket)', () => {
     template.resourceCountIs('AWS::S3::Bucket', 2);
+    expect(Object.keys(template.findResources('AWS::S3::Bucket'))).toHaveLength(
+      2,
+    );
   });
 
   it('block-all-public-access on both buckets', () => {
@@ -68,6 +71,14 @@ describe('HardenedBucket construct — fine-grained synth assertions', () => {
         LogFilePrefix: 'data-bucket/',
       }),
     });
+    // Companion literal assertion (SonarQube S2699 — CDK matchers aren't
+    // counted): the data bucket's LoggingConfiguration.LogFilePrefix is exactly
+    // 'data-bucket/', proving it ships access logs (to the dedicated log bucket,
+    // which carries a DestinationBucketName ref rather than the self-log prefix).
+    const prefixes = Object.values(template.findResources('AWS::S3::Bucket'))
+      .map((b) => b.Properties.LoggingConfiguration?.LogFilePrefix)
+      .sort();
+    expect(prefixes).toEqual(['data-bucket/', 'self/']);
   });
 
   it('the log bucket logs to itself (self/ prefix), avoiding an infinite chain', () => {
@@ -76,6 +87,15 @@ describe('HardenedBucket construct — fine-grained synth assertions', () => {
         LogFilePrefix: 'self/',
       }),
     });
+    // Companion literal assertion (SonarQube S2699). Exactly one bucket logs to
+    // itself under the 'self/' prefix — the log bucket — which is what breaks the
+    // otherwise-infinite chain of log buckets each needing their own log bucket.
+    const selfLoggers = Object.values(
+      template.findResources('AWS::S3::Bucket'),
+    ).filter(
+      (b) => b.Properties.LoggingConfiguration?.LogFilePrefix === 'self/',
+    );
+    expect(selfLoggers).toHaveLength(1);
   });
 
   it('bounds accumulation with lifecycle rules on both buckets', () => {

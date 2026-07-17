@@ -49,6 +49,14 @@ describe('CompatS3Stack — self-provisioned compat stack', () => {
     template.resourceCountIs('AWS::S3::Bucket', 2);
     // A deny-non-TLS bucket policy per bucket proves the SSL hardening survived.
     template.resourceCountIs('AWS::S3::BucketPolicy', 2);
+    // Companion literal assertions (SonarQube S2699 — CDK matchers aren't
+    // counted as assertions): exactly two buckets and two SSL bucket policies.
+    expect(Object.keys(template.findResources('AWS::S3::Bucket'))).toHaveLength(
+      2,
+    );
+    expect(
+      Object.keys(template.findResources('AWS::S3::BucketPolicy')),
+    ).toHaveLength(2);
   });
 
   it('pins the deploy target to the MiniStack account/region unconditionally', () => {
