@@ -1,10 +1,14 @@
 import * as cdk from 'aws-cdk-lib';
-import { Template } from 'aws-cdk-lib/assertions';
+import { Template, Match } from 'aws-cdk-lib/assertions';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import {
   CompatLambdaStack,
   COMPAT_LAMBDA_FUNCTION_NAME,
 } from '../../../services/lambda/iac/cdk/stack';
+import {
+  DOUBLER_PROVENANCE_DESCRIPTION,
+  DOUBLER_PROVENANCE_TAG,
+} from '../../../services/lambda/iac/cdk/construct';
 import { buildCompatApp } from '../../../services/lambda/iac/cdk/app';
 import { MINISTACK_ENV } from '../../../lib/env';
 
@@ -62,6 +66,25 @@ describe('CompatLambdaStack — self-provisioned compat stack', () => {
     expect(Object.keys(template.findResources('AWS::SQS::Queue'))).toHaveLength(
       1,
     );
+  });
+
+  it('stamps the provenance Description + tag the integration read-back checks (#175)', () => {
+    // The integration adapter (iac/cdk/deploy.ts) reads the function back via
+    // GetFunction after deploy — on the verify fast-path AND after a fresh
+    // provision — and requires this exact marker. A stale/foreign
+    // compat-lambda-doubler from an unrelated source lacks it, so the adapter
+    // fails loudly instead of letting the oracle green against a function this
+    // stack never provisioned. Lock the marker into the synthesized template so
+    // it can never silently drift away from what deploy.ts asserts.
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Description: DOUBLER_PROVENANCE_DESCRIPTION,
+      Tags: Match.arrayWith([
+        Match.objectLike({
+          Key: DOUBLER_PROVENANCE_TAG.key,
+          Value: DOUBLER_PROVENANCE_TAG.value,
+        }),
+      ]),
+    });
   });
 
   it('pins the deploy target to the MiniStack account/region unconditionally', () => {

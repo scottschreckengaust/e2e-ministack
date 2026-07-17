@@ -1,6 +1,10 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { DoublerFunction } from '../../../services/lambda/iac/cdk/construct';
+import {
+  DoublerFunction,
+  DOUBLER_PROVENANCE_DESCRIPTION,
+  DOUBLER_PROVENANCE_TAG,
+} from '../../../services/lambda/iac/cdk/construct';
 
 // Pure-synth unit test for the reusable Lambda construct fragment shipped by
 // the compat harness (epic #117, sub-issue B / #136). Mirrors
@@ -69,6 +73,29 @@ describe('DoublerFunction construct — fine-grained synth assertions', () => {
   it('does not attach the AWS-managed AWSLambdaBasicExecutionRole', () => {
     const roles = template.findResources('AWS::IAM::Role');
     expect(JSON.stringify(roles)).not.toContain('AWSLambdaBasicExecutionRole');
+  });
+
+  it('stamps the provenance Description marker only this construct sets (#175)', () => {
+    // The integration adapter (iac/cdk/deploy.ts) reads this marker back via
+    // GetFunction after deploy and FAILS LOUDLY if it is absent, so a stale or
+    // foreign function of the same name can never let the integration tier
+    // green without exercising a freshly-provisioned DoublerFunction. Lock the
+    // marker into the synthesized template so the read-back has something to
+    // assert against and a future edit that drops it fails here.
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Description: DOUBLER_PROVENANCE_DESCRIPTION,
+    });
+  });
+
+  it('stamps the provenance CDK tag on the function (#175)', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Tags: Match.arrayWith([
+        Match.objectLike({
+          Key: DOUBLER_PROVENANCE_TAG.key,
+          Value: DOUBLER_PROVENANCE_TAG.value,
+        }),
+      ]),
+    });
   });
 
   it('honors an explicit functionName prop', () => {

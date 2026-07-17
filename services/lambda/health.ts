@@ -28,3 +28,27 @@ export function isFunctionConfigHealthy(
   const failedUpdate = cfg?.LastUpdateStatus === LastUpdateStatus.Failed;
   return !(brokenState || failedUpdate);
 }
+
+/**
+ * PROVENANCE predicate for the verify-or-provision adapter (#175).
+ *
+ * A `GetFunction` that succeeds proves only that SOME function of that name
+ * exists — not that THIS stack provisioned it. A stale leftover, or a foreign
+ * function that happens to share `compat-lambda-doubler`, would otherwise let
+ * the integration oracle green without ever exercising a freshly-provisioned
+ * {@link DoublerFunction}. So the adapter reads the function's `Description`
+ * back and requires the EXACT marker string only that construct stamps
+ * (`DOUBLER_PROVENANCE_DESCRIPTION`); this predicate is that pure check.
+ *
+ * Deliberately EXACT-match and marker-passed-in: the expected value lives in
+ * the construct (the single source of truth for what gets stamped) and is
+ * threaded through here, so `health.ts` stays free of any CDK import. An
+ * absent/empty/foreign Description is `false` (fail loudly / re-provision); only
+ * the exact marker is `true`.
+ */
+export function hasProvenanceMarker(
+  cfg: FunctionConfiguration | undefined,
+  expectedDescription: string,
+): boolean {
+  return cfg?.Description === expectedDescription;
+}

@@ -17,6 +17,18 @@ import type { LambdaContract } from '../../../services/lambda/contract';
  * demo-deployed `cdk-doubler`. Terraform/CloudFormation adapters arrive in
  * later sub-issues as one extra array entry each, with NO change to the oracles.
  *
+ * PROVENANCE PROOF (#175): the adapter's `deploy()` no longer trusts a bare
+ * verify short-circuit — after both the fast-path skip AND a fresh provision it
+ * reads the function back via `GetFunction` and asserts the provenance marker
+ * (`DOUBLER_PROVENANCE_DESCRIPTION`) that ONLY `DoublerFunction`/
+ * `CompatLambdaStack` stamps. So `beforeAll` here THROWS if the invoked
+ * `compat-lambda-doubler` is a stale or foreign function of the same name
+ * rather than one this stack provisioned — the oracle can no longer green
+ * against a resource the harness didn't create. (The marker + the read-back's
+ * pure predicate are unit-tested in test/unit/services/lambda-construct.test.ts,
+ * lambda-compat-stack.test.ts, and lambda-health.test.ts; the live read-back
+ * itself runs only here in the integration tier.)
+ *
  * INTEGRATION tier: needs a live MiniStack but NOT a prior `cdk deploy` — the
  * adapter provisions its own stack on demand. It does NOT run in the unit tier
  * and cannot run without an emulator. It emits named JUnit cases to
