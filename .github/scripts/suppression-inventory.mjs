@@ -60,6 +60,21 @@ function ripgrepCandidates() {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
+  // FAIL-SAFE (report-only contract, must NEVER red CI): if ripgrep isn't
+  // spawnable — not installed (ENOENT), or killed by a signal — `res.error` is
+  // set and/or `res.status` is null. A missing tool is an infra gap, not a
+  // finding, so treat it as an EMPTY inventory (caller writes a valid
+  // empty-results SARIF + text report) rather than failing the step. This is
+  // deliberately distinct from a genuine ripgrep RUNTIME error (the process ran
+  // and exited with a numeric code >= 2, e.g. a bad pattern), which is a real
+  // bug in THIS tool and still exits non-zero below.
+  if (res.error || res.status === null) {
+    console.error(
+      `ripgrep unavailable (${res.error ? res.error.code || res.error.message : 'no exit status'}); ` +
+        'emitting empty report (report-only — not failing CI)',
+    );
+    return [];
+  }
   // rg exits 1 when there are no matches — that is a clean tree, not an error.
   if (res.status !== 0 && res.status !== 1) {
     console.error(`ripgrep failed (status ${res.status}): ${res.stderr}`);

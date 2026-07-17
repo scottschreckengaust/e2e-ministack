@@ -1567,9 +1567,18 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           npm-ci: 'false' # inventory uses Node built-ins + ripgrep only; no deps
+      # ubuntu-latest does NOT ship ripgrep, so install it (same apt pattern as
+      # the clamav job's clamdscan). The shim is ALSO fail-safe if rg is missing
+      # (emits an empty report, never reds this report-only job), but install it
+      # so the inventory actually runs.
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update || true
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get install -y --no-install-recommends ripgrep
+          rg --version | head -1
       - name: Run suppression inventory (report-only — never fails)
         run: |
-          rg --version | head -1
           node .github/scripts/suppression-inventory.mjs \
             --sarif suppression-inventory.sarif \
             --text suppression-inventory.txt
