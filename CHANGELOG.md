@@ -10,6 +10,27 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.7.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.6.0...v0.7.0) (2026-07-17)
+
+
+### Features
+
+* **deps:** Dependabot for github-actions only ([#221](https://github.com/scottschreckengaust/e2e-ministack/issues/221)) ([#224](https://github.com/scottschreckengaust/e2e-ministack/issues/224)) ([e11e4b6](https://github.com/scottschreckengaust/e2e-ministack/commit/e11e4b6522e9b68898b2bdc1ecdcc1dde1c71fc3))
+* **security:** VEX report — gate-vs-badge severity divergence column ([#208](https://github.com/scottschreckengaust/e2e-ministack/issues/208)) ([#216](https://github.com/scottschreckengaust/e2e-ministack/issues/216)) ([a827f38](https://github.com/scottschreckengaust/e2e-ministack/commit/a827f38eb4cfd38639bf20eb93c5e65284b3c20d))
+* **security:** VEX report — reclassify stale-open alerts as Scanner-cleared ([#210](https://github.com/scottschreckengaust/e2e-ministack/issues/210)) ([#214](https://github.com/scottschreckengaust/e2e-ministack/issues/214)) ([1c041aa](https://github.com/scottschreckengaust/e2e-ministack/commit/1c041aa5a991195dc63ec12eede4479af59ba872))
+
+
+### Bug Fixes
+
+* **ci:** bump download-artifact to node24 (v8.0.1) + enforce SonarQube gate ([#170](https://github.com/scottschreckengaust/e2e-ministack/issues/170)) ([#219](https://github.com/scottschreckengaust/e2e-ministack/issues/219)) ([59f2dcf](https://github.com/scottschreckengaust/e2e-ministack/commit/59f2dcf7e48ed71a29498c31f3c04064f93c7b39))
+* **sonar:** return the stack handle from buildApp — resolve S1848 ([#170](https://github.com/scottschreckengaust/e2e-ministack/issues/170)) ([#218](https://github.com/scottschreckengaust/e2e-ministack/issues/218)) ([96df225](https://github.com/scottschreckengaust/e2e-ministack/commit/96df225bac926941ee29038569b7556ae25c5c53))
+
+
+### Performance Improvements
+
+* **ci:** Grype image — SBOM once, scan the SBOM; derive gate from JSON ([#263](https://github.com/scottschreckengaust/e2e-ministack/issues/263), [#261](https://github.com/scottschreckengaust/e2e-ministack/issues/261)) ([#265](https://github.com/scottschreckengaust/e2e-ministack/issues/265)) ([f82e68f](https://github.com/scottschreckengaust/e2e-ministack/commit/f82e68fd02101c6d23a234af329333b33cce80d3))
+* **ci:** Trivy image — scan once, derive SARIF + table from JSON ([#263](https://github.com/scottschreckengaust/e2e-ministack/issues/263)) ([#264](https://github.com/scottschreckengaust/e2e-ministack/issues/264)) ([fc134f2](https://github.com/scottschreckengaust/e2e-ministack/commit/fc134f2643bb44604ee646bac6100e4347ff41a5))
+
 ## [0.6.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.5.1...v0.6.0) (2026-07-16)
 
 
