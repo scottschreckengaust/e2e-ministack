@@ -1,0 +1,55 @@
+# Keyword → label map for github/issue-labeler (issue #191, part of #190).
+#
+# Consumed by .github/workflows/issue-labeler.yml. This is the ISSUE analog of
+# the path-based PR labeler in .github/labeler.yml (#116): different trigger
+# (`issues`), different mechanism (title/body keyword regex, zero egress).
+#
+# Semantics (github/issue-labeler v3):
+#   - Each key is a label that MUST already exist in the repo (`gh label list`);
+#     the action never creates labels.
+#   - The value is a list of regexes. Multiple list entries are AND'd, so each
+#     label uses ONE alternation regex — a match on ANY listed keyword applies
+#     the label.
+#   - The `/…/i` form (leading/trailing slash + `i` flag) makes matching
+#     case-insensitive; a bare string would match case-sensitively.
+#   - Labeling is ADDITIVE — the workflow sets `sync-labels: 0`, so a label is
+#     never removed when its regex stops matching (protects hand-applied
+#     priority:*/effort:*/help-wanted, mirroring the PR labeler's decision).
+#
+# Scope is the repo's real `area:*` set plus `documentation`/`enhancement`.
+# Patterns are anchored on domain-specific terms (with \b word boundaries) to
+# keep false positives low; a stray label is cheap since a human can drop it.
+
+# GitHub Actions workflows / CI plumbing.
+area:ci:
+  - '/\b(ci|continuous[ -]integration|github actions?|workflows?|pipelines?|actionlint|zizmor)\b/i'
+
+# CDK stack / IaC / the MiniStack emulator.
+area:infra:
+  - '/\b(cdk|cdk-nag|cloudformation|infrastructure|iac|lambda|s3 bucket|buckets?|ministack|synth(esiz\w+)?)\b/i'
+
+# Test pyramid, fuzzing, mutation, coverage.
+area:tests:
+  - '/\b(tests?|testing|jest|coverage|mutation|stryker|fuzz(ing)?|fast-check|junit)\b/i'
+
+# Dependencies / pinning / supply of packages.
+area:deps:
+  - '/\b(dependenc(y|ies)|dependabot|renovate|lockfile|package-lock|npm audit|pinning|version pin)\b/i'
+
+# Docs / DX / repo health.
+area:docs:
+  - '/\b(docs|documentation|readme|markdown(lint)?|typos?)\b/i'
+
+# Security posture / supply chain / scanners.
+area:security:
+  - '/\b(security|vulnerabilit(y|ies)|cve|vex|grype|trivy|semgrep|codeql|gitleaks|secrets?|malware|clamav|sonarqube|supply[ -]chain|sast)\b/i'
+
+# Cross-cut: the `documentation` label tracks the same doc keywords as
+# area:docs (both already exist; issue #191 allows documentation/enhancement).
+documentation:
+  - '/\b(docs|documentation|readme|markdown(lint)?|typos?)\b/i'
+
+# Feature requests. Kept deliberately tight (explicit request phrasing only) to
+# avoid tagging every issue that happens to say "feature".
+enhancement:
+  - '/\b(enhancement|feature request|feature:|new feature)\b/i'
