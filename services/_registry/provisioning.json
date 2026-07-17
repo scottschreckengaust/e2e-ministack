@@ -8,6 +8,15 @@
       "oracles": { "sdk": "pass", "cli": "pass" },
       "lastVerifiedDigest": "sha256:c5ce466eb2e73b5f3af86a5a1aea780c1e8fcf8f04ec0e2042a5cf759d6dcdd3",
       "notes": "self-provisions its own CompatLambdaStack (compat-lambda-doubler) via verify-or-provision; decoupled from the demo stack (#147)"
+    },
+    {
+      "service": "s3",
+      "resource": "AWS::S3::Bucket",
+      "iac": "cdk",
+      "deploy": "pass",
+      "oracles": { "sdk": "pass", "cli": "pass" },
+      "lastVerifiedDigest": "sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9",
+      "notes": "self-provisions its own CompatS3Stack (compat-s3-bucket + a dedicated access-log bucket) via verify-or-provision; decoupled from the demo stack (#139)"
     }
   ]
 }
