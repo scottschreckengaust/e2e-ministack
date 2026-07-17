@@ -22,7 +22,7 @@ Security tab.
 | Semgrep               | security.yml | SAST over source                            | hard-fail             |
 | npm audit             | security.yml | npm advisories (`--audit-level=high`)       | hard-fail             |
 | OSV-Scanner           | security.yml | lockfile advisories                         | hard-fail             |
-| Grype (FS)            | security.yml | filesystem vuln scan                        | hard-fail             |
+| Grype (FS)            | security.yml | filesystem vuln scan                        | hard-fail (VEX-gated) |
 | Grype (MiniStack img) | security.yml | third-party emulator image by digest        | hard-fail (VEX-gated) |
 | Trivy (FS)            | security.yml | filesystem vuln scan (2nd DB vs Grype)      | report-only           |
 | Trivy (MiniStack img) | security.yml | third-party emulator image by digest        | hard-fail (VEX-gated) |
@@ -606,6 +606,54 @@ with a matching rationale, and re-opens the moment an upstream fix ships.
   filesystem-surface VEX feed into the scanners is tracked separately (#226);
   revisit when semgrep makes mcp an extra or advances the pin (semgrep#11506).
   See `.vex/README.md` and **#226**.
+
+  **Update (#284) — grype's DB now rates these three high, and the Grype FS gate
+  is now JSON-derived.** Grype only suppresses `not_affected`/`fixed`, so once
+  its floating DB began rating the 3 `mcp` GHSAs high, the deliberately-`affected`
+  records could not suppress the finding and the **required** `grype` FS gate
+  reddened repo-wide. The fix (§ "Grype FS gate — JSON-derived, VEX-aware for both
+  statuses" below) derives the FS gate from grype's JSON — failing only on a high+
+  finding not covered by ANY `.vex/` record — mirroring how the `ministack-image`
+  Grype job already gates. **These records stay honestly `affected`** (the #188
+  stance is unchanged; only the gate MECHANISM changed): the FS scan no longer
+  reds on a VEX-accepted CVE regardless of its status, but still hard-fails on a
+  genuinely-new uncovered high+, and the SARIF still uploads so the `mcp` findings
+  stay visible on the Security tab.
+
+## Grype FS gate — JSON-derived, VEX-aware for both statuses (#284)
+
+The `grype` **FS scan** (`security.yml`) is a **required** Code-Scanning gate.
+It was `fail-build: true` and fed the whole `.vex/` set via
+`GRYPE_VEX_DOCUMENTS`, relying on grype to drop VEX-covered findings. But grype's
+go-vex only moves `not_affected`/`fixed` to the ignored set; an `affected` record
+STAYS in `matches[]` (its `AugmentMatches` re-surfaces it — proven in #160). So
+when grype's floating DB advanced and began rating the 3 `mcp` server-transport
+GHSAs high — CVEs the repo deliberately accepts as `status: affected` under the
+status-honesty policy of #188 (reachable-but-not-exercised) — the gate went red
+on `main` and every PR, blocking all merges.
+
+**The fix (Option 3, maintainer-recommended) mirrors the `ministack-image` Grype
+job:** run the scan action with `fail-build: false` (so the SARIF always uploads
+— findings stay VISIBLE on the Security tab) and **derive the gate from grype's
+JSON** via `.github/scripts/grype-fs-gate.ts`. The gate fails ONLY on a high+
+finding **not covered by any `.vex/` record** — where "covered" treats **both**
+`affected` and `not_affected` as an explicit, reviewed acceptance (an `affected`
+record is as deliberate a governance decision as a `not_affected` one). This does
+**not** weaken the gate: it still hard-fails on a genuinely-new uncovered high+
+(VEX-accept it or fix it) — it just stops red-ing on CVEs the repo has already
+reviewed and accepted, making the FS scan consistent with the image scan.
+
+The gate handles **GHSA↔CVE aliasing** (the crux): grype may report the GHSA as
+the primary `vulnerability.id` with the CVE in `relatedVulnerabilities[]` (or
+vice versa), while the `.vex/` records name the CVE in `vulnerability.name` and
+alias the GHSA in `vulnerability.aliases[]`. The decider builds the accepted set
+as the union of every record's name + aliases and tests each match against the
+union of its primary + related ids, so either direction maps onto the accepted
+set. The logic module is 100%-covered, Stryker-mutation-tested (0 survivors), and
+replayed in the fuzz-regression tier (`grype-fs-gate.regression.test.ts`); the
+`.mjs` is a thin Node-built-in CLI shim. The `mcp` records are **unchanged**
+(`status: affected`) — only the gate mechanism moved from `fail-build` to
+JSON-derived.
 
 ## Pinning
 

@@ -397,22 +397,41 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      # VEX-aware FS gate (#226). This job hard-fails at high+; feed it the whole
-      # `.vex/` set via GRYPE_VEX_DOCUMENTS (comma-separated — the same channel the
-      # ministack-image job uses) so an honest `not_affected` record suppresses a
-      # matching filesystem finding. go-vex only suppresses when the record's
-      # product purl equals the scanned component's, so the image `CVE-*` records
-      # (deb/generic image purls) are INERT here while the pypi-surface records
+      # VEX-aware FS gate (#226, #284). Feed the whole `.vex/` set via
+      # GRYPE_VEX_DOCUMENTS (comma-separated — the same channel the ministack-image
+      # job uses) so an honest `not_affected` record suppresses a matching
+      # filesystem finding. go-vex only suppresses when the record's product purl
+      # equals the scanned component's, so the image `CVE-*` records (deb/generic
+      # image purls) are INERT here while the pypi-surface records
       # (e.g. ecdsa-CVE-2024-23342, a pypi purl in a relocated requirements.txt)
-      # match and drop. `affected` records deliberately do NOT suppress (only
-      # `not_affected`/`fixed` do — proven in #160), so a future `affected` record
-      # (e.g. the mcp CVEs) still surfaces here as intended.
+      # match and drop.
       - name: Gather VEX documents
         id: vex
         run: echo "docs=$(printf '%s,' .vex/*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
-      # The anchore action emits SARIF and (with fail-build) sets the outcome;
-      # capture its output path and always upload.
-      - id: grype
+      # ── The GATE — derive the fail decision from the JSON, NOT from grype's
+      # `fail-build` (#284), mirroring the ministack-image job. WHY: grype only
+      # moves `not_affected`/`fixed` records to `ignoredMatches[]`; an `affected`
+      # record STAYS in `matches[]` (its `AugmentMatches` re-surfaces it — proven
+      # in #160). So once grype's floating DB began rating the 3 mcp GHSAs high,
+      # the deliberately-`affected` `.vex/mcp-CVE-*.openvex.json` records (#188
+      # status-honesty: reachable-but-not-exercised MCP server transport) could
+      # not suppress the finding and this REQUIRED gate reddened on main + every
+      # PR. The JSON-derived gate (`grype-fs-gate.mjs`) fails ONLY on a high+
+      # finding NOT covered by ANY `.vex/` record — an `affected` record is an
+      # explicit, reviewed acceptance exactly as a `not_affected` one is — so it
+      # still hard-fails on a genuinely-new uncovered high+ (the actionable
+      # signal) but no longer reds on VEX-accepted CVEs. The mcp records stay
+      # honestly `affected`; the SARIF still uploads so findings stay VISIBLE.
+      # `fail-build: false` so the action never fails the step itself (the SARIF
+      # must always upload); the gate is enforced off the outcome file below.
+      #
+      # A separate JSON scan feeds the gate (`grype-fs-gate.mjs` needs the
+      # structured `matches[].vulnerability.{id,severity}` + `relatedVulnerabilities`
+      # for GHSA↔CVE aliasing that SARIF doesn't carry cleanly); the SARIF scan
+      # below is the Security-tab visibility view (VEX-fed, unchanged shape).
+      - id: grype-json
+        name: Grype gate scan (VEX-fed JSON)
+        continue-on-error: true # never stop the job here; enforced off the outcome below
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
@@ -422,7 +441,42 @@ jobs:
           # The vuln DB still floats by design (fresh CVEs). Bump deliberately.
           grype-version: v0.114.0
           path: '.'
-          fail-build: true
+          fail-build: false # gate is derived from the JSON below, not fail-build
+          severity-cutoff: high
+          output-format: json
+      # Compute the gate from the JSON: FAIL iff a high+ finding is NOT covered by
+      # ANY `.vex/` record (affected OR not_affected — both are reviewed
+      # acceptances). Handles GHSA↔CVE aliasing (grype may report the GHSA with the
+      # CVE in `relatedVulnerabilities`, or vice versa; the `.vex/` records name the
+      # CVE + alias the GHSA). Logic is the 100%-covered + mutation-tested + fuzzed
+      # `grype-fs-gate.ts`; the `.mjs` is a thin CLI shim (Node built-in only).
+      - name: Derive gate outcome from JSON (VEX-aware, both statuses)
+        if: always()
+        env:
+          GATE_JSON: ${{ steps.grype-json.outputs.json }}
+        run: |
+          if [ -z "$GATE_JSON" ] || [ ! -f "$GATE_JSON" ]; then
+            echo "no gate JSON produced (scan failed to run)"
+            echo "outcome=failure" > grype-fs.outcome
+            exit 0
+          fi
+          # shellcheck disable=SC2046  # intentional glob-expansion of the .vex/ set
+          node .github/scripts/grype-fs-gate.mjs "$GATE_JSON" $(printf '%s ' .vex/*.openvex.json)
+      # The Security-tab visibility view: a VEX-fed SARIF (fail-build:false so it
+      # never fails the step). VEX-fed keeps parity with the pre-#284 Security-tab
+      # behavior (a `not_affected` FS record like ecdsa is suppressed here; an
+      # `affected` mcp record still SHOWS — honest visibility, just no longer
+      # gate-failing).
+      - id: grype
+        name: Grype SARIF scan (Security-tab view, VEX-fed)
+        continue-on-error: true # visibility path; the gate is the JSON scan above
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        env:
+          GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
+        with:
+          grype-version: v0.114.0
+          path: '.'
+          fail-build: false # visibility only; gate is derived from the JSON above
           severity-cutoff: high
           output-format: sarif
       - name: Upload SARIF to Security tab
@@ -436,8 +490,16 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: grype-sarif
-          path: ${{ steps.grype.outputs.sarif }}
+          path: |
+            ${{ steps.grype.outputs.sarif }}
+            ${{ steps.grype-json.outputs.json }}
           if-no-files-found: warn
+      - name: Enforce Grype FS result (hard-fail on any uncovered high+ CVE)
+        if: always()
+        run: |
+          source grype-fs.outcome
+          echo "grype FS scan outcome=$outcome (fails on any high+ CVE not covered by a .vex/ record)"
+          test "$outcome" = "success"
 
   # ── Third-party container image (MiniStack emulator) ───────────────────
   # The MiniStack image runs with the host Docker socket mounted and

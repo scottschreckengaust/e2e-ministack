@@ -30,6 +30,25 @@ record (see its note below) — it fires now because the pinned pip files were
 relocated to `requirements.txt` (so grype/trivy catalog them by filename) and
 the FS jobs were wired to the `.vex/` feed.
 
+As of **#284** the `grype` FS gate is **JSON-derived and VEX-aware for BOTH
+statuses**, mirroring the `ministack-image` job: the scan action runs
+`fail-build: false` (SARIF still uploads to the Security tab, so findings stay
+visible) and the gate is computed from grype's JSON by
+`.github/scripts/grype-fs-gate.ts` — it FAILS only on a high+ finding **not
+covered by any `.vex/` record** (an `affected` record is an explicit, reviewed
+acceptance exactly as a `not_affected` one is). Why the change: grype's go-vex
+only moves `not_affected`/`fixed` to `ignoredMatches[]`; an `affected` record
+STAYS in `matches[]` (its `AugmentMatches` re-surfaces it — see below), so once
+the floating DB began rating the 3 `mcp` GHSAs high, the deliberately-`affected`
+`mcp` records could not suppress the finding and the **required** FS gate went
+red repo-wide. The JSON gate keeps the `mcp` records honestly `affected`
+(#188), still hard-fails on a genuinely-new uncovered high+, and handles
+GHSA↔CVE aliasing (grype may report the GHSA with the CVE in
+`relatedVulnerabilities`, or vice versa; each record names the CVE + aliases the
+GHSA). The `GRYPE_VEX_DOCUMENTS`-fed SARIF is retained as the Security-tab
+visibility view (a `not_affected` FS record like `ecdsa` is suppressed there; an
+`affected` `mcp` record still shows — honest, just no longer gate-failing).
+
 Beyond the CI gate, these records also drive the **GitHub Security-tab** state:
 a covered CVE is surfaced as a _dismissed_ alert whose suppression is derived
 from its record here, and it auto-re-opens if the record is dropped (issue #181;
@@ -215,6 +234,18 @@ the FS surface — the `ecdsa` record is now listed in `trivy.yaml` too).
   Dependabot dismissal here, so these records ARE the honest acceptance. Wiring
   the filesystem-surface VEX feed into a consuming scanner is tracked separately
   under **#226** (PR 2).
+
+  **Update (#284): grype's DB now rates these three high.** When that happened,
+  the deliberately-`affected` records could NOT suppress the finding (grype only
+  suppresses `not_affected`/`fixed`), so the **required** Grype FS gate reddened
+  on `main` and every PR. The fix (see the "As of #284" note near the top of this
+  file) makes the FS gate **JSON-derived and VEX-aware for both statuses**: it no
+  longer reds on any CVE covered by a `.vex/` record (an `affected` acceptance is
+  as explicit and reviewed as a `not_affected` one), while still hard-failing on
+  a genuinely-new uncovered high+. **These three records stay honestly
+  `affected`** — the #188 status-honesty stance is unchanged; only the gate
+  mechanism changed. They still show as (un-suppressed) findings in the
+  Security-tab SARIF, so visibility is preserved.
 
 ### MiniStack image base CVEs (`CVE-*.openvex.json`, #84)
 
