@@ -703,10 +703,32 @@ export function renderMarkdown(rows: readonly ReportRow[]): string {
   const resolved = rows.filter((r) => r.status === 'Resolved');
   const alertTotal = rows.reduce((n, r) => n + r.alertCount, 0);
 
-  // (1) Header: distinct CVEs (rows) vs. the alerts they collapse (the #206
-  // "170 vs 125" legibility fix — say both denominators explicitly).
+  // The DISTINCT scanners contributing alerts (grype ∪ trivy ∪ …), for the
+  // header's third denominator (#206 item 6). Counting distinct scanner names
+  // across every row — NOT total scanner links — is the number that explains why
+  // ~132 CVEs expand to ~455 alerts (each scanner re-reports the CVE, and grype
+  // splits per-package): "N CVEs across M alerts (K scanners)" reads as
+  // aggregation, not a discrepancy. Tool-agnostic: it's a COUNT (not the scanner
+  // names), so a scanner swap changes only the number, matching the report's
+  // `.vex/`-driven, tool-agnostic design (the maintainer's example named them,
+  // but a count stays stable across the DB/digest bumps that shift the set).
+  const scannerNames = new Set<string>();
+  for (const r of rows)
+    for (const sc of r.scanners) scannerNames.add(sc.scanner);
+  const scannerCount = scannerNames.size;
+  // Omit the qualifier when there are no scanners at all (e.g. a stale-record-
+  // only report) — mirrors how the status suffixes below drop their zero cases,
+  // and avoids the nonsensical "(0 scanners)".
+  const scannerNote =
+    scannerCount > 0
+      ? ` (${scannerCount} scanner${scannerCount === 1 ? '' : 's'})`
+      : '';
+
+  // (1) Header: distinct CVEs (rows) vs. the alerts they collapse vs. the
+  // scanners those alerts came from (the #206 "170 vs 125" legibility fix — say
+  // all three denominators explicitly so the gap reads as aggregation).
   const summary =
-    `**VEX report** — ${rows.length} CVE(s) across ${alertTotal} image-scan alert(s): ` +
+    `**VEX report** — ${rows.length} CVE(s) across ${alertTotal} image-scan alert(s)${scannerNote}: ` +
     `${s['Decision needed']} decision needed · ${s['VEX drift']} vex drift · ` +
     `${s['Undocumented dismissal']} undocumented dismissal · ` +
     `${s['Revisit overdue']} revisit overdue · ${s['Stale record']} stale · ` +
