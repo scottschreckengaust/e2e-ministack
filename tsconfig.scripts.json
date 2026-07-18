@@ -7,10 +7,30 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    // `vex-dialects.ts` imports `SUPPRESSING_STATUSES`/`extractCve` from its
+    // sibling `./vex-to-sarif-suppressions.ts` WITH the explicit `.ts` extension
+    // (#251) — the repo's first runtime VALUE cross-import between two
+    // `.github/scripts` modules (all others are `import type`, erased at
+    // runtime). The `.mjs` shim runs it under Node 24's type-stripping loader,
+    // which resolves ONLY the `.ts` specifier at runtime (a `.js` sibling does
+    // not exist on a clean checkout; extensionless fails). This flag lets tsc
+    // accept that extension; it is legal precisely because this project is
+    // `noEmit` (nothing is written, so there is no rewrite-the-specifier step).
+    "allowImportingTsExtensions": true,
     // node globals for the logic modules + jest globals for the fuzz-regression
     // `.ts` targets (describe/it/expect) that this project also type-checks.
     "types": ["node", "jest"]
   },
-  "include": [".github/scripts/**/*.ts", "scripts/**/*.ts", "fuzz/**/*.ts"],
+  // Also type-check the unit test that imports the `.ts`-cross-importing module
+  // (test/unit/vex-dialects.test.ts): it is EXCLUDED from the emitting
+  // tsconfig.json (below) so tsc never follows its import and emits a shadowing
+  // `.js`, so this noEmit project is where it gets type-checked. Scoped to that
+  // one file — the rest of test/** stays on the emitting build's graph.
+  "include": [
+    ".github/scripts/**/*.ts",
+    "scripts/**/*.ts",
+    "fuzz/**/*.ts",
+    "test/unit/vex-dialects.test.ts"
+  ],
   "exclude": ["node_modules", "cdk.out"]
 }

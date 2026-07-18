@@ -1,0 +1,1 @@
+{"statements":[{"vulnerability":{"name":"CVE-2026-8"},"status":"not_affected","impact_statement":"has \"quotes\" and\nnewline and — dash"}]}

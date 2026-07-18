@@ -6,17 +6,34 @@ actually **affected** by a CVE its scanners flag. A scanner that consumes VEX
 can then suppress a finding we have honestly assessed as not reachable, instead
 of leaving it as permanent red noise.
 
+**`.vex/` is the single authoring surface (#251).** You edit only the
+`.vex/*.openvex.json` records; every scanner's suppression dialect is a
+**generated artifact**. `.github/scripts/vex-dialects.ts` (jest-gated at 100%
+coverage + Stryker + fuzz) reads the ledger and emits both `trivy.yaml`'s
+`vulnerability.vex` list and `osv-scanner.toml`'s `[[IgnoredVulns]]`; a hard-fail
+CI job (`vex-dialects` in `security.yml`) regenerates them and fails if the
+committed files drift. Regenerate after any record change with
+`node .github/scripts/vex-dialects.mjs write` (do **not** hand-edit trivy.yaml /
+osv-scanner.toml — they carry a GENERATED-FILE banner). The generator honors the
+SAME `SUPPRESSING_STATUSES` set (`not_affected`/`fixed`) as the SARIF injector
+(imported from `vex-to-sarif-suppressions.ts`, not re-derived), so `affected`
+records (e.g. mcp) never appear in any dialect. Grype needs no generated file —
+it reads `.vex/` natively (see below).
+
 As of **#84** these records are **live**: the `security.yml` `ministack-image`
 (Grype) and `trivy-image` (Trivy) jobs are **hard-fail, VEX-gated** and consume
 the `.vex/CVE-*.openvex.json` set. The feed channel differs per scanner (neither
 `--vex` accepts a bare directory): **Grype** reads them via the
 `GRYPE_VEX_DOCUMENTS` env (a comma-separated file list the `anchore/scan-action`
-forwards natively); **Trivy** reads them from the committed `trivy.yaml`
+forwards natively); **Trivy** reads them from the **generated** `trivy.yaml`
 `vulnerability.vex` list, which trivy auto-discovers from the CWD — the pinned
 `aquasecurity/trivy-action` has no `vex` input and does not forward a
 `TRIVY_VEX` env, so the config file is the channel that actually loads them (see
-`docs/SECURITY-TOOLING.md` § MiniStack image scan). The image gate fails on any
-**new** high+ CVE not covered by a record here, and passes on the accepted set.
+`docs/SECURITY-TOOLING.md` § MiniStack image scan). **OSV-Scanner** (#251) has no
+OpenVEX channel — it reads the **generated** `osv-scanner.toml` `[[IgnoredVulns]]`
+(id + reason + `ignoreUntil` derived from a dated `revisit_by`). The image gate
+fails on any **new** high+ CVE not covered by a record here, and passes on the
+accepted set.
 
 As of **#226** the **filesystem** SCA scans are also VEX-aware: the `grype` FS job
 (hard-fail @ high) reads the whole `.vex/*.openvex.json` set via
@@ -176,16 +193,31 @@ severity as `badge / gate X` whenever the scanner's distro/gate rating diverges
 from GitHub's NVD-derived badge (#208, sourced from the scanners' structured
 JSON via `gate-findings.*` — never SARIF-scraped).
 
-## Adding a record — the two-feed gotcha
+## Adding a record — now generated, no more two-feed gotcha (#251)
 
-A new image `.vex/CVE-*.openvex.json` reaches the **grype image gate**
-automatically (its feed is a glob over `.vex/CVE-*.openvex.json`) and the
-**suppression injector** the same way; the **grype FS gate** globs the broader
-`.vex/*.openvex.json` (so it also picks up the pypi-surface `ecdsa` record).
-Either way, **`trivy.yaml`'s `vulnerability.vex` is an explicit file list**, not
-a glob, so a new record MUST be added there in lockstep or trivy won't see it.
-Keep the feeds in sync (this is the existing #84 convention; #226 extended it to
-the FS surface — the `ecdsa` record is now listed in `trivy.yaml` too).
+A new `.vex/CVE-*.openvex.json` reaches the **grype image gate** automatically
+(its feed is a glob over `.vex/CVE-*.openvex.json`), the **grype FS gate** (which
+globs the broader `.vex/*.openvex.json`, so it also picks up pypi-surface records
+like `ecdsa`), and the **suppression injector** the same way — all read `.vex/`
+directly.
+
+The scanners that CANNOT glob `.vex/` — **Trivy** (`trivy.yaml`'s
+`vulnerability.vex` is an explicit file list) and **OSV-Scanner** (no OpenVEX
+channel at all, only `osv-scanner.toml` `[[IgnoredVulns]]`) — used to require
+**hand-maintained parity** with `.vex/`, the historical "two-feed gotcha". As of
+**#251** that parity is **generated, not hand-maintained**: after adding or
+removing a record, run
+
+```bash
+node .github/scripts/vex-dialects.mjs write   # regenerate trivy.yaml + osv-scanner.toml
+```
+
+and commit the result. The hard-fail `vex-dialects` CI job runs
+`node .github/scripts/vex-dialects.mjs check` and fails if either committed file
+drifts from the generator output, so a forgotten regenerate can no longer
+silently desync a scanner. Only `not_affected`/`fixed` records are emitted; an
+`affected` record (e.g. mcp) is deliberately omitted from both dialects so it
+stays a visible finding (#188).
 
 ## Records
 
@@ -330,8 +362,9 @@ it** (most visible for the interpreter, `pkg:generic/python@<v>`). Procedure:
    one scanner's say-so re-opens the gate on the other.
 4. A CVE fixed upstream but not yet in the image stays as a record whose
    `impact_statement` says so; drop it when a later digest ships the fix.
-5. Keep `.vex/` and `trivy.yaml`'s `vulnerability.vex` list in lockstep (a
-   record count == list count parity check catches drift).
+5. Regenerate the dialects (`node .github/scripts/vex-dialects.mjs write`) and
+   commit trivy.yaml + osv-scanner.toml — the `vex-dialects` CI drift-check
+   enforces they match `.vex/` (#251, replacing the old manual parity).
 
 Verify BOTH scanners report **0 uncovered high+** locally before pushing; CI's
 grype + trivy are the final arbiters.

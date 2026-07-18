@@ -1596,6 +1596,34 @@ jobs:
           chmod +x actionlint
           ./actionlint -color
 
+  # ── VEX dialect drift-check (hard-fail, #251) ───────────────────────────
+  # `.vex/*.openvex.json` is the ONE canonical VEX ledger; the per-scanner
+  # suppression dialects are GENERATED from it by .github/scripts/vex-dialects.ts
+  # (jest-gated at 100% coverage #124 + Stryker #122 + fuzz). Grype reads `.vex/`
+  # natively (a glob), but Trivy needs an explicit FILE list (trivy.yaml
+  # `vulnerability.vex`) and OSV-Scanner has NO OpenVEX channel at all (only
+  # osv-scanner.toml `[[IgnoredVulns]]`) — both were drift-prone hand-maintained
+  # parity before this. This job regenerates both from `.vex/` and fails if the
+  # COMMITTED trivy.yaml / osv-scanner.toml differ from the generator output, so
+  # a hand-edit or a forgotten `vex-dialects.mjs write` can never silently desync
+  # a scanner's suppression set from the ledger (the "two-feed gotcha" #84/#226
+  # documented — now a gate, not a convention). Only not_affected/fixed records
+  # suppress; the `affected` mcp records (#226/#227) are omitted so they stay
+  # visible in every scanner (#188), enforced by the shared SUPPRESSING_STATUSES.
+  vex-dialects:
+    name: VEX dialect drift-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup # Node + npm ci (the generator imports smol-toml)
+      - name: Check trivy.yaml / osv-scanner.toml match the .vex/ ledger
+        run: node .github/scripts/vex-dialects.mjs check
+
   zizmor:
     name: Zizmor (Actions audit)
     runs-on: ubuntu-latest

@@ -43,6 +43,14 @@
     // above; tsc would otherwise follow those imports and emit a `.js` sibling
     // next to each. Exclude them from the emitting build too — they are loaded
     // only by jest (ts-jest) — and type-check them via tsconfig.scripts.json.
-    "fuzz/**/*.ts"
+    "fuzz/**/*.ts",
+    // Same reason, one file (#251): vex-dialects.test.ts imports
+    // .github/scripts/vex-dialects.ts, which does a runtime VALUE cross-import
+    // with an explicit `.ts` extension. An EMITTING project rejects a `.ts`
+    // import (TS5097) and can't set `allowImportingTsExtensions`, so following
+    // it here would both fail and emit a shadowing `.js`. Exclude it from the
+    // emitting build; it is type-checked by tsconfig.scripts.json (which lists
+    // it in `include`) and run by jest (ts-jest) + the unit coverage gate.
+    "test/unit/vex-dialects.test.ts"
   ]
 }

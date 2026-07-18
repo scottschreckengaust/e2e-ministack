@@ -1,0 +1,1 @@
+{"statements":[{"vulnerability":{"name":"CVE-2026-11822"},"status":"not_affected","justification":"vulnerable_code_cannot_be_controlled_by_adversary","impact_statement":"local-only CI emulator"}]}

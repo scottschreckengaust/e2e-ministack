@@ -52,6 +52,7 @@
     "jest-junit": "^17.0.0",
     "markdownlint-cli2": "^0.22.1",
     "prettier": "^3.8.4",
+    "smol-toml": "^1.6.1",
     "spdx-satisfies": "^6.0.0",
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
