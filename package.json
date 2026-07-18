@@ -1,6 +1,6 @@
 {
   "name": "e2e-ministack",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "license": "MIT",
   "packageManager": "npm@11.13.0",
