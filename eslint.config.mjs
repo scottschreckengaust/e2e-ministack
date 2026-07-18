@@ -26,7 +26,20 @@ export default tseslint.config(
         // .github/scripts/ + scripts/ are reachable via their test imports, so
         // the service already covers them.)
         projectService: {
-          allowDefaultProject: ['fuzz/*.regression.test.ts'],
+          // `fuzz/*.regression.test.ts`: the fuzz-regression targets (see the
+          // exclude comment above). `.github/scripts/vex-dialects.ts` +
+          // `test/unit/vex-dialects.test.ts` (#251): both are excluded from the
+          // EMITTING tsconfig.json (vex-dialects.ts does a runtime `.ts`
+          // value cross-import the emitting build can't follow — TS5097), and
+          // the test is the ONLY importer of that module, so neither is
+          // reachable through a tsconfig.json test-import the way the other
+          // logic modules are. They ARE type-checked by tsconfig.scripts.json;
+          // here they lint under the inferred default program.
+          allowDefaultProject: [
+            'fuzz/*.regression.test.ts',
+            '.github/scripts/vex-dialects.ts',
+            'test/unit/vex-dialects.test.ts',
+          ],
           // typescript-eslint caps the inferred default program at 8 matched
           // files by default; the fuzz-regression `.ts` targets (one per logic
           // module) crossed that ceiling at #284 (the grype-fs-gate target is the

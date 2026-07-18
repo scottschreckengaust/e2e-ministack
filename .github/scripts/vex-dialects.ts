@@ -26,10 +26,23 @@
 // dialects can never disagree with the SARIF injector on which statuses suppress.
 
 import { stringify as tomlStringify } from 'smol-toml';
+// EXPLICIT `.ts` extension (NOT `.js`, NOT extensionless): this is the repo's
+// FIRST runtime VALUE cross-import between two `.github/scripts` siblings (every
+// other cross-import here is `import type`, erased at runtime). The `.mjs` shim
+// runs this under Node 24's type-stripping loader with NO build step, and that
+// loader only resolves an EXPLICIT specifier that names an existing file — a
+// `.js` sibling does NOT exist on a clean checkout (it is a gitignored tsc
+// artifact), and an extensionless specifier fails too, so only
+// `./vex-to-sarif-suppressions.ts` resolves at runtime. tsc accepts the `.ts`
+// extension under `allowImportingTsExtensions` (set in the noEmit
+// tsconfig.scripts.json that type-checks these modules); the EMITTING
+// tsconfig.json never sees this file — both it and its only test importer are
+// excluded there (mirroring the existing `fuzz/**` exclusion), so tsc never
+// tries to emit a `.js` sibling that would shadow the `.ts` under jest/Stryker.
 import {
   SUPPRESSING_STATUSES,
   extractCve,
-} from './vex-to-sarif-suppressions.js';
+} from './vex-to-sarif-suppressions.ts';
 
 // Re-export the shared predicate so this module is the single import surface for
 // the dialect generator AND so a test can assert both modules agree on the set.
