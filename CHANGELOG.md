@@ -10,6 +10,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.9.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.8.0...v0.9.0) (2026-07-18)
+
+
+### Features
+
+* **ci:** VEX report UX — hyperlinked items, clearer Accepted/Tracked, count legend ([#206](https://github.com/scottschreckengaust/e2e-ministack/issues/206)) ([#287](https://github.com/scottschreckengaust/e2e-ministack/issues/287)) ([34af29b](https://github.com/scottschreckengaust/e2e-ministack/commit/34af29b3e288abbda9b9184c80552ffdba67baee))
+* **security:** generate scanner VEX dialects from .vex/ ledger ([#251](https://github.com/scottschreckengaust/e2e-ministack/issues/251)) ([#290](https://github.com/scottschreckengaust/e2e-ministack/issues/290)) ([c1cf1d2](https://github.com/scottschreckengaust/e2e-ministack/commit/c1cf1d24716a23a2687da7c84ed6fffd58d95b1b))
+
 ## [0.8.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.7.0...v0.8.0) (2026-07-17)
 
 
