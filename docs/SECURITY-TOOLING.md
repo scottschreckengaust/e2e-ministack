@@ -10,8 +10,10 @@ doc for the drift audit (#76); CLAUDE.md points here rather than duplicating it.
 Two workflows. `ci.yml` (changes → unit → integration) builds, lint/unit-tests
 with the cdk-nag synth gate, then deploys/tests against MiniStack. `security.yml`
 runs the scanners below (also on a weekly cron). A third, small scheduled
-workflow — `license-review-poller.yml` — resolves open `license-review` issues
-against ClearlyDefined weekly (see "Could not detect a license" below). Every
+workflow — `license-review-poller.yml` — resolves open `review:license` issues
+against ClearlyDefined weekly (see "Could not detect a license" below, and the
+"`review:<thing>` burndown-queue label family" section for the label convention).
+Every
 gate follows the **produce → always-upload → enforce** pattern so its report
 artifact exists even when the job fails; SARIF-capable gates also upload to the
 Security tab.
@@ -164,7 +166,7 @@ Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
        `curl -X POST https://api.clearlydefined.io/harvest -H 'Content-Type: application/json' -d '{"tool":"package","coordinates":"pypi/pypi/-/<name>/<version>"}'`
        (no auth required; returns `201 Created`; no evidence payload — their
        own tooling re-scans the artifact).
-    3. **File (or update) a `license-review`-labeled issue** for the purl,
+    3. **File (or update) a `review:license`-labeled issue** for the purl,
        recording the METADATA verdict from step 1 and the ClearlyDefined
        definition link
        (`https://clearlydefined.io/definitions/pypi/pypi/-/<name>/<version>`).
@@ -211,6 +213,48 @@ Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
 `npm audit --audit-level=high`. The action default is `low`. To triage the full
 backlog during a rollout, temporarily lower it to `low` (emit-all), then ratchet
 back to `high`.
+
+## The `review:<thing>` burndown-queue label family (#297)
+
+`review:license` (the license-UNKNOWN queue above) is the first member of a
+label **family**: `review:<thing>` marks a **machine-generated, machine-resolved
+review queue** — one issue per item, filed by a workflow and auto-closed by a
+poller. It is distinct from the classifying families (`area:*`, `priority:*`,
+`effort:*`, which _describe_ an issue); `review:` means "an open item in a
+burndown queue that CI owns."
+
+**Burndown query — the whole point of the family.** The label _is_ the todo
+list; there is no separate tracking record:
+
+```bash
+gh issue list --label 'review:license' --state open   # one family
+```
+
+`gh --label` has no glob, so query one family at a time (or union a few with a
+small loop over the known `review:*` labels). This per-family query is the
+canonical "find and work it down" handle.
+
+**One issue per item — NOT a checklist.** Do **not** collapse a queue into a
+single tracking issue with `[ ]`/`[x]` checkboxes, or a comment per item. A
+poller can idempotently _open_ and _close_ a real issue (the license queue
+already does), but it **cannot** race-safely tick a free-text markdown checkbox,
+and a "dashboard index" issue would be a derived parallel ledger — exactly the
+anti-pattern #167 exists to prevent. The label query already gives the list.
+
+**Adding a new `review:<thing>` family:**
+
+1. Create the label: `gh label create 'review:<thing>' --description '<queue purpose>'`.
+2. File items from a workflow with `--label review:<thing>` (idempotent by exact
+   title match, as the license triage step in `security.yml` does).
+3. Add a poller (or extend a generic one) that resolves/auto-closes items.
+4. If items should survive stale-close, add the label to `stale.yml`'s
+   `exempt-issue-labels` / `exempt-pr-labels`.
+
+**Spelling caveat (the license queue specifically).** Only the _label_ is
+`review:license`. The workflow **filename** stays `license-review-poller.yml`
+(renaming a scheduled workflow resets its cron history) and the **issue-title
+prefix** stays `license-review: <purl>` (a functional parse key the poller
+depends on). Label ≠ filename ≠ title-prefix here — do not "unify" them.
 
 ## SBOM
 

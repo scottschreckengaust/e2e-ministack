@@ -1,13 +1,19 @@
 name: License review poller
 
-# Scheduled verdict poller for `license-review` issues (#127 Leg B2).
+# Scheduled verdict poller for `review:license` issues (#127 Leg B2).
+#
+# NB: the LABEL is `review:license` (part of the repo's `review:<thing>`
+# burndown-queue family, #297); the ISSUE-TITLE prefix stays `license-review:`
+# (a functional parse key, deliberately unchanged) and this workflow's FILENAME
+# stays `license-review-poller.yml` (renaming it resets the cron history and is
+# also baked into the `<!-- license-review-poller -->` comment marker below).
 #
 # WHY THIS EXISTS: the dependency-review gate in security.yml is PR-diff-
 # scoped. A package that enters the tree while its license is UNKNOWN
 # (ClearlyDefined harvest lag) is never re-evaluated after merge — no future
 # PR diff contains it, so if its license later resolves to something off the
 # allow-list (e.g. AGPL-3.0) no PR-time gate ever fires. The B1 triage step
-# in security.yml files a `license-review` issue per UNKNOWN purl; this
+# in security.yml files a `review:license` issue per UNKNOWN purl; this
 # workflow is THE enforcement point for those: for each open issue it fetches
 # ClearlyDefined's declared SPDX expression and either
 #   - auto-closes the issue (declared license satisfiable from security.yml's
@@ -19,7 +25,7 @@ name: License review poller
 #     can no longer fire. Remediation stays a human decision on the issue.
 #
 # Closing issues here is a designed exception to "automation never closes
-# issues": it closes `license-review` BOOKKEEPING issues only, never work
+# issues": it closes `review:license` BOOKKEEPING issues only, never work
 # issues.
 #
 # The allow-list is NOT duplicated here — it is extracted at runtime from
@@ -46,12 +52,12 @@ concurrency:
 
 jobs:
   poll:
-    name: Poll license-review issues
+    name: Poll review:license issues
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read # checkout (script + allow-list source)
-      issues: write # comment / label / close license-review issues
+      issues: write # comment / label / close review:license issues
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -61,7 +67,7 @@ jobs:
       # #222 — the script is no longer Node-built-ins-only). A few seconds of
       # install is an acceptable cost for a weekly cron.
       - uses: ./.github/actions/setup
-      - name: Poll ClearlyDefined and resolve license-review issues
+      - name: Poll ClearlyDefined and resolve review:license issues
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -88,15 +94,15 @@ jobs:
           fi
           echo "allow-list: $ALLOW_LIST"
 
-          issues=$(gh issue list --label license-review --state open \
+          issues=$(gh issue list --label review:license --state open \
             --json number,title,createdAt,labels --limit 100)
           count=$(jq 'length' <<<"$issues")
           if [ "$count" = "0" ]; then
-            echo "nothing to review — no open license-review issues."
-            echo "No open \`license-review\` issues — nothing to review." >> "$GITHUB_STEP_SUMMARY"
+            echo "nothing to review — no open review:license issues."
+            echo "No open \`review:license\` issues — nothing to review." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          echo "open license-review issues: $count"
+          echo "open review:license issues: $count"
           echo "## License review poller" >> "$GITHUB_STEP_SUMMARY"
 
           now_epoch=$(date -u +%s)

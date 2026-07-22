@@ -298,7 +298,7 @@ jobs:
     # pull-requests: write is required by comment-summary-in-pr (below), which
     # posts the full vuln+license review as a single (overwritten) PR comment.
     # issues: write is required by the license-UNKNOWN triage step (#127 Leg
-    # B1), which files/updates `license-review` issues for unlicensed deps.
+    # B1), which files/updates `review:license` issues for unlicensed deps.
     permissions:
       contents: read
       pull-requests: write
@@ -362,7 +362,7 @@ jobs:
           # so the warning only fires on PRs touching that package. Because
           # exemptions are name-only (above), a standing entry would silence
           # license checks for ALL future versions; so instead route each UNKNOWN
-          # to a `license-review` issue per #127 and the procedure in
+          # to a `review:license` issue per #127 and the procedure in
           # docs/SECURITY-TOOLING.md ("Could not detect a license") — the triage
           # step below (#127 Leg B1) automates that routing.
 
@@ -371,7 +371,7 @@ jobs:
       # `unlicensed` / `unresolved` / `forbidden`. For each `unlicensed`
       # pypi purl this step (a) fire-and-forgets a ClearlyDefined harvest
       # POST to shorten the lag, and (b) files/updates an idempotent
-      # `license-review` issue — the durable artifact the scheduled
+      # `review:license` issue — the durable artifact the scheduled
       # license-review-poller workflow later resolves (auto-close on an
       # acceptable declared license; red run + escalation otherwise).
       # This step NEVER fails the job: on a read-only token (fork PRs) or
@@ -379,7 +379,7 @@ jobs:
       # log-only (npm licenses come from the registry, not ClearlyDefined).
       # `!cancelled()`: run even when the review step fails the gate —
       # outputs are set before the action's own failure.
-      - name: License-UNKNOWN triage (file license-review issues)
+      - name: License-UNKNOWN triage (file review:license issues)
         if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -421,11 +421,13 @@ jobs:
             else
               echo "::warning::ClearlyDefined harvest POST failed for $purl (non-fatal)"
             fi
-            # (b) Create-or-update the license-review issue (idempotent by
+            # (b) Create-or-update the review:license issue (idempotent by
             # exact title match; titles are matched via jq --arg, never
-            # interpolated into a query).
+            # interpolated into a query). NB the LABEL is `review:license`
+            # (#297) but the issue-TITLE prefix stays `license-review:` — a
+            # functional parse key the poller depends on (#297 §2).
             title="license-review: $purl"
-            existing=$(gh issue list --label license-review --state open \
+            existing=$(gh issue list --label review:license --state open \
               --json number,title --limit 100 \
               | jq -r --arg t "$title" '[.[] | select(.title == $t)][0].number // empty') || existing=""
             if [ -n "$existing" ]; then
@@ -442,8 +444,8 @@ jobs:
           **Manual METADATA verification (primary source):** read the wheel/sdist \`METADATA\` \`License:\` / \`License-Expression:\` field on PyPI for \`${name}==${version}\` — stronger evidence than any aggregator.
 
           **Close condition:** the scheduled \`license-review-poller\` workflow auto-closes this issue once ClearlyDefined reports a declared license satisfiable from the \`allow-licenses\` list in \`security.yml\`; an unacceptable declared license escalates it instead (see #127 Leg B)."
-              gh issue create --title "$title" --label license-review --body "$body" \
-                || echo "::warning::could not create license-review issue (read-only token?) — manual follow-up: $purl"
+              gh issue create --title "$title" --label review:license --body "$body" \
+                || echo "::warning::could not create review:license issue (read-only token?) — manual follow-up: $purl"
             fi
           done
 
