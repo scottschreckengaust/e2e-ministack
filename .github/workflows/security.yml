@@ -132,9 +132,13 @@ jobs:
       - name: Convert npm audit JSON -> SARIF
         if: always()
         run: |
-          # shellcheck disable=SC2046  # intentional glob-expansion of the .vex/ set
+          # Collect the .vex/ glob into an array so each match is a separate arg
+          # (nullglob makes it empty, not the literal pattern) — array expansion
+          # does not word-split, so no SC2046 suppression is needed.
+          shopt -s nullglob
+          vex=(.vex/*.openvex.json)
           node .github/scripts/npm-audit-to-sarif.mjs \
-            npm-audit.json npm-audit.sarif $(printf '%s ' .vex/*.openvex.json)
+            npm-audit.json npm-audit.sarif "${vex[@]}"
       # Inject VEX suppressions so a `not_affected`/`fixed` npm record dismisses
       # its alert with rationale, while an `affected` record stays a VISIBLE open
       # alert. Scoped to `.vex/npm-*.openvex.json` ONLY: a base-image `CVE-*`
@@ -174,9 +178,13 @@ jobs:
       - name: Derive gate outcome (VEX-aware)
         if: always()
         run: |
-          # shellcheck disable=SC2046  # intentional glob-expansion of the .vex/ set
+          # Array-collect the .vex/ glob (nullglob makes it empty, not the literal
+          # pattern) so each match is a separate arg — array expansion does not
+          # word-split, so no SC2046 suppression is needed.
+          shopt -s nullglob
+          vex=(.vex/*.openvex.json)
           node .github/scripts/npm-audit-gate.mjs \
-            npm-audit.json "$(date -u +%Y-%m-%d)" $(printf '%s ' .vex/*.openvex.json)
+            npm-audit.json "$(date -u +%Y-%m-%d)" "${vex[@]}"
       - name: Enforce audit result
         if: always()
         run: |
@@ -524,8 +532,12 @@ jobs:
             echo "outcome=failure" > grype-fs.outcome
             exit 0
           fi
-          # shellcheck disable=SC2046  # intentional glob-expansion of the .vex/ set
-          node .github/scripts/grype-fs-gate.mjs "$GATE_JSON" $(printf '%s ' .vex/*.openvex.json)
+          # Array-collect the .vex/ glob (nullglob makes it empty, not the literal
+          # pattern) so each match is a separate arg — array expansion does not
+          # word-split, so no SC2046 suppression is needed.
+          shopt -s nullglob
+          vex=(.vex/*.openvex.json)
+          node .github/scripts/grype-fs-gate.mjs "$GATE_JSON" "${vex[@]}"
       # The Security-tab visibility view: a VEX-fed SARIF (fail-build:false so it
       # never fails the step). VEX-fed keeps parity with the pre-#284 Security-tab
       # behavior (a `not_affected` FS record like ecdsa is suppressed here; an
