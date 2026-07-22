@@ -101,7 +101,7 @@ that change they were `.mjs` files that either had a `*.test.mjs` **nothing ever
 (jest globs `test/**/*.test.ts`; no workflow invoked `node --test`) or no test
 at all — a false green on security-critical transformers (a wrong ClamAV/Sonar
 SARIF silently resolves Code-Scanning alerts; a wrong `license-verdict` closes
-or escalates a `license-review` issue).
+or escalates a `review:license` issue).
 
 **Layout — one pair per script:**
 

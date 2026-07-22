@@ -4,7 +4,7 @@
 // allow-list satisfiability decider, asserting its invariants. Runs in the
 // PR-gating fuzz-regression tier (`jest.fuzz.config.js`) and emits into
 // `reports/junit/fuzz.xml`. `license-verdict` makes ACCEPT/REJECT decisions
-// that close or escalate `license-review` issues, so its robustness is
+// that close or escalate `review:license` issues, so its robustness is
 // security-relevant: it must never throw for a non-empty allow-list, and must
 // always return a boolean (the conservative fallback → `false` on anything
 // unparseable/malformed).
