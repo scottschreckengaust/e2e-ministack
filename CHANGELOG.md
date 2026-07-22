@@ -10,6 +10,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.9.1](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.9.0...v0.9.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **security:** npm vuln sweep + VEX-aware npm-audit gate + checkov bump (supersedes [#291](https://github.com/scottschreckengaust/e2e-ministack/issues/291)/[#292](https://github.com/scottschreckengaust/e2e-ministack/issues/292)/[#293](https://github.com/scottschreckengaust/e2e-ministack/issues/293), closes [#295](https://github.com/scottschreckengaust/e2e-ministack/issues/295)) ([#294](https://github.com/scottschreckengaust/e2e-ministack/issues/294)) ([cd8158f](https://github.com/scottschreckengaust/e2e-ministack/commit/cd8158f21c1e83e3ec4ae6ab8c817cbf57103161))
+
 ## [0.9.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.8.0...v0.9.0) (2026-07-18)
 
 
