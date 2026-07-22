@@ -39,6 +39,14 @@ export default tseslint.config(
             'fuzz/*.regression.test.ts',
             '.github/scripts/vex-dialects.ts',
             'test/unit/vex-dialects.test.ts',
+            // #295: same `.ts` value cross-import situation — npm-audit-gate.ts
+            // and npm-audit-to-sarif.ts import ./vex-ledger.ts with an explicit
+            // extension, so they + their sole-importer unit tests are excluded
+            // from the emitting tsconfig.json and lint under the inferred program.
+            '.github/scripts/npm-audit-gate.ts',
+            '.github/scripts/npm-audit-to-sarif.ts',
+            'test/unit/npm-audit-gate.test.ts',
+            'test/unit/npm-audit-to-sarif.test.ts',
           ],
           // typescript-eslint caps the inferred default program at 8 matched
           // files by default; the fuzz-regression `.ts` targets (one per logic

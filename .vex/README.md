@@ -201,6 +201,30 @@ globs the broader `.vex/*.openvex.json`, so it also picks up pypi-surface record
 like `ecdsa`), and the **suppression injector** the same way — all read `.vex/`
 directly.
 
+The **npm-audit gate** (#295) reads the broad `.vex/*.openvex.json` glob for its
+pass/fail decision (id-only match: an advisory's GHSA vs the union of every
+record's name+aliases), so a new record covers it automatically. But its
+**SARIF suppression** (which controls Security-tab VISIBILITY) is fed the
+**scoped** `.vex/npm-*.openvex.json` glob ONLY — see the naming convention below.
+
+**Record-name prefix = surface scope.** A record's FILENAME prefix selects which
+scanner surfaces inject its suppression, because several surfaces glob a scoped
+subset rather than all of `.vex/`:
+
+| prefix             | surface(s) that inject its SARIF suppression | example                     |
+| ------------------ | -------------------------------------------- | --------------------------- |
+| `CVE-*`            | grype **image** gate + suppression injector  | base-image emulator CVEs    |
+| `npm-*`            | **npm-audit** SARIF suppression (#295)       | `npm-brace-expansion-CVE-…` |
+| `mcp-*`, `ecdsa-*` | FS surface (broad `.vex/*` glob)             | pypi-surface records        |
+
+This scoping is why the SAME CVE can have TWO records with DIFFERENT statuses for
+DIFFERENT products without colliding: `CVE-2026-13149.openvex.json`
+(`pkg:deb/debian/node-brace-expansion`, `not_affected` — the emulator image) and
+`npm-brace-expansion-CVE-2026-13149.openvex.json` (`pkg:npm/brace-expansion`,
+`affected` — the bundled npm dep) coexist. The npm-audit injection is scoped to
+`.vex/npm-*` so the deb record's `not_affected` can NEVER suppress (hide) the npm
+`affected` finding — it stays a visible open alert, per #188.
+
 The scanners that CANNOT glob `.vex/` — **Trivy** (`trivy.yaml`'s
 `vulnerability.vex` is an explicit file list) and **OSV-Scanner** (no OpenVEX
 channel at all, only `osv-scanner.toml` `[[IgnoredVulns]]`) — used to require
@@ -247,6 +271,33 @@ stays a visible finding (#188).
   were wired to the `.vex/` feed. **Dependabot** (which does **not** read VEX)
   still flags ecdsa as alert #13, so the **API dismissal** of #13
   (`tolerable_risk`) remains the active control for THAT surface.
+
+### `npm-audit` surface (npm dependency audit — live as of #295)
+
+- **`npm-brace-expansion-CVE-2026-13149.openvex.json`** — `affected` for
+  `pkg:npm/brace-expansion@5.0.6` (bundled inside `aws-cdk-lib` via its bundled
+  `minimatch`). CVE-2026-13149 / GHSA-3jxr-9vmj-r5cp is an exponential-time
+  brace-expansion DoS, fixed in 5.0.7. **No repo-side fix:** the copy ships
+  BUNDLED in the `aws-cdk-lib` tarball (`bundleDependencies`, `inBundle:true`);
+  npm `overrides` provably cannot rewrite bundled deps and `npm audit fix` bumps
+  only the un-bundled top-level copies, so only an `aws-cdk-lib` release that
+  rebundles 5.0.7 clears it. Reachable-but-accepted (glob expansion over the
+  repo's own non-adversarial CDK source at synth time), hence `affected` — the
+  finding stays VISIBLE (the gate prints it; the npm-scoped SARIF injection adds
+  no suppression) rather than being hidden.
+
+  **Dated `revisit_by` (the staleness nag, #295).** Unlike the event-token form
+  (`wait-for-image-rebuild`), this record carries a DATED `revisit_by`
+  (`revisit 2026-10-22`). The npm-audit gate reads the ACTIVE record set
+  (`activeRecordIds`): once today is on/after that date, the record stops
+  covering and the gate **self-reds**, forcing a re-check for an aws-cdk-lib
+  rebundle. Use a dated `revisit_by` (not an event token) for override/bundled
+  "waiting-for-the-vendor" acceptances so they can't rot silently.
+
+  **Distinct from `CVE-2026-13149.openvex.json`** (same CVE, `not_affected`, the
+  `pkg:deb/debian/node-brace-expansion` emulator-image component). The `npm-`
+  filename prefix scopes THIS record to the npm-audit SARIF injection only, so
+  the two never collide — see "Record-name prefix = surface scope" above.
 
 ### `mcp` (server-transport CVEs — filesystem/lockfile surface, #226)
 
