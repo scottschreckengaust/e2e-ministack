@@ -30,7 +30,9 @@
     ".github/scripts/**/*.ts",
     "scripts/**/*.ts",
     "fuzz/**/*.ts",
-    "test/unit/vex-dialects.test.ts"
+    "test/unit/vex-dialects.test.ts",
+    "test/unit/npm-audit-gate.test.ts",
+    "test/unit/npm-audit-to-sarif.test.ts"
   ],
   "exclude": ["node_modules", "cdk.out"]
 }

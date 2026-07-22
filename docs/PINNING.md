@@ -18,7 +18,7 @@ supply-chain safety. This file is the authoritative inventory.
 | SonarSource actions                                    | `security.yml`                       | commit SHA (`sonarqube-scan-action` v8.2.0, `-quality-gate-action` v1.2.0)      |
 | CodeQL analyzer bundle                                 | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                                                         |
 | Semgrep                                                | `security.yml`                       | `==1.167.0`                                                                     |
-| cfn-lint / checkov                                     | `security.yml`                       | `==1.52.0` / `==3.3.2`                                                          |
+| cfn-lint / checkov                                     | `security.yml`                       | `==1.52.0` / `==3.3.8`                                                          |
 | OSV-Scanner                                            | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**                                                   |
 | Grype (`anchore/scan-action`)                          | `security.yml`                       | action SHA + engine `grype-version:`; vuln **DB floats** (#183)                 |
 | Trivy (`trivy-action`)                                 | `security.yml`                       | action SHA + engine `version:`; vuln **DB floats**, cached (#183)               |

@@ -63,11 +63,11 @@
     "@aws-sdk/client-dynamodb": "^3.1072.0",
     "@aws-sdk/client-lambda": "^3.1072.0",
     "@aws-sdk/client-s3": "^3.1072.0",
-    "aws-cdk-lib": "2.260.0",
+    "aws-cdk-lib": "2.261.0",
     "constructs": "^10.6.0"
   },
   "overrides": {
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^4.3.0",
     "markdown-it": "^14.2.0",
     "qs": "^6.15.2"
   }

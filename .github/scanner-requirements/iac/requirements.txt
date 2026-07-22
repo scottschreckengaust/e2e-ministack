@@ -3,11 +3,11 @@
 # (--no-deps because overrides/requirements.txt forces aiohttp past checkov's declared
 # upper bound — see that file for the rationale; this closure is complete, so resolution
 # is redundant).
-# Top-level pins: cfn-lint==1.52.0, checkov==3.3.2.
+# Top-level pins: cfn-lint==1.52.0, checkov==3.3.8.
 # Path is a per-tool subdir named requirements.txt so SCA scanners (grype / trivy /
 # OSV) recognize it by filename — the old iac.txt was invisible to them (#226).
 # Regenerate after a version bump (Python 3.12, matches the workflow's setup-python):
-#   printf 'cfn-lint==1.52.0\ncheckov==3.3.2\n' | uv pip compile --universal \
+#   printf 'cfn-lint==1.52.0\ncheckov==3.3.8\n' | uv pip compile --universal \
 #     --generate-hashes --python-version 3.12 \
 #     --overrides .github/scanner-requirements/overrides/requirements.txt \
 #     --output-file .github/scanner-requirements/iac/requirements.txt -
@@ -445,9 +445,9 @@ charset-normalizer==3.4.7 \
     # via
     #   checkov
     #   requests
-checkov==3.3.2 \
-    --hash=sha256:38b135f16ee84eba5c873837a0c7584de09e1048bbac31c72c0c16a2b3634380 \
-    --hash=sha256:d05d69821fbe66603faf27db5b2646d99b02bfd11793469d89a5280429122687
+checkov==3.3.8 \
+    --hash=sha256:8d59cd3bb06b9237868300602ba469687866077cc008fbc903404520acfa88a9 \
+    --hash=sha256:a65e5cda0337e7770436eeadabb1f65c6ce4ad7f5b145a7f801bfdf14f1aea05
 click==8.4.1 \
     --hash=sha256:482be17c6991b8c19c5429a1e995d9b0efdbb63172824c41f99965dc0ade8ec2 \
     --hash=sha256:918b5633eddf6b41c32d4f454bf0de810065c74e3f7dbf8ee5452f8be88d3e96
@@ -646,9 +646,9 @@ gitdb==4.0.12 \
     --hash=sha256:5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571 \
     --hash=sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf
     # via gitpython
-gitpython==3.1.50 \
-    --hash=sha256:80da2d12504d52e1f998772dc5baf6e553f8d2fcfe1fcc226c9d9a2ee3372dcc \
-    --hash=sha256:d352abe2908d07355014abdd21ddf798c2a961469239afec4962e9da884858f9
+gitpython==3.1.54 \
+    --hash=sha256:53f2085e24a2cda300eed7c3fc5f1559ae289634b725e98acaf4791940247aa0 \
+    --hash=sha256:b90d7b3d9bc0238681d24369130826f0dcdb0ceaa45db67cf1d4ffa4c302dedf
     # via checkov
 idna==3.18 \
     --hash=sha256:7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2 \

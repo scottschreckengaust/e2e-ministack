@@ -107,29 +107,90 @@ jobs:
     name: npm audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning (#295)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - name: npm audit (JSON report; enforce after upload)
+      # Produce the machine-readable audit. `--audit-level=high` only sets the
+      # summary/exit threshold; the JSON carries ALL advisories regardless, and
+      # the VEX-aware gate below (not this exit code) is authoritative — so a
+      # low/moderate advisory still appears as an alert via the SARIF.
+      - name: npm audit (JSON report)
         run: |
           set +e
-          npm audit --audit-level=high --json > npm-audit.json
-          echo "exit=$?" > npm-audit.outcome
-          npm audit --audit-level=high # human-readable in the log
+          npm audit --json > npm-audit.json
+          npm audit --audit-level=high # human-readable in the log (non-gating)
+          exit 0
+      # npm audit uploads no SARIF natively; convert its JSON so it becomes a
+      # first-class scanner on the Security tab + the Code-Scanning Alerts API
+      # (the union ledger the VEX report reconciles). ruleIds carry the CVE the
+      # `.vex/` ledger aliases to each GHSA, so findings reconcile by CVE (#295).
+      - name: Convert npm audit JSON -> SARIF
+        if: always()
+        run: |
+          # Collect the .vex/ glob into an array so each match is a separate arg
+          # (nullglob makes it empty, not the literal pattern) — array expansion
+          # does not word-split, so no SC2046 suppression is needed.
+          shopt -s nullglob
+          vex=(.vex/*.openvex.json)
+          node .github/scripts/npm-audit-to-sarif.mjs \
+            npm-audit.json npm-audit.sarif "${vex[@]}"
+      # Inject VEX suppressions so a `not_affected`/`fixed` npm record dismisses
+      # its alert with rationale, while an `affected` record stays a VISIBLE open
+      # alert. Scoped to `.vex/npm-*.openvex.json` ONLY: a base-image `CVE-*`
+      # record for the SAME CVE (different product/purl) must NOT suppress the npm
+      # finding — the filename prefix is the surface scope (see .vex/README.md).
+      - name: Inject VEX suppressions (npm-scoped)
+        if: always()
+        run: |
+          shopt -s nullglob
+          npm_vex=(.vex/npm-*.openvex.json)
+          if [ ${#npm_vex[@]} -eq 0 ]; then
+            cp npm-audit.sarif npm-audit.suppressed.sarif
+          else
+            node .github/scripts/vex-to-sarif-suppressions.mjs \
+              npm-audit.sarif npm-audit.suppressed.sarif "${npm_vex[@]}"
+          fi
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: npm-audit.suppressed.sarif
+          category: npm-audit
       - name: Upload audit report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-audit-json
-          path: npm-audit.json
+          path: |
+            npm-audit.json
+            npm-audit.sarif
           if-no-files-found: warn
+      # Derive the gate from the JSON (VEX-aware, #295): FAIL only on an advisory
+      # whose GHSA is not covered by an ACTIVE `.vex/` record (a dated revisit_by
+      # on/before today self-expires). An `affected` record passes the gate but is
+      # PRINTED here (npm audit has no Security tab of its own — this log + the
+      # uploaded JSON are its visibility surface).
+      - name: Derive gate outcome (VEX-aware)
+        if: always()
+        run: |
+          # Array-collect the .vex/ glob (nullglob makes it empty, not the literal
+          # pattern) so each match is a separate arg — array expansion does not
+          # word-split, so no SC2046 suppression is needed.
+          shopt -s nullglob
+          vex=(.vex/*.openvex.json)
+          node .github/scripts/npm-audit-gate.mjs \
+            npm-audit.json "$(date -u +%Y-%m-%d)" "${vex[@]}"
       - name: Enforce audit result
         if: always()
         run: |
           source npm-audit.outcome
-          test "$exit" = "0"
+          echo "npm audit gate outcome=$outcome (VEX-aware; fails on any advisory not covered by an active .vex/ record)"
+          test "$outcome" = "success"
 
   osv-scanner:
     name: OSV Scanner
@@ -471,8 +532,12 @@ jobs:
             echo "outcome=failure" > grype-fs.outcome
             exit 0
           fi
-          # shellcheck disable=SC2046  # intentional glob-expansion of the .vex/ set
-          node .github/scripts/grype-fs-gate.mjs "$GATE_JSON" $(printf '%s ' .vex/*.openvex.json)
+          # Array-collect the .vex/ glob (nullglob makes it empty, not the literal
+          # pattern) so each match is a separate arg — array expansion does not
+          # word-split, so no SC2046 suppression is needed.
+          shopt -s nullglob
+          vex=(.vex/*.openvex.json)
+          node .github/scripts/grype-fs-gate.mjs "$GATE_JSON" "${vex[@]}"
       # The Security-tab visibility view: a VEX-fed SARIF (fail-build:false so it
       # never fails the step). VEX-fed keeps parity with the pre-#284 Security-tab
       # behavior (a `not_affected` FS record like ecdsa is suppressed here; an
@@ -1030,11 +1095,16 @@ jobs:
               main_arg="--main main-alerts.json"
             fi
           fi
-          # Restrict to the image-scan categories so unrelated code-scanning
-          # alerts (SonarQube, CodeQL) don't leak into the VEX/image report.
+          # Restrict to the supply-chain scan categories so unrelated
+          # code-scanning alerts (SonarQube, CodeQL) don't leak into the VEX
+          # report. Beyond the image scans, this now includes the FS/dependency
+          # surfaces (#295): `npm-audit` (the converted npm-audit SARIF) and the
+          # OSV lockfile/pip scans — so a `.vex/` acceptance on ANY of these
+          # (e.g. the bundled brace-expansion npm record) is reconciled and
+          # surfaced in the report, not just the image CVEs.
           # shellcheck disable=SC2086  # $main_arg is an intentional flag pair
           node .github/scripts/alerts-findings.mjs alerts.json findings.json \
-            $main_arg grype-ministack-image trivy-image
+            $main_arg grype-ministack-image trivy-image npm-audit osv-scanner osv-scanner-pip
           # "Recently resolved" window boundary: the LAST published release's
           # date ("resolved since users last saw a release"). Fall back to a
           # rolling 7-day window when there is no prior release yet (fresh repo)
