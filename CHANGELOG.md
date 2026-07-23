@@ -10,6 +10,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.10.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.9.1...v0.10.0) (2026-07-22)
+
+
+### Features
+
+* **governance:** rename license-review label to review:license + establish review:&lt;thing&gt; convention ([#297](https://github.com/scottschreckengaust/e2e-ministack/issues/297)) ([#298](https://github.com/scottschreckengaust/e2e-ministack/issues/298)) ([4269af0](https://github.com/scottschreckengaust/e2e-ministack/commit/4269af0de64fc07283b5021e75127286b36506d8))
+
 ## [0.9.1](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.9.0...v0.9.1) (2026-07-22)
 
 
