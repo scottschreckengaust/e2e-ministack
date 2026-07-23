@@ -12,6 +12,8 @@ It proves the harness end-to-end on **one service (Lambda) × one IaC tool
 services/lambda/
   README.md          # this file
   contract.ts        # LambdaContract = Contract & { functionName: string } (types-only)
+  invoke.ts          # PURE payload-encode / response-parse / CLI-argv seam (100%-gated, #151/#144)
+  health.ts          # isFunctionConfigHealthy + hasProvenanceMarker predicates (100%-gated)
   checks.sdk.ts      # checkSdk — typed AWS SDK v3 oracle   (defined ONCE, integration tier)
   checks.cli.ts      # checkCli — documented AWS CLI oracle  (defined ONCE, integration tier)
   iac/
@@ -105,19 +107,33 @@ CompatLambdaStack` via the compat app. No `teardown` — cross-vertical reset is
 ## Coverage
 
 Per the merged `jest.config.js` path-convention excludes (no per-vertical config
-edits needed):
+edits needed), and the harness-wide **extract-don't-mock** policy in
+[`../README.md` § Coverage](../README.md#coverage):
 
 - `checks.sdk.ts`, `checks.cli.ts` (`checks.*.ts`) and `iac/cdk/deploy.ts`
-  (`iac/**/deploy.ts`) run only in the **integration tier** against a live
-  MiniStack, so istanbul can't instrument them — **coverage-EXCLUDED**.
+  (`iac/**/deploy.ts`) are **THIN I/O shells** run only in the **integration
+  tier** against a live MiniStack, so istanbul can't instrument them —
+  **coverage-EXCLUDED**. Their pure logic is extracted to gated siblings.
+- `invoke.ts` is the extracted PURE seam for both oracles (#151/#144):
+  `buildSdkPayload` (SDK `Payload` bytes), `parseInvokePayload` (decode the SDK
+  `Uint8Array` / CLI temp-file string response), and `cliInvokeArgs` (the exact
+  `aws lambda invoke` argv). It is NOT named `checks.*.ts`, so it is
+  **coverage-INCLUDED / 100%-gated**, held there by
+  [`lambda-invoke.test.ts`](../../test/unit/services/lambda-invoke.test.ts) —
+  which locks the [#136](https://github.com/scottschreckengaust/e2e-ministack/issues/136)
+  `--payload` double-encoding bug as a permanent emulator-free regression test.
+- `health.ts` (`isFunctionConfigHealthy` / `hasProvenanceMarker`) is the pure
+  classification the deploy adapter delegates to → **100%-gated** by
+  [`lambda-health.test.ts`](../../test/unit/services/lambda-health.test.ts).
 - `contract.ts` is types-only → erases to zero runtime statements.
 - `iac/cdk/construct.ts`, `iac/cdk/stack.ts`, and `iac/cdk/app.ts` are pure
   synth logic → **100%-gated**, held there by `lambda-construct.test.ts` and
   `lambda-compat-stack.test.ts`.
 
-The integration matrix's correctness is verified by CI's
-**Integration (MiniStack)** job on the PR (it cannot run locally without an
-emulator).
+The integration matrix's correctness — the thin shells end-to-end — is verified
+by CI's **Integration (MiniStack)** job on the PR (it cannot run locally without
+an emulator). The unit tier proves the extracted pure logic; nothing is mocked
+to fabricate coverage.
 
 ## MiniStack Lambda boundary notes
 

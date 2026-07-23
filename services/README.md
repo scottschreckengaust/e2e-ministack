@@ -167,10 +167,62 @@ coverage today. `jest.config.js` `collectCoverageFrom` encodes this as
 - `services/**/iac/**/deploy.ts` — the `DeployAdapter`s (integration-tier provisioners)
 - `services/**/*.test.ts` — spec files
 
-Everything else under `services/` (e.g. `_harness/adapter.ts`, `contract.ts`,
-any `construct.ts` / `stack.ts` / `app.ts` synth logic, and any pure helpers) is
-gated at 100%. `_harness/adapter.ts` and `contract.ts` are types-only, so they
-erase to zero runtime statements and trivially satisfy the gate; the CDK
-`construct.ts`/`stack.ts`/`app.ts` are pure synth logic held at 100% by
-`test/unit/services/*.test.ts` (no emulator). Any executable pure logic you add
-must be exercised by a unit test to hold 100%.
+### The policy: extract pure logic to a gated module — never mock to chase coverage (#151 / #144)
+
+The exclusion is for **genuine I/O**, not a license to leave logic untested. The
+harness-wide rule every vertical follows:
+
+> **Extract pure logic to a gated (coverage-included) module; keep only genuine
+> I/O in the excluded shell; never mock the emulator / CLI / SDK to chase
+> coverage.**
+
+This is the pattern PR #148 established (the deploy adapter's repoRoot/argv/env
+logic → `_harness/cdk.ts` + `_harness/aws-env.ts`, its health classification →
+`<service>/health.ts`) and #151/#144 extended to the oracles: the payload
+encoding, response parsing, and AWS-CLI argv that used to live INSIDE
+`checks.sdk.ts` / `checks.cli.ts` now live in `services/lambda/invoke.ts`, a
+NON-`checks.*.ts` module that `collectCoverageFrom` therefore INCLUDES and gates
+at 100%. That seam is exactly where the [#136] AWS-CLI-v2 `--payload`
+double-encoding bug lived — an emulator-free unit test now locks it as a
+permanent regression, and mutation testing (Stryker) proves the tests pin the
+behavior. The genuine I/O (`LambdaClient.send`, `execFile('aws', …)`, the
+temp-file lifecycle) stays in the thin, excluded shell.
+
+Why not mock: mocking MiniStack / the AWS CLI / the SDK in the unit tier would
+manufacture a green number without proving the real wire behavior (and would let
+a regression like #136 slip past a mock that encodes the same wrong assumption).
+The **required Integration (MiniStack) job** proves the shells end-to-end against
+a live emulator; the unit tier proves the extracted pure logic. Downstream
+verticals ([S3 #139], [DynamoDB #140], and future IaC tools) inherit this by
+convention — no `jest.config.js` edit is needed, because a helper named anything
+but `checks.*.ts` / `iac/**/deploy.ts` is coverage-included automatically.
+
+[#136]: https://github.com/scottschreckengaust/e2e-ministack/issues/136
+[S3 #139]: https://github.com/scottschreckengaust/e2e-ministack/issues/139
+[DynamoDB #140]: https://github.com/scottschreckengaust/e2e-ministack/issues/140
+
+### What each excluded / trivially-covered file is, and why
+
+Everything else under `services/` (any `construct.ts` / `stack.ts` / `app.ts`
+synth logic, `health.ts`, `invoke.ts`, and the `_harness/*` helpers) is gated at
+100%. Held there by `test/unit/services/*.test.ts` (no emulator). Any executable
+pure logic you add must be exercised by a unit test to hold 100%. The
+deliberately-uncovered files, one rationale each, so the exclude list is
+self-explaining:
+
+- `services/**/checks.*.ts` (the SDK/CLI oracles) — coverage-EXCLUDED by
+  design: what remains after extraction is genuine I/O (`LambdaClient.send`,
+  `execFile('aws', …)`, temp-file read/unlink) that only runs against a live
+  MiniStack in the integration tier, where istanbul can't see it. Proven by the
+  Integration (MiniStack) job, not the unit gate.
+- `services/**/iac/**/deploy.ts` (the `DeployAdapter`s) — coverage-EXCLUDED by
+  design: after #148 extracted its pure logic (`_harness/cdk.ts`,
+  `_harness/aws-env.ts`, `<service>/health.ts`), the shell is only the live
+  `LambdaClient`/`GetFunction`, the `ResourceNotFoundException`→absent mapping
+  (a catch clause inseparable from the live `send`, not a standalone predicate),
+  and the two `cdk` `execFile` calls — all integration-tier I/O. Audited under
+  #151: no classifiable pure logic remains to extract.
+- `services/_harness/adapter.ts` and `services/<service>/contract.ts` —
+  types-only (`interface`/`type` declarations): they erase to ZERO runtime
+  statements, so they carry no executable code to cover and trivially satisfy
+  the gate. Not excluded by a glob — they simply contribute nothing.

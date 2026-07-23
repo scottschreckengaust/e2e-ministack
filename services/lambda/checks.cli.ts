@@ -5,6 +5,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { ministackEnv as buildMinistackEnv } from '../_harness/aws-env';
+import { cliInvokeArgs, parseInvokePayload } from './invoke';
 import type { LambdaContract } from './contract';
 
 const execFileAsync = promisify(execFile);
@@ -37,19 +38,17 @@ export const ministackEnv: NodeJS.ProcessEnv = buildMinistackEnv(process.env);
  * file we immediately reap is the idiomatic pattern (repo memory: no /tmp for
  * DURABLE scratch, but a per-call temp file that is read+unlinked is fine).
  *
+ * This is a THIN I/O shell (per `services/README.md` § Coverage — extract,
+ * don't mock): the pure argv construction — including the #136 payload-encoding
+ * fix (RAW JSON `--payload` paired with `--cli-binary-format raw-in-base64-out`,
+ * NOT base64) — and the response JSON parse are extracted to the gated
+ * {@link ./invoke} module ({@link cliInvokeArgs} / {@link parseInvokePayload})
+ * and unit-tested without an emulator. What remains here is genuine I/O: the
+ * temp-file lifecycle and the `execFile('aws', …)` child process.
+ *
  * Args are passed to execFile as an argv ARRAY (never a shell string), so there
  * is no shell and no injection surface; the only interpolated value is the
  * function name from our own contract.
- *
- * Payload encoding: AWS CLI v2 changed the `--payload` blob default to expect
- * base64 (v1 accepted raw text). Passing `--cli-binary-format raw-in-base64-out`
- * flips blob INPUT back to RAW, so we must pass RAW JSON as `--payload` — the
- * two settings have to be consistent or the CLI double-handles the value
- * (raw-in-base64-out + a base64 string ⇒ the CLI forwards the base64 TEXT
- * verbatim ⇒ the handler JSON.parses it ⇒ `n` is undefined/NaN ⇒ a bogus 400).
- * Raw JSON + raw-in-base64-out is also the human-friendly form the oracle is
- * meant to prove: exactly what you paste into CloudShell. (Issue #136's sketch
- * showed the broken base64 cross — corrected here per the CI failure on #142.)
  */
 async function invokeViaCli(
   functionName: string,
@@ -60,24 +59,11 @@ async function invokeViaCli(
     `ministack-lambda-invoke-${randomUUID()}.json`,
   );
   try {
-    await execFileAsync(
-      'aws',
-      [
-        'lambda',
-        'invoke',
-        '--function-name',
-        functionName,
-        '--payload',
-        // RAW JSON (paired with raw-in-base64-out below) — NOT base64.
-        JSON.stringify(payload),
-        '--cli-binary-format',
-        'raw-in-base64-out',
-        outFile,
-      ],
-      { env: ministackEnv },
-    );
+    await execFileAsync('aws', cliInvokeArgs(functionName, payload, outFile), {
+      env: ministackEnv,
+    });
     const body = await readFile(outFile, 'utf8');
-    return JSON.parse(body);
+    return parseInvokePayload(body);
   } finally {
     // Best-effort cleanup; ignore if the CLI never created the file.
     await unlink(outFile).catch(() => undefined);
