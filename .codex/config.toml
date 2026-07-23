@@ -1,0 +1,31 @@
+# GENERATED FILE — do NOT edit by hand.
+#
+# The OpenAI Codex CLI's MCP config, generated from the canonical .mcp.json
+# by scripts/sync-mcp-config.ts (#111). Codex reads ~/.codex/config.toml (a
+# global file), so this repo-local .codex/config.toml is a REFERENCE FRAGMENT:
+# copy its [mcp_servers.*] tables into your ~/.codex/config.toml.
+#
+# Regenerate: `node scripts/sync-mcp-config.mjs write`. CI fails on drift.
+# Secret-free: the github server names the token ENV VAR (bearer_token_env_var)
+# — Codex reads GITHUB_PERSONAL_ACCESS_TOKEN from its own environment; no token
+# is ever written here. Codex HTTP transport forbids an `env` block and does
+# not ${…}-interpolate header strings, so the X-MCP-* toggles are static
+# http_headers and the stdio env values are carried verbatim (fill them in via
+# your shell/AWS profile).
+
+[mcp_servers.threat-composer-ai]
+command = "uvx"
+args = [ "--from", "git+https://github.com/awslabs/threat-composer.git@0d58a0d85e5413f6c4169245c667ac083f4efb39#subdirectory=packages/threat-composer-ai", "threat-composer-ai-mcp" ]
+
+[mcp_servers.threat-composer-ai.env]
+AWS_REGION = "${AWS_REGION:-us-east-1}"
+AWS_PROFILE = "${AWS_PROFILE}"
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"
+
+[mcp_servers.github.http_headers]
+X-MCP-Toolsets = "all"
+X-MCP-Readonly = "false"
+X-MCP-Insiders = "true"

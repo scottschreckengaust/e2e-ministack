@@ -8,8 +8,8 @@
 # `digest` field, collects the unique set, and FAILS if more than one distinct
 # digest exists. It passes when every site agrees.
 #
-# Dependency-free: git + grep + sed + jq (jq is already required by
-# scripts/check-mcp-parity.sh, so it adds no new tool). Runs on ubuntu-latest.
+# Dependency-free: git + grep + sed + jq (all present on ubuntu-latest, so it
+# adds no new tool). Runs on ubuntu-latest.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
