@@ -80,7 +80,16 @@ module.exports = {
     //   checks.*.ts        — SDK/CLI oracles (integration-tier, live MiniStack)
     //   iac/**/deploy.ts   — DeployAdapters (integration-tier provisioners)
     //   *.test.ts          — spec files
-    // Any OTHER pure logic under services/ stays gated at 100%.
+    // The EXCLUSION IS FOR I/O, NOT FOR SKIPPING TESTS. The harness-wide policy
+    // (#151/#144, see services/README.md § Coverage): EXTRACT pure logic to a
+    // gated (coverage-INCLUDED) module; keep only genuine I/O in the excluded
+    // shell; NEVER mock the emulator/CLI/SDK to chase coverage. The excluded
+    // shells here are THIN — their pure payload/response/argv/classification
+    // logic lives in gated siblings (e.g. services/lambda/invoke.ts,
+    // services/*/health.ts, services/_harness/*.ts) unit-tested without an
+    // emulator. Any OTHER pure logic under services/ stays gated at 100%, so a
+    // helper named anything but `checks.*.ts` / `iac/**/deploy.ts` is INCLUDED
+    // by default — which is why the extracted seams need no glob edit here.
     'services/**/*.{ts,js}',
     '!services/**/*.test.ts',
     '!services/**/checks.*.ts',

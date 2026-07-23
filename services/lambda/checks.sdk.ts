@@ -1,5 +1,6 @@
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { endpoint, region } from '../_harness/aws-env';
+import { buildSdkPayload, parseInvokePayload } from './invoke';
 import type { LambdaContract } from './contract';
 
 /**
@@ -17,10 +18,16 @@ import type { LambdaContract } from './contract';
  *    the invoke still succeeds at the HTTP layer).
  *
  * This is an oracle (`checks.*.ts`): coverage-EXCLUDED (jest.config.js) and run
- * only in the integration tier against a live MiniStack. The endpoint and region
- * come from the shared `_harness/aws-env` module (`AWS_ENDPOINT_URL` /
- * `AWS_DEFAULT_REGION`, set at the CI integration-job level, else the MiniStack
- * defaults); the dummy test/test credentials are accepted by MiniStack.
+ * only in the integration tier against a live MiniStack — a THIN I/O shell. The
+ * pure payload-encoding / response-parsing (the seam the #136 double-encoding
+ * bug lived in) is extracted to the gated {@link ./invoke} module and unit-tested
+ * without an emulator; what remains here is genuine I/O: the live
+ * `LambdaClient.send(Invoke)` calls and the `expect(...)` assertions on their
+ * results (per `services/README.md` § Coverage — extract, don't mock). The
+ * endpoint and region come from the shared `_harness/aws-env` module
+ * (`AWS_ENDPOINT_URL` / `AWS_DEFAULT_REGION`, set at the CI integration-job level,
+ * else the MiniStack defaults); the dummy test/test credentials are accepted by
+ * MiniStack.
  */
 export async function checkSdk(c: LambdaContract): Promise<void> {
   const lambda = new LambdaClient({
@@ -32,7 +39,7 @@ export async function checkSdk(c: LambdaContract): Promise<void> {
   const ok = await lambda.send(
     new InvokeCommand({
       FunctionName: c.functionName,
-      Payload: Buffer.from(JSON.stringify({ n: 21 })),
+      Payload: buildSdkPayload({ n: 21 }),
     }),
   );
   // Fail fast on an unhandled Lambda error: with RequestResponse an UNHANDLED
@@ -41,7 +48,7 @@ export async function checkSdk(c: LambdaContract): Promise<void> {
   // surfaces the real stack trace instead of an opaque undefined-field error.
   expect(ok.FunctionError).toBeUndefined();
   expect(ok.StatusCode).toBe(200);
-  const okPayload = JSON.parse(Buffer.from(ok.Payload!).toString());
+  const okPayload = parseInvokePayload(ok.Payload!);
   expect(okPayload.statusCode).toBe(200);
   expect(okPayload.doubled).toBe(42);
   expect(okPayload.nodeVersion).toMatch(/^v24\./);
@@ -50,11 +57,11 @@ export async function checkSdk(c: LambdaContract): Promise<void> {
   const bad = await lambda.send(
     new InvokeCommand({
       FunctionName: c.functionName,
-      Payload: Buffer.from(JSON.stringify({ n: 'abc' })),
+      Payload: buildSdkPayload({ n: 'abc' }),
     }),
   );
   expect(bad.FunctionError).toBeUndefined();
   expect(bad.StatusCode).toBe(200);
-  const badPayload = JSON.parse(Buffer.from(bad.Payload!).toString());
+  const badPayload = parseInvokePayload(bad.Payload!);
   expect(badPayload.statusCode).toBe(400);
 }
