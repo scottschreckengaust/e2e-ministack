@@ -10,6 +10,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.11.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.10.0...v0.11.0) (2026-07-23)
+
+
+### Features
+
+* **agentic:** generate per-agent MCP configs from canonical .mcp.json + drift gate ([#303](https://github.com/scottschreckengaust/e2e-ministack/issues/303)) ([245d394](https://github.com/scottschreckengaust/e2e-ministack/commit/245d3940fcf5545814a57f2980fa344bad30ad6a))
+* **ci:** local↔CI gate parity — one pre-push command + pinned local scanners ([#304](https://github.com/scottschreckengaust/e2e-ministack/issues/304)) ([2b7295b](https://github.com/scottschreckengaust/e2e-ministack/commit/2b7295b23268444bd8055ba0e6f4949e1670c22b))
+
 ## [0.10.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.9.1...v0.10.0) (2026-07-22)
 
 
