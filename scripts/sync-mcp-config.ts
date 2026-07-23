@@ -245,15 +245,52 @@ const CODEX_BANNER = [
   '# your shell/AWS profile).',
 ].join('\n');
 
+// Static Codex `http_headers` = every canonical header EXCEPT Authorization (the
+// token, which Codex handles via bearer_token_env_var). Declarative filter keeps
+// the original insertion order (Object.entries → filter → fromEntries), so the
+// smol-toml serialization is byte-identical to the manual accumulator loop.
+function codexHttpHeaders(
+  headers: Record<string, string> | undefined,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers ?? {}).filter(([hk]) => hk !== 'Authorization'),
+  );
+}
+
+// Codex HTTP-server table: `url` + `bearer_token_env_var` (names the PAT env var;
+// Codex reads it itself) + `http_headers` for the non-secret X-MCP-* toggles. NO
+// Authorization header, NO env block (forbidden). `http_headers` is only assigned
+// when non-empty.
+function buildCodexHttpServer(s: CanonicalServer): CodexHttpServer {
+  const server: CodexHttpServer = {
+    url: String(s.url),
+    bearer_token_env_var: TOKEN_VAR,
+  };
+  const httpHeaders = codexHttpHeaders(s.headers);
+  if (Object.keys(httpHeaders).length > 0) server.http_headers = httpHeaders;
+  return server;
+}
+
+// Codex stdio-server table: `command` / `args` / `env` (literal values; Codex does
+// not ${…}-expand them — carried verbatim so a human sees the shape).
+// Build via conditional spread so an absent args/env contributes NO key (rather
+// than an `if (x) obj.x = x` that assigns `undefined` when forced true — a no-op
+// smol-toml drops, i.e. an equivalent mutant). With the spread, `s.args` present
+// vs absent produces DIFFERENT objects.
+function buildCodexStdioServer(s: CanonicalServer): CodexStdioServer {
+  return {
+    command: String(s.command),
+    ...(s.args ? { args: s.args } : {}),
+    ...(s.env ? { env: { ...s.env } } : {}),
+  };
+}
+
 /**
  * Render the Codex `config.toml` fragment: one `[mcp_servers.<name>]` table per
  * canonical server. Codex's transport model differs fundamentally from the JSON
  * agents (verified against openai/codex config sources, see docs/MCP.md):
- *   - HTTP server  -> `url` + `bearer_token_env_var` (names the PAT env var; Codex
- *                     reads it itself) + `http_headers` for the non-secret X-MCP-*
- *                     toggles. NO Authorization header, NO env block (forbidden).
- *   - stdio server -> `command` / `args` / `env` (literal values; Codex does not
- *                     ${…}-expand them — carried verbatim so a human sees the shape).
+ *   - HTTP server  -> `buildCodexHttpServer` (url + bearer_token_env_var + http_headers)
+ *   - stdio server -> `buildCodexStdioServer` (command / args / env)
  * Serialization is delegated to the vetted `smol-toml` (BSD-3-Clause, already a
  * repo devDependency for vex-dialects.ts) so header/env prose can never corrupt
  * the file. Deterministic; ends with a newline.
@@ -261,30 +298,9 @@ const CODEX_BANNER = [
 export function renderCodexToml(c: CanonicalConfig): string {
   const mcp_servers: Record<string, CodexHttpServer | CodexStdioServer> = {};
   for (const [name, s] of Object.entries(c.mcpServers)) {
-    if (s.url) {
-      const server: CodexHttpServer = { url: s.url };
-      server.bearer_token_env_var = TOKEN_VAR;
-      // Static headers = every canonical header EXCEPT Authorization (the token,
-      // which Codex handles via bearer_token_env_var).
-      const httpHeaders: Record<string, string> = {};
-      for (const [hk, hv] of Object.entries(s.headers ?? {})) {
-        if (hk === 'Authorization') continue;
-        httpHeaders[hk] = hv;
-      }
-      if (Object.keys(httpHeaders).length > 0)
-        server.http_headers = httpHeaders;
-      mcp_servers[name] = server;
-    } else {
-      // Build via conditional spread so an absent args/env contributes NO key
-      // (rather than an `if (x) obj.x = x` that assigns `undefined` when forced
-      // true — a no-op smol-toml drops, i.e. an equivalent mutant). With the
-      // spread, `s.args` present vs absent produces DIFFERENT objects.
-      mcp_servers[name] = {
-        command: String(s.command),
-        ...(s.args ? { args: s.args } : {}),
-        ...(s.env ? { env: { ...s.env } } : {}),
-      };
-    }
+    mcp_servers[name] = s.url
+      ? buildCodexHttpServer(s)
+      : buildCodexStdioServer(s);
   }
   // smol-toml terminates its output with exactly one `\n` (same guarantee
   // vex-dialects.ts relies on), so its serialization is already a well-formed
