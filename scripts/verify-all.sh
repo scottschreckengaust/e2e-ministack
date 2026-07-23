@@ -35,8 +35,15 @@
 # echoes RAN / SKIPPED (+ why). Exits non-zero if ANY run gate failed.
 
 # The gate helpers below are invoked INDIRECTLY (via `run_gate "$name" <fn>` or a
-# conditional call), which shellcheck's static analysis can't see — silence its
-# file-wide "function never invoked" info rather than tagging each definition.
+# conditional call), which shellcheck's static analysis can't statically trace —
+# it emits SC2329 ("never invoked … or ignored if invoked indirectly") on all 12.
+# This is an INHERENT limitation of the dynamic-dispatch design (the `run_gate`
+# abstraction is the whole point), not something a structural fix could remove
+# without gutting readability, so this single file-wide directive is the one
+# justified, irreducible suppression residual here (suppression inventory
+# #167/#202). The three SC1091 sites below were converted to `source=/dev/null`
+# (the correct directive, not a disable) and `outcome` is declared explicitly, so
+# SC2329 is the ONLY remaining `disable` in this file.
 # shellcheck disable=SC2329
 set -uo pipefail
 
@@ -97,7 +104,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 setup_pip_venv() {
   have python3 || { note_skip "pip-venv" "python3 not found — cfn-lint/checkov/semgrep will skip"; return 1; }
   python3 -m venv "$VENV_DIR" >/dev/null 2>&1 || { note_skip "pip-venv" "venv creation failed"; return 1; }
-  # shellcheck disable=SC1091
+  # The venv activator is created at runtime, so shellcheck can't follow it —
+  # `source=/dev/null` is shellcheck's directive for an intentionally-unfollowable
+  # source (treat it as empty), NOT a `disable` (so it clears the suppression
+  # inventory #167/#202 legitimately).
+  # shellcheck source=/dev/null
   . "$VENV_DIR/bin/activate"
   pip install --quiet --upgrade pip >/dev/null 2>&1 || true
   return 0
@@ -146,8 +157,12 @@ npm_audit_gate() {
   local vex=(.vex/*.openvex.json)
   node .github/scripts/npm-audit-gate.mjs npm-audit.json "$(date -u +%Y-%m-%d)" "${vex[@]}"
   # The gate shim writes npm-audit.outcome (KEY=VALUE, sets `outcome`) and always
-  # exits 0 (produce → enforce). shellcheck can't see the sourced assignment.
-  # shellcheck disable=SC1091,SC2034
+  # exits 0 (produce → enforce). The file is generated at runtime, so shellcheck
+  # can't follow it — `source=/dev/null` (treat as empty), NOT a `disable`. The
+  # `local outcome=""` above is the fail-closed default (empty ≠ "success" ⇒ the
+  # gate reds if the shim never wrote the file), and shellcheck now sees it as
+  # assigned-then-read by the `test` below, so no SC2034/SC2154 and no disable.
+  # shellcheck source=/dev/null
   source npm-audit.outcome
   rm -f npm-audit.json npm-audit.outcome
   test "$outcome" = "success"
@@ -175,8 +190,12 @@ grype_fs_gate() {
   GRYPE_VEX_DOCUMENTS="$docs" grype dir:. --output json --file "$json" -q >/dev/null 2>&1
   node .github/scripts/grype-fs-gate.mjs "$json" "${vex[@]}"
   # The gate shim writes grype-fs.outcome (KEY=VALUE, sets `outcome`, gitignored)
-  # and always exits 0. shellcheck can't see the sourced assignment.
-  # shellcheck disable=SC1091,SC2034
+  # and always exits 0. The file is generated at runtime, so shellcheck can't
+  # follow it — `source=/dev/null` (treat as empty), NOT a `disable`. The
+  # `local outcome=""` above is the fail-closed default (empty ≠ "success" ⇒ the
+  # gate reds if the shim never wrote the file), and shellcheck now sees it as
+  # assigned-then-read by the `test` below, so no SC2034/SC2154 and no disable.
+  # shellcheck source=/dev/null
   source grype-fs.outcome
   rm -f grype-fs.outcome
   test "$outcome" = "success"
@@ -210,6 +229,11 @@ semgrep_gate() {
   [[ -n "$PIP_READY" ]] || { note_skip "Semgrep" "pip venv unavailable"; return 0; }
   pip install --quiet --require-hashes -r .github/scanner-requirements/semgrep/requirements.txt >/dev/null 2>&1 \
     || { echo "semgrep install failed"; return 1; }
+  # `--exclude-rule` is the ONE parity-required suppression residual here: it
+  # MIRRORS security.yml's identical exclusion of the `detected-sonarqube-docs-api-key`
+  # rule — a documented, tracked FALSE POSITIVE on the SHA/digest pins (#163, until
+  # upstream semgrep/semgrep-rules#3994 lands). Removing it would BREAK #185 parity
+  # (local semgrep would red on the same FP CI suppresses), so it is kept, not dropped.
   semgrep scan --config=auto --error \
     --exclude=node_modules --exclude=cdk.out \
     --exclude-rule=generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
