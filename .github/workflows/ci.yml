@@ -84,12 +84,15 @@ jobs:
               - '.markdownlint-cli2.jsonc'
               - '.prettierrc.json'
               - '.prettierignore'
+              # canonical MCP block + every generated per-agent file + the
+              # generator itself: any change re-runs the drift gate (#111)
               - '.mcp.json'
               - '.cursor/**'
-              # optional per-agent MCP configs the parity gate checks when present (#111)
               - '.vscode/mcp.json'
               - '.gemini/settings.json'
-              - 'scripts/check-mcp-parity.sh'
+              - '.codex/config.toml'
+              - 'scripts/sync-mcp-config.ts'
+              - 'scripts/sync-mcp-config.mjs'
               - 'scripts/run-integ-snapshot.sh'
               - 'scripts/run-integ-snapshot-update.sh'
 
@@ -124,7 +127,11 @@ jobs:
         run: npm run lint:md
       - name: Format check (prettier)
         run: npm run format:check
-      - name: MCP config parity (.mcp.json vs .cursor/mcp.json)
+      - name: MCP config drift gate (canonical .mcp.json -> per-agent files)
+        # Regenerates every per-agent MCP config from the canonical .mcp.json in
+        # memory and fails if a committed file drifts (#111). Covers .cursor,
+        # .vscode, .gemini, .codex + the normalized canonical file. Run
+        # `npm run sync:mcp-config` and commit to fix drift.
         run: npm run check:mcp-parity
       - name: Build
         run: npm run build
@@ -556,8 +563,8 @@ jobs:
   # files (workflows, AGENTS.md, README.md, the compat registry). Updating some
   # but not all would silently drift. This fail-closed check greps every real
   # full-digest pin, adds the registry's `digest` field, and fails if the unique
-  # set has more than one value. Dependency-free (git/grep/sed/jq — jq is already
-  # required by check-mcp-parity), so it adds no new tool or gate.
+  # set has more than one value. Dependency-free (git/grep/sed/jq, all present on
+  # ubuntu-latest), so it adds no new tool or gate.
   ministack-digest-drift:
     name: MiniStack digest drift guard
     needs: changes

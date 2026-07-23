@@ -99,3 +99,11 @@ repos:
         # Prettier governs formatting for all its supported types here.
         files: \.(ts|js|mjs|json|jsonc|md|ya?ml)$
         pass_filenames: false
+      - id: mcp-config-drift
+        name: mcp config drift (canonical .mcp.json -> per-agent files)
+        # Fail if a committed per-agent MCP config (.cursor/.vscode/.gemini/.codex)
+        # drifts from the canonical .mcp.json (#111). Fix: `npm run sync:mcp-config`.
+        entry: npm run check:mcp-parity
+        language: system
+        files: ^(\.mcp\.json|\.cursor/mcp\.json|\.vscode/mcp\.json|\.gemini/settings\.json|\.codex/config\.toml|scripts/sync-mcp-config\.(ts|mjs))$
+        pass_filenames: false

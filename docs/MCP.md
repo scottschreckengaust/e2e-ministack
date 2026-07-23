@@ -4,9 +4,11 @@ This repo ships a repo-wide [Model Context Protocol](https://modelcontextprotoco
 configuration in [`.mcp.json`](../.mcp.json) (the Claude Code / CLI location) so an
 agent can interact with the project and the GitHub repository.
 
-> **Scope.** `.mcp.json` is the **Claude Code** project-scope file. Other agents
-> read their own paths (`.vscode/mcp.json`, `.cursor/mcp.json`, Codex
-> `config.toml`, …) — see [Other editor/agent vendors](#other-editoragent-vendors).
+> **Scope.** `.mcp.json` is the **Claude Code** project-scope file and the ONE
+> canonical source. Every other agent's config
+> (`.cursor/mcp.json`, `.vscode/mcp.json`, `.gemini/settings.json`, `.codex/config.toml`)
+> is **generated** from it by `scripts/sync-mcp-config.ts` — see
+> [Canonical source + generator](#canonical-source--generator).
 
 ## Servers
 
@@ -46,11 +48,12 @@ header that `.mcp.json` builds from the env var; if the var is unset the entry f
 back to an empty token (`${…:-}`) so the server merely fails to authenticate rather
 than breaking config parsing.
 
-### GitHub remote headers (Claude and Cursor)
+### GitHub remote headers (all agents)
 
-Both [`.mcp.json`](../.mcp.json) and [`.cursor/mcp.json`](../.cursor/mcp.json) send
-the same four headers to the `github` server. Only `Authorization` interpolation
-differs (`${GITHUB_PERSONAL_ACCESS_TOKEN:-}` vs `${env:GITHUB_PERSONAL_ACCESS_TOKEN}`).
+Every agent's `github` entry sends the same four headers. Only the token
+reference differs per agent's env-expansion syntax (see
+[Per-agent env-var expansion](#per-agent-env-var-expansion)); the generator emits
+each correctly from the one canonical value in [`.mcp.json`](../.mcp.json).
 
 GitHub's remote server takes the `Authorization` header (the only secret) plus five
 optional `X-MCP-*` toggles ([authoritative list](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md#optional-headers)).
@@ -71,14 +74,10 @@ Two further `X-MCP-*` toggles are **not** set in either file but available:
 (`MCP-Protocol-Version` is an MCP transport header the client sets itself — do not
 add it to committed MCP JSON.)
 
-**Drift gate:** `scripts/check-mcp-parity.sh` (also `npm run check:mcp-parity`) fails
-CI if an agent config diverges from the canonical `.mcp.json` on server names, the
-threat-composer pin, `github.url`/`type`, or non-`Authorization` headers.
-`.cursor/mcp.json` is always checked; `.vscode/mcp.json` and `.gemini/settings.json`
-are checked **only when present** (the gate never obliges those files to exist), and
-the checker accounts for VS Code keying its server map under `servers` rather than
-`mcpServers`. Full one-source generation of all per-agent files is still
-[#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111).
+**Drift gate:** `npm run check:mcp-parity` (`scripts/sync-mcp-config.mjs check`)
+regenerates every per-agent file from `.mcp.json` in memory and fails CI (unit
+job) and pre-commit if a committed file drifts — see
+[Canonical source + generator](#canonical-source--generator).
 
 > **Why remote (PoC decision).** The issue thread (#72) settled on the **remote
 > server with all toolsets** as the proof-of-concept: it is GitHub's recommended
@@ -200,24 +199,60 @@ setup lives here and in `.cursor/mcp.json`, not a separate instructions file.
 `~/.cursor/mcp.json`, or OAuth. [gitleaks](https://github.com/gitleaks/gitleaks) in
 pre-commit/CI catches accidental commits.
 
-## Other editor/agent vendors
+## Canonical source + generator
 
-`.mcp.json` is read by **Claude Code only**. There is no single cross-agent MCP
-file: the `mcpServers` JSON shape ports to Cursor (`.cursor/mcp.json`) and
-Gemini CLI (`.gemini/settings.json`), but VS Code/Copilot (`.vscode/mcp.json`)
-uses a different key (`servers`) and OpenAI Codex CLI uses TOML
-(`~/.codex/config.toml`, `[mcp_servers.<name>]`).
+`.mcp.json` (Claude Code, `mcpServers`) is the **one canonical source**. Every
+other agent reads its own path with its own file shape and env-expansion syntax,
+so `scripts/sync-mcp-config.ts` **generates** each per-agent file from `.mcp.json`
+(the transform logic is unit-tested + 100%-coverage-gated + Stryker-mutated like
+the repo's other logic modules; the runnable CLI is the thin
+`scripts/sync-mcp-config.mjs` shim). Add or change a server ONCE in `.mcp.json`,
+then regenerate:
 
-A generator that keeps per-vendor files in sync from one canonical block is
-tracked separately ([#111](https://github.com/scottschreckengaust/e2e-ministack/issues/111)).
-Until that lands, `.mcp.json` (Claude) and `.cursor/mcp.json` (Cursor) are
-maintained in parallel with the same servers but vendor-specific interpolation.
+```bash
+npm run sync:mcp-config   # (re)write every per-agent file from .mcp.json
+npm run check:mcp-parity  # drift gate: fail if a committed file != generator output
+```
 
-**Drift coverage today.** `scripts/check-mcp-parity.sh` treats `.mcp.json` as the
-canonical source and validates each **present** agent config against it:
-`.cursor/mcp.json` always, and `.vscode/mcp.json` / `.gemini/settings.json` when they
-exist. Because VS Code keys its server map under `servers` (not `mcpServers`), the
-checker reads that file through the `servers` path. If you add a `.vscode/mcp.json` or
-`.gemini/settings.json`, the gate will start enforcing it automatically — no wiring
-change needed. Codex TOML (`~/.codex/config.toml`) and Windsurf (global-only) are not
-yet covered; they await the generator in #111.
+**Generated targets** (all committed, all secret-free — see
+[Per-agent env-var expansion](#per-agent-env-var-expansion)):
+
+| Agent           | File                    | Server key        | HTTP transport                                  | Token reference                              |
+| --------------- | ----------------------- | ----------------- | ----------------------------------------------- | -------------------------------------------- |
+| Claude Code     | `.mcp.json` (canonical) | `mcpServers`      | `type: http` + `url`                            | `Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN:-}`   |
+| Cursor          | `.cursor/mcp.json`      | `mcpServers`      | `type: http` + `url`                            | `Bearer ${env:GITHUB_PERSONAL_ACCESS_TOKEN}` |
+| VS Code/Copilot | `.vscode/mcp.json`      | `servers`         | `type: http` + `url`                            | `Bearer ${env:GITHUB_PERSONAL_ACCESS_TOKEN}` |
+| Gemini CLI      | `.gemini/settings.json` | `mcpServers`      | `httpUrl` (no `type`)                           | `Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}`     |
+| OpenAI Codex    | `.codex/config.toml`    | `[mcp_servers.*]` | `url` + `bearer_token_env_var` + `http_headers` | `bearer_token_env_var = "GITHUB_…TOKEN"`     |
+
+**Drift gate.** `npm run check:mcp-parity` (`sync-mcp-config.mjs check`) regenerates
+all targets in memory and fails — in the CI unit job and the `mcp-config-drift`
+pre-commit hook — if any committed file differs. A hand-edit or a forgotten
+`sync:mcp-config` can never silently desync an agent from the canonical block.
+
+**Codex is a reference fragment, not a repo config.** Codex reads a **global**
+`~/.codex/config.toml`, so the committed `.codex/config.toml` is a fragment to copy
+its `[mcp_servers.*]` tables from (the file's banner says so). Its HTTP transport
+model differs fundamentally: it forbids a per-server `env` block and does **not**
+`${…}`-interpolate header strings, so the token is named via `bearer_token_env_var`
+(Codex reads `GITHUB_PERSONAL_ACCESS_TOKEN` from its own environment) and the
+`X-MCP-*` toggles become static `http_headers`.
+
+**Windsurf** is **global-only** (`~/.codeium/windsurf/mcp_config.json`, no
+repo-local file), so it is documented here but deliberately **not** generated —
+there is no committed file to keep in sync. Copy the `mcpServers` block from
+`.mcp.json` into that global file and use Windsurf's own token loader.
+
+## Per-agent env-var expansion
+
+The token (`GITHUB_PERSONAL_ACCESS_TOKEN`) is the only secret; **no committed file
+ever holds a real token** — each carries only a reference in that agent's syntax
+(verified against each vendor's official docs):
+
+- **Claude** — shell-style `${VAR}` / `${VAR:-default}`, expanded from Claude's launch environment.
+- **Cursor** — [`${env:VAR}`](https://cursor.com/docs/mcp#config-interpolation); stdio-server defaults load via `envFile`.
+- **VS Code** — `${env:VAR}` (same predefined-variable syntax as `launch.json`); `${input:…}` prompts are the alternative for secrets.
+- **Gemini CLI** — `$VAR` / `${VAR}` / `${VAR:-default}` in any `settings.json` string; note Gemini keys streamable-HTTP under **`httpUrl`** (not `url`/`type`).
+- **Codex** — no `${…}` interpolation. The HTTP server names the token env var via `bearer_token_env_var`; stdio `env` values are carried **verbatim** (Codex does not expand them — fill them in via your shell/AWS profile).
+
+gitleaks (pre-commit + CI, full history) catches an accidentally committed real token.

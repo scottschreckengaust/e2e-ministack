@@ -5,31 +5,31 @@ supply-chain safety. This file is the authoritative inventory.
 
 ## Pinned
 
-| What                                                   | Where                                | Pin form                                                                        |
-| ------------------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------- |
-| GitHub Actions (all `uses:`)                           | `.github/workflows/*.yml`            | commit SHA (`# vX` comment)                                                     |
-| npm dependencies (transitive)                          | `package-lock.json` + `npm ci`       | exact, lockfile-resolved                                                        |
-| `aws-cdk`, `aws-cdk-lib`                               | `package.json`                       | exact (`2.1128.0`, `2.260.0`)                                                   |
-| Node.js                                                | `mise.toml`, workflow `node-version` | exact patch (`24.17.0`)                                                         |
-| npm (via Corepack)                                     | `package.json` (`packageManager`)    | exact (`npm@11.13.0`)                                                           |
-| MiniStack image                                        | `ci.yml`                             | digest (`@sha256:636c4ef5…`)                                                    |
-| ClamAV image                                           | `security.yml` (`clamav` service)    | digest (`@sha256:6f4a9e7d…`); **signature DB floats** (freshclam)               |
-| SonarQube image                                        | `security.yml` (`sonarqube` service) | digest (`@sha256:160bd2f6…`)                                                    |
-| SonarSource actions                                    | `security.yml`                       | commit SHA (`sonarqube-scan-action` v8.2.0, `-quality-gate-action` v1.2.0)      |
-| CodeQL analyzer bundle                                 | `security.yml` (`tools:`)            | `codeql-bundle-v2.25.6`                                                         |
-| Semgrep                                                | `security.yml`                       | `==1.167.0`                                                                     |
-| cfn-lint / checkov                                     | `security.yml`                       | `==1.52.0` / `==3.3.8`                                                          |
-| OSV-Scanner                                            | `security.yml`                       | `v2.4.0` **+ SHA-256 verify**                                                   |
-| Grype (`anchore/scan-action`)                          | `security.yml`                       | action SHA + engine `grype-version:`; vuln **DB floats** (#183)                 |
-| Trivy (`trivy-action`)                                 | `security.yml`                       | action SHA + engine `version:`; vuln **DB floats**, cached (#183)               |
-| actionlint                                             | `security.yml`, pre-commit           | `v1.7.12` (install script self-verifies)                                        |
-| shellcheck                                             | `ci.yml`, pre-commit                 | `v0.11.0` **+ SHA-256 verify** (CI) / `shellcheck-py v0.11.0.1` (hook)          |
-| gitleaks, pre-commit-hooks                             | `.pre-commit-config.yaml`            | `rev:` tags                                                                     |
-| threat-composer-ai (uvx)                               | `.mcp.json`, `.cursor/mcp.json`      | git commit SHA (same pin in both; `npm run check:mcp-parity`)                   |
-| Prettier, markdownlint-cli2                            | `package.json` + lockfile            | exact, lockfile-resolved                                                        |
-| Stryker (mutation testing)                             | `package.json` + lockfile            | exact, lockfile-resolved                                                        |
-| fast-check, jazzer.js (fuzz)                           | `package.json` + lockfile            | exact, lockfile-resolved                                                        |
-| `@aws-cdk/integ-runner` / `@aws-cdk/integ-tests-alpha` | `package.json` + lockfile            | exact (`2.202.1` / `2.260.0-alpha.0`; runner line independent of `aws-cdk-lib`) |
+| What                                                   | Where                                               | Pin form                                                                                                 |
+| ------------------------------------------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| GitHub Actions (all `uses:`)                           | `.github/workflows/*.yml`                           | commit SHA (`# vX` comment)                                                                              |
+| npm dependencies (transitive)                          | `package-lock.json` + `npm ci`                      | exact, lockfile-resolved                                                                                 |
+| `aws-cdk`, `aws-cdk-lib`                               | `package.json`                                      | exact (`2.1128.0`, `2.260.0`)                                                                            |
+| Node.js                                                | `mise.toml`, workflow `node-version`                | exact patch (`24.17.0`)                                                                                  |
+| npm (via Corepack)                                     | `package.json` (`packageManager`)                   | exact (`npm@11.13.0`)                                                                                    |
+| MiniStack image                                        | `ci.yml`                                            | digest (`@sha256:636c4ef5…`)                                                                             |
+| ClamAV image                                           | `security.yml` (`clamav` service)                   | digest (`@sha256:6f4a9e7d…`); **signature DB floats** (freshclam)                                        |
+| SonarQube image                                        | `security.yml` (`sonarqube` service)                | digest (`@sha256:160bd2f6…`)                                                                             |
+| SonarSource actions                                    | `security.yml`                                      | commit SHA (`sonarqube-scan-action` v8.2.0, `-quality-gate-action` v1.2.0)                               |
+| CodeQL analyzer bundle                                 | `security.yml` (`tools:`)                           | `codeql-bundle-v2.25.6`                                                                                  |
+| Semgrep                                                | `security.yml`                                      | `==1.167.0`                                                                                              |
+| cfn-lint / checkov                                     | `security.yml`                                      | `==1.52.0` / `==3.3.8`                                                                                   |
+| OSV-Scanner                                            | `security.yml`                                      | `v2.4.0` **+ SHA-256 verify**                                                                            |
+| Grype (`anchore/scan-action`)                          | `security.yml`                                      | action SHA + engine `grype-version:`; vuln **DB floats** (#183)                                          |
+| Trivy (`trivy-action`)                                 | `security.yml`                                      | action SHA + engine `version:`; vuln **DB floats**, cached (#183)                                        |
+| actionlint                                             | `security.yml`, pre-commit                          | `v1.7.12` (install script self-verifies)                                                                 |
+| shellcheck                                             | `ci.yml`, pre-commit                                | `v0.11.0` **+ SHA-256 verify** (CI) / `shellcheck-py v0.11.0.1` (hook)                                   |
+| gitleaks, pre-commit-hooks                             | `.pre-commit-config.yaml`                           | `rev:` tags                                                                                              |
+| threat-composer-ai (uvx)                               | `.mcp.json` (canonical → generated per-agent files) | git commit SHA (one source, propagated by `scripts/sync-mcp-config.ts`; `npm run check:mcp-parity` gate) |
+| Prettier, markdownlint-cli2                            | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
+| Stryker (mutation testing)                             | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
+| fast-check, jazzer.js (fuzz)                           | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
+| `@aws-cdk/integ-runner` / `@aws-cdk/integ-tests-alpha` | `package.json` + lockfile                           | exact (`2.202.1` / `2.260.0-alpha.0`; runner line independent of `aws-cdk-lib`)                          |
 
 > **Scope of "exact" above.** Only `aws-cdk` and `aws-cdk-lib` are pinned to a
 > bare exact version _string_ in `package.json`. The other direct runtime deps
