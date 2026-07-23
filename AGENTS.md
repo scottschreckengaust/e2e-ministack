@@ -38,6 +38,13 @@ npm run test:fuzz-regression  # PR-gating: replays committed fuzz/corpus/ seeds 
 npm run fuzz           # exploratory jazzer.js fuzzing, scheduled only (needs GLIBC >= 2.38)
 npm run destroy        # cdk destroy --force
 
+# Local ↔ CI gate parity (#185): run EVERY reproducible gate in CI order + config,
+# so a full sandbox can confirm CI passes BEFORE push (near-zero round-trips). Needs
+# `mise install` first (pins grype/trivy/osv/shellcheck to the CI engine versions).
+# Docker gates (MiniStack E2E/image, ClamAV, SonarQube) auto-skip-with-notice unless
+# RUN_DOCKER_GATES=1. See docs/SECURITY-TOOLING.md § "Local CI parity for an agent sandbox".
+npm run verify:all
+
 # Reset MiniStack state between runs (faster than restarting the container):
 curl -X POST http://localhost:4566/_ministack/reset
 
@@ -115,7 +122,7 @@ pre-commit install
 - `tsconfig.json` is excluded from `check-json` (it's JSONC — has comments).
 - **`bin/app.ts` is mode `100755`** (executable) on purpose — it has a `#!/usr/bin/env node` shebang, so the shebang/executable hooks require it. Don't `chmod -x` it.
 - gitleaks/actionlint build from Go source on first install. This works out of the box for most. **Only** if your network can't reach `proxy.golang.org` (e.g. a TLS-intercepting corporate proxy) is a workaround needed: run `go env -w GOPROXY=direct` once (persists in Go's env config across shells), then reinstall the hooks.
-- This is a convenience tier, not an enforcing control (`--no-verify` bypasses it; absent until `pre-commit install`). CI remains the source of truth; the slow gates (cdk-nag synth, checkov, CodeQL, grype, MiniStack E2E) stay in CI only.
+- This is a convenience tier, not an enforcing control (`--no-verify` bypasses it; absent until `pre-commit install`). CI remains the source of truth; the slow gates (cdk-nag synth, checkov, CodeQL, grype, MiniStack E2E) stay out of _pre-commit_ **for human-laptop convenience** (a `git commit` shouldn't block on a five-minute scan). **This is not "CI-only" for a full sandbox:** an agent aiming for pre-push confidence runs the ENTIRE reproducible gate suite locally with **`npm run verify:all`** (pinned scanners via `mise install`, CI-parity config) — see [docs/SECURITY-TOOLING.md](docs/SECURITY-TOOLING.md) § "Local CI parity for an agent sandbox" (#185). The vuln DB still floats (#183), so parity is near-zero round-trips, not zero.
 
 ## Dependency notes
 

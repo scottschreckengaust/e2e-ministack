@@ -11,6 +11,7 @@ supply-chain safety. This file is the authoritative inventory.
 | npm dependencies (transitive)                          | `package-lock.json` + `npm ci`                      | exact, lockfile-resolved                                                                                 |
 | `aws-cdk`, `aws-cdk-lib`                               | `package.json`                                      | exact (`2.1128.0`, `2.260.0`)                                                                            |
 | Node.js                                                | `mise.toml`, workflow `node-version`                | exact patch (`24.17.0`)                                                                                  |
+| Local CI-parity scanners (#185)                        | `mise.toml` `[tools]`                               | exact, **mirrors** the `security.yml`/`ci.yml` engine pins (see below)                                   |
 | npm (via Corepack)                                     | `package.json` (`packageManager`)                   | exact (`npm@11.13.0`)                                                                                    |
 | MiniStack image                                        | `ci.yml`                                            | digest (`@sha256:636c4ef5…`)                                                                             |
 | ClamAV image                                           | `security.yml` (`clamav` service)                   | digest (`@sha256:6f4a9e7d…`); **signature DB floats** (freshclam)                                        |
@@ -51,6 +52,36 @@ supply-chain safety. This file is the authoritative inventory.
 > #14–#24) — so `security.yml` installs it with `--no-deps` (see AGENTS.md
 > "Dependency notes"). Drop the override when checkov's cap allows
 > `aiohttp>=3.14.1`.
+
+### Local CI-parity scanner pins (#185) — a synced second site
+
+So a fully-sandboxed agent can run the reproducible security gates locally at
+CI-matching versions (`npm run verify:all`; see
+[SECURITY-TOOLING.md](SECURITY-TOOLING.md) § "Local CI parity for an agent
+sandbox"), the four mise-installable **binary** scanners are pinned in
+`mise.toml` `[tools]`. Each value is the CI engine pin, **minus mise's
+leading-`v` strip**:
+
+| `mise.toml`             | Mirrors                                                             |
+| ----------------------- | ------------------------------------------------------------------- |
+| `grype = "0.114.0"`     | `security.yml` `grype-version: v0.114.0` (`anchore/scan-action`)    |
+| `trivy = "0.70.0"`      | `security.yml` `version: v0.70.0` (`aquasecurity/trivy-action`)     |
+| `osv-scanner = "2.4.0"` | `security.yml` OSV-Scanner download pin `v2.4.0`                    |
+| `shellcheck = "0.11.0"` | `ci.yml` `SHELLCHECK_VERSION: v0.11.0` (and pre-commit `v0.11.0.1`) |
+
+> **⚠️ This is a SECOND site each version lives (a #78 pin-sync target).** It
+> MUST stay in lockstep with `security.yml`/`ci.yml` — bump both together, never
+> one alone (do not introduce drift). Until `update:scanners` lands (#78), this is
+> a manual couple, cross-referenced by comment in `mise.toml`. The `mise.toml`
+> comment points here; this table points back. As with the CI engine pins, the
+> vuln **DB still floats** (see "Trivy vulnerability database" below), so a fresh
+> CVE can still diverge local↔CI — parity is near-zero round-trips, not zero.
+>
+> **Why only the binary scanners are here.** cfn-lint / checkov / semgrep are
+> **not** in `mise.toml`: CI installs them from the hash-pinned closures under
+> `.github/scanner-requirements/`, and `verify:all` installs those SAME closures
+> into an ephemeral venv — a mise pipx entry would be a THIRD, unhashed version
+> source for them, so it is deliberately avoided (single source of truth per tool).
 
 ## Intentionally NOT pinned (with reasons)
 

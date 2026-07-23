@@ -576,23 +576,76 @@ regression tier — same contract as the other `*-to-sarif` converters); the
 `allow-licenses` permissive list — no `dependency-review` exemption needed) and
 SHA-pinned per the zizmor convention; it needs `security-events: write`.
 
-## Intentional local ↔ remote (pre-commit) gap
+## Intentional local ↔ remote (pre-commit) gap — human-laptop convenience only
 
-Per CLAUDE.md, pre-commit is a **fast convenience tier**, not a mirror of CI —
-the slow/heavy gates stay CI-only **by design**. So a clean `git push` does not
-fully predict green CI. This gap is **known and deliberate**, not accidental:
+Per CLAUDE.md, **pre-commit** is a **fast convenience tier** for a human laptop,
+not a mirror of CI — the slow/heavy gates stay out of _pre-commit_ **by design**
+so a `git commit` isn't blocked on a five-minute scan. So a clean pre-commit run
+does not fully predict green CI. This gap is **known and deliberate**, not
+accidental — **and it is scoped to the pre-commit hook tier / human-laptop
+convenience.** It is **NOT** a claim that those gates can't run locally: a
+fully-sandboxed agent should run the ENTIRE reproducible gate suite pre-push via
+`npm run verify:all` (see "Local CI parity for an agent sandbox" below, #185) —
+completeness + pre-push confidence beat commit-time speed there.
 
 **Run in pre-commit AND CI:** hygiene hooks, gitleaks, actionlint, eslint, tsc,
 markdownlint, prettier.
 
-**Intentionally CI-only** (too slow / needs network / needs synth or the
-emulator): CodeQL, Grype, zizmor, the full cdk-nag synth gate, checkov,
-cfn-lint, npm audit, OSV-Scanner, dependency-review (needs the PR dep-diff),
-SBOM, and the MiniStack E2E deploy/integration tier.
+**Not in pre-commit** (too slow to gate a `git commit` — but reproducible LOCALLY
+via `verify:all`): CodeQL¹, Grype, zizmor, the full cdk-nag synth gate, checkov,
+cfn-lint, npm audit, OSV-Scanner, dependency-review¹, SBOM¹, and the MiniStack
+E2E deploy/integration tier. (¹ = no faithful local twin / reporting-only — see
+the parity section's CI-only list.)
 
-Closing the _cheap, high-signal_ subset of this gap (a Semgrep pre-commit hook
-matching CI, OSV-Scanner locally) is tracked separately — Semgrep parity under
-**#79**, the rest under **#77**'s parent scope.
+Closing the _cheap, high-signal_ subset of this gap in **pre-commit** (a Semgrep
+pre-commit hook matching CI, OSV-Scanner locally) is tracked separately — Semgrep
+parity under **#79**, the rest under **#77**'s parent scope.
+
+## Local CI parity for an agent sandbox (#185)
+
+The pre-commit gap above is a human-laptop convenience trade-off. **For an agent
+with a full sandbox, the trade-off flips:** completeness + pre-push confidence
+win, so the aim is to run the ENTIRE reproducible gate suite locally with high
+confidence that remote CI also passes — catching a new CVE / missing `.vex/`
+record / gate failure BEFORE push, not via a CI round-trip. (The motivating
+incident: #182 VEX-verified `.vex/` against **grype only**; CI's **trivy** uses a
+different DB, flagged 4 HIGH CVEs the grype-only check missed, and CI went red — a
+round-trip a local trivy run would have caught. #183 pinned the scanner engines,
+the first enabler; #185 is the umbrella.)
+
+**One command:** `npm run verify:all` (→ `scripts/verify-all.sh`) runs every
+reproducible gate **in CI order**, in **CI-parity config** (severity floors, VEX
+feeds `GRYPE_VEX_DOCUMENTS` / `trivy.yaml`, the hash-pinned scanner closures, and
+the JSON-derived VEX-aware gates), and exits non-zero on any failure. It honors
+the **observability convention** — it never silently skips: every gate echoes
+`PASS` / `FAIL` / `SKIP` (+ why).
+
+**Tool provisioning.** The binary scanners come from `mise install` at the
+CI-pinned engine versions (`mise.toml`: grype `0.114.0`, trivy `0.70.0`,
+osv-scanner `2.4.0`, shellcheck `0.11.0` — each `==` its `security.yml`/`ci.yml`
+pin, minus mise's leading-`v` strip). The pip scanners (cfn-lint / checkov /
+semgrep) are **deliberately not** in `mise.toml` — CI installs them from the
+hash-pinned closures under `.github/scanner-requirements/`, and `verify:all`
+installs those SAME closures into an ephemeral venv, so there is no second,
+unhashed version source for them. The **version-sync coupling** (mise.toml ↔
+security.yml — a #78 pin-sync target) is inventoried in
+[PINNING.md](PINNING.md) § "Local CI-parity scanner pins".
+
+**Gate classification (what's local vs not):**
+
+| Tier                | Gates                                                                                                                                                                                                                                                                                                                            | In `verify:all`?                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **Fully local**     | eslint, markdownlint, prettier, mcp-parity, tsc build, integ-snapshot, unit tests (100% cov + fast cdk-nag), fuzz-regression, cdk-nag synth gate, Stryker mutation, npm audit (VEX), OSV, Grype FS (VEX), Trivy FS, cfn-lint + checkov, Semgrep, shellcheck, threat-model, VEX-dialect drift, MiniStack digest-drift, actionlint | **yes** — always run                                |
+| **Heavy-but-local** | Grype/Trivy MiniStack **image** scan (needs docker + pinned digest), MiniStack **E2E** deploy/integration (needs docker), ClamAV (service container), SonarQube (service container)                                                                                                                                              | opt-in `RUN_DOCKER_GATES=1` / auto-skip-with-notice |
+| **CI-only**         | **CodeQL** (heavy analyzer bundle, Security-tab gate), **dependency-review** (needs the base↔head PR dep-diff — no faithful local twin), and the **reporting-only** side effects (octocov PR comment, SBOM/Syft artifact, SARIF uploads to the Security tab — outputs, NOT gates)                                                | **no** — documented, not localized (#185 non-goals) |
+
+**Honest residual — near-zero, not exactly zero round-trips.** The grype/trivy
+vuln DB and ClamAV signatures **float by design** (#183 / see PINNING.md): a CVE
+disclosed AFTER your last local DB refresh — but before CI's — can still red CI
+with no repo change. That's the intended fresh-CVE signal, and it's the one thing
+`verify:all` cannot fully predict. So parity reduces round-trips to **near-zero**,
+not exactly zero. (`mise install` fetches current engines; run it before
+`verify:all` to minimize the window.)
 
 ## Accepted risks (documented, not suppressed)
 
