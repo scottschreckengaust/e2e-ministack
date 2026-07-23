@@ -1,6 +1,28 @@
 [tools]
 node = "24.17.0"
 
+# ── Local CI-parity scanners (#185) ─────────────────────────────────────────
+# So a fully-sandboxed agent can run the reproducible security gates locally at
+# CI-matching engine versions (catch a new CVE / missing VEX record BEFORE push,
+# not via a CI round-trip). `mise install` provisions these; `scripts/verify-all.sh`
+# (`npm run verify:all`) drives them in CI-parity config. Only mise-installable
+# BINARY scanners live here; the pip tools (cfn-lint / checkov / semgrep) stay on
+# their hash-pinned closures under `.github/scanner-requirements/` (the script
+# installs those into an ephemeral venv) — mise pipx would be a THIRD, unhashed
+# version source, so it is deliberately not used for them.
+#
+# ⚠️ VERSION-SYNC (a #78 pin-sync target): each version below is the CI engine pin
+# and MUST stay in lockstep with `.github/workflows/security.yml`. mise strips the
+# leading `v` the workflow uses. The coupling is inventoried in docs/PINNING.md
+# ("Local CI-parity scanner pins"); when you bump a pin in security.yml, bump it
+# here too (and vice-versa). The vuln DB still floats by design (#183), so local
+# and CI can still diverge on a fresh-CVE window — see docs/SECURITY-TOOLING.md
+# § "Local CI parity for an agent sandbox".
+grype = "0.114.0"       # == security.yml `grype-version: v0.114.0` (anchore/scan-action)
+trivy = "0.70.0"        # == security.yml `version: v0.70.0` (aquasecurity/trivy-action)
+osv-scanner = "2.4.0"   # == security.yml OSV-Scanner download pin `v2.4.0`
+shellcheck = "0.11.0"   # == ci.yml `SHELLCHECK_VERSION: v0.11.0` (and pre-commit shellcheck-py v0.11.0.1)
+
 # Pin-sync tasks (#152, the ergonomics surface of the #78 pin-sync updater).
 # `mise run update` is the single, discoverable local entrypoint for bumping the
 # repo's coupled pins; it fans out to per-pin `update:*` tasks. Each `update:*`
