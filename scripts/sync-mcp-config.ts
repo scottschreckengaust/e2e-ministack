@@ -55,6 +55,11 @@ export interface CanonicalConfig {
 /** The env var carrying the GitHub PAT — the only secret any target references. */
 export const TOKEN_VAR = 'GITHUB_PERSONAL_ACCESS_TOKEN';
 
+// Match the bare NAME of the first `${VAR...}` / `$VAR` reference in an env value.
+// Non-global (no `g` flag → no lastIndex state), so `.exec` returns the same match
+// array on every call. `\w` (without the `u` flag) is exactly `[A-Za-z0-9_]`.
+const ENV_VAR_RE = /\$\{?([A-Za-z_]\w*)/;
+
 /**
  * True for a non-null, non-array object (a JSON "map"). Extracted as a single
  * total predicate so the parse guard has no redundant clauses whose mutation
@@ -122,16 +127,17 @@ function retargetEnv(
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    const m = value.match(/\$\{?([A-Za-z_][A-Za-z0-9_]*)/);
+    const m = ENV_VAR_RE.exec(value);
     out[key] = m ? interp(m[1]) : value;
   }
   return out;
 }
 
 // Deep-copy a server entry so a transform never mutates the caller's canonical
-// object (JSON round-trip is fine: these are plain JSON values).
+// object. `structuredClone` is exact here: the canonical config is loaded from
+// JSON, so a server holds only structured-cloneable JSON values.
 function cloneServer(server: CanonicalServer): CanonicalServer {
-  return JSON.parse(JSON.stringify(server)) as CanonicalServer;
+  return structuredClone(server);
 }
 
 /**
