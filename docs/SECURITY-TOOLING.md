@@ -415,6 +415,80 @@ does **not** re-trigger the license review (contradicting the awslabs example's
 comment). That is acceptable here — the action is LGPL at every version, so it is
 intentionally permanently exempt while in use.
 
+### Scoping dependency-review off the scanner-tooling pip closure (#262)
+
+`dependency-review` gets its dep-diff from **GitHub's dependency graph**, which
+indexes **every `requirements.txt` in the tree** — including the CI
+scanner-tooling pip closures at `.github/scanner-requirements/{semgrep,iac,overrides}/requirements.txt`.
+Those closures are the pinned transitive dependencies of the CI **scanners**
+(checkov / cfn-lint / semgrep), and they are deliberately **named
+`requirements.txt`** so grype / trivy / OSV / Dependabot / any future swappable
+scanner keep **auto-discovering** them by convention (#226/#228). The side effect:
+dependency-review evaluates that tooling closure against the **product's**
+permissive-only `allow-licenses`, so a PR that _diffs_ a closure (the #78
+scanner-bump / hash-regen path) reds the gate on the closure's copyleft and
+harvest-lag deps — even though none of them ships in the product.
+
+**The tooling-closure vs product distinction.** The product is pure Node/TS
+(`package.json`: `@aws-sdk/*`, `aws-cdk-lib`, `constructs`; the shipped Lambda is
+`lambda/index.js`, Node). Every dep in the pip closures is a **CI-scanner
+transitive** — verified `git grep` = 0 hits outside `.github/scanner-requirements/`.
+So allow-listing their copyleft is the **same CI-only external-invocation
+carve-out** already documented for shellcheck (GPLv3), ClamAV (GPLv2), and the
+SonarSource LGPL actions (#161): tools we _invoke_ in the pipeline, never linked
+or redistributed into repo output, so their copyleft terms don't reach it. This
+is honest scoping, not copyleft-laundering.
+
+**Chosen fix — ENUMERATE the allow-list (not rename).** Two mechanisms could
+scope the closure out: (a) rename the files off `requirements.txt` so the
+dependency graph stops indexing them, or (b) enumerate the closure's
+non-permissive deps in `allow-dependencies-licenses` + `allow-ghsas`. The
+maintainer chose **(b)** because the governing value is **auto-discovery** —
+renaming would break grype/trivy/OSV/Dependabot filename recognition (a #226
+regression) and falsify the `requirements.txt`-name claims in
+AGENTS.md/PINNING.md/`.vex/README.md`. This **deliberately reverses #262's own
+original acceptance criterion** (which pre-rejected enumerate as a "second
+ledger"); the reversal is maintainer-approved and recorded on PR #301.
+
+**What is enumerated (all in the `dependency-review` job of `security.yml`):**
+
+- **`allow-dependencies-licenses`** — the four genuine copyleft tooling deps, by
+  name (no version qualifier — matching is name-only per #161): `certifi`
+  (MPL-2.0), `orjson` (MPL-2.0 conjunct), `semgrep` (LGPL-2.1-or-later, the
+  scanner itself), `tqdm` (MPL-2.0 conjunct).
+- **`allow-ghsas`** — the four HIGH advisories in the closure (dependency-review
+  is `fail-on-severity: high`; these are the only high ones in GitHub's advisory
+  DB for the closure — `click`'s isn't in GitHub's DB, `idna`'s is moderate/below
+  floor): `GHSA-wj6h-64fc-37mp` (ecdsa), `GHSA-hvrp-rf83-w775` /
+  `GHSA-jpw9-pfvf-9f58` / `GHSA-vj7q-gjh5-988w` (mcp → semgrep).
+
+**Maintenance model (asymmetric).** The **license** side is name-only: a version
+bump needs **no edit**; only a NEW package _name_ entering a closure with a
+non-allow-listed license needs a new entry (the PR adding it flags it here). The
+**allow-ghsas** side is version-bound in spirit and must be **PRUNED** once a dep
+is bumped past the fix (osv/grype/trivy stop reporting it) — an unpruned GHSA
+silently exempts a re-introduced vuln.
+
+**The 3 harvest-lag "unlicensed" tooling deps are NOT enumerated.**
+`face`/`peewee`/`rustworkx` surface as `unlicensed` only because of ClearlyDefined
+harvest lag (their real licenses are permissive — BSD-3/MIT/Apache); they
+self-heal on re-harvest. They are routed to the **existing #127 Leg B1
+`review:license` triage** (which already files/resolves such issues against
+ClearlyDefined), not this standing ledger. **Tradeoff:** until re-harvest, a PR
+diffing one of the 3 could red dep-review — accepted by the maintainer; #127 owns
+resolution.
+
+**Second projection of the same accepted set.** The four `allow-ghsas` are the
+SAME advisories already accepted as `.vex/` records feeding the grype/trivy
+channel (`ecdsa-CVE-2024-23342`, `mcp-CVE-2026-52869/52870/59950`).
+dependency-review has **no `.vex/` channel** and reads only `allow-ghsas`, so the
+set is projected twice. Unifying the two projections (one ledger → many scanner
+dialects) is **#251**, tracked as future work — not built here.
+
+**Generatability (future work).** The license side is a pure **projection of the
+pinned pip closure** (its copyleft deps), so it could be auto-generated from the
+closure rather than hand-maintained — a natural fit for the #251 unification.
+
 ## MiniStack image scan — hard-fail, VEX-gated (#84)
 
 The `ministack-image` (Grype) and `trivy-image` (Trivy) jobs are **hard-fail**:

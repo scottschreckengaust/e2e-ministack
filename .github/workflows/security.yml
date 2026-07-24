@@ -332,30 +332,80 @@ jobs:
             BSD-2-Clause, BSD-3-Clause, 0BSD,
             BlueOak-1.0.0, Python-2.0,
             CC0-1.0, CC-BY-4.0, Unlicense
-          # allow-dependencies-licenses carries exactly TWO documented entries: the
-          # SonarQube LGPL exception (#150/#161) for BOTH SonarSource actions this
-          # repo uses — sonarqube-scan-action AND sonarqube-quality-gate-action.
-          # Both are LGPL-3.0 — copyleft, NOT on the permissive allow-list above —
-          # but CI-ONLY actions we invoke, never linked/redistributed into repo
-          # output, so their copyleft terms don't reach it (the same external-
-          # invocation carve-out that clears shellcheck/ClamAV). MAINTAINER-APPROVED
-          # exception; see docs/SECURITY-TOOLING.md. (Both must be listed: an
-          # exemption for only one leaves the other in dependency-review's
-          # `unlicensed` bucket, where the #127 Leg B1 pypi-only triage step emits
-          # a "non-pypi purl — manual triage" NOTICE. Listing both silences it.)
+          # allow-dependencies-licenses carries two documented GROUPS, both under
+          # the SAME CI-only external-invocation carve-out (copyleft that never
+          # links/redistributes into repo output — the line that clears shellcheck/
+          # ClamAV) and all MAINTAINER-APPROVED (see docs/SECURITY-TOOLING.md):
+          #
+          # (1) The SonarQube LGPL exception (#150/#161) for BOTH SonarSource
+          #     actions this repo uses — sonarqube-scan-action AND
+          #     sonarqube-quality-gate-action. Both are LGPL-3.0 — copyleft, NOT on
+          #     the permissive allow-list above — but CI-ONLY actions we invoke.
+          #     (Both must be listed: exempting only one leaves the other in
+          #     dependency-review's `unlicensed` bucket, where the #127 Leg B1
+          #     pypi-only triage step emits a "non-pypi purl — manual triage"
+          #     NOTICE. Listing both silences it.)
+          #
+          # (2) SCANNER-TOOLING copyleft (#262). dependency-review evaluates the CI
+          #     scanner-tooling pip closures (.github/scanner-requirements/*/
+          #     requirements.txt) — indexed by GitHub's dependency graph because
+          #     they are named `requirements.txt` (#226, kept ON that name so
+          #     grype/trivy/OSV/Dependabot keep auto-discovering them) — against the
+          #     PRODUCT's permissive-only allow-list above. Four of those transitive
+          #     deps of the CI scanners (checkov/cfn-lint/semgrep) carry copyleft
+          #     licenses NOT on the allow-list, so a PR diffing a closure (the #78
+          #     scanner-bump path) would red the gate. They are NONE of them product
+          #     deps — the product is pure Node/TS (package.json: @aws-sdk/*,
+          #     aws-cdk-lib, constructs; the shipped Lambda is lambda/index.js) —
+          #     verified `git grep` = 0 hits outside .github/scanner-requirements/.
+          #     So the SAME external-invocation carve-out applies: CI scanners we
+          #     invoke, never linked/redistributed. Enumerated (NOT renamed off
+          #     `requirements.txt`) to PRESERVE auto-discovery (#262 maintainer
+          #     decision; deliberately reverses #262's original "no second ledger"
+          #     acceptance criterion). The four:
+          #       - certifi   MPL-2.0            (via checkov/cfn-lint/semgrep)
+          #       - orjson    MPL-2.0 (conjunct) (via cfn-lint/checkov tooling)
+          #       - semgrep   LGPL-2.1-or-later  (the semgrep scanner itself)
+          #       - tqdm      MPL-2.0 (conjunct) (tooling)
+          #     NOT listed here: the 3 harvest-lag "unlicensed" tooling deps
+          #     (face/peewee/rustworkx — real licenses permissive: BSD-3/MIT/
+          #     Apache) are ClearlyDefined lag artifacts that self-heal on re-harvest
+          #     and are owned by the EXISTING #127 Leg B1 review:license triage
+          #     (below), NOT this standing ledger. Tradeoff: until re-harvest, a PR
+          #     diffing one of the 3 could red dep-review — accepted; #127 resolves.
+          #
           # #161 Q1 (verified against the action's src/purl.ts `purlsMatch` at the
           # pinned SHA): exemptions match by NAME ONLY — `purlsMatch` compares
           # type + namespace/name and IGNORES the version. So the @<sha>s below are
-          # cosmetic; a future SHA/version bump does NOT re-trigger review, the
-          # entries silence license checks for ALL versions of these actions. That
-          # is intended here (they're LGPL at every version, permanently exempt).
-          # NOTE: a plain quoted scalar (not a `>-` block) so the two purls parse
-          # as a single clean comma-list (a block scalar would fold in stray
-          # text). The detected-sonarqube-docs-api-key secrets rule would match
-          # these SHA-bearing purls, but it is globally --exclude-rule'd in the
-          # semgrep job (temporary; see #163) so no inline suppression is needed.
-          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b'
-          # Aside from that one entry, allow-dependencies-licenses stays empty for
+          # cosmetic and the pypi entries need no version qualifier; a future SHA/
+          # version bump does NOT re-trigger review, the entries silence license
+          # checks for ALL versions of these deps. That is intended here — the four
+          # actions/deps carry copyleft at every version, permanently exempt while
+          # in use. (This name-only side needs NO edit on a version bump; only a
+          # NEW package NAME entering a tooling closure with a non-allow-listed
+          # license needs a new entry — the PR adding it flags it here.)
+          # NOTE: a plain quoted scalar (not a `>-` block) so the purls parse as a
+          # single clean comma-list (a block scalar would fold in stray text). The
+          # detected-sonarqube-docs-api-key secrets rule would match the SHA-bearing
+          # SonarSource purls, but it is globally --exclude-rule'd in the semgrep
+          # job (temporary; see #163) so no inline suppression is needed.
+          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b, pkg:pypi/certifi, pkg:pypi/orjson, pkg:pypi/semgrep, pkg:pypi/tqdm'
+          # allow-ghsas: the high-severity advisories in the SAME scanner-tooling
+          # pip closures (#262). dependency-review is fail-on-severity:high, so
+          # these four HIGH GHSAs (the only high ones GitHub's advisory DB reports
+          # for the closure — click's isn't in GitHub's DB; idna's is moderate,
+          # below the floor) would red a closure-diffing PR (#78 bump path) even
+          # though they are tooling-only, not product deps. They are the SAME
+          # accepted set that already lives as `.vex/` records feeding the grype/
+          # trivy channel (ecdsa-CVE-2024-23342, mcp-CVE-2026-52869/52870/59950) —
+          # but dependency-review has NO .vex/ channel and reads only allow-ghsas,
+          # so this is a SECOND projection of the same accepted set. #251 (one
+          # ledger → many scanner dialects) is the unification opportunity; do NOT
+          # build it here. UNLIKE the name-only license side above, allow-ghsas is
+          # version-bound to the vulnerable range in spirit: PRUNE an entry once its
+          # dep is bumped past the fix (osv/grype/trivy stop reporting it).
+          allow-ghsas: 'GHSA-wj6h-64fc-37mp, GHSA-hvrp-rf83-w775, GHSA-jpw9-pfvf-9f58, GHSA-vj7q-gjh5-988w'
+          # Aside from the entries above, allow-dependencies-licenses stays empty for
           # the license-UNKNOWN path: "Could not detect a license" on a brand-new
           # release is upstream harvest lag (GitHub sources PyPI license data from
           # ClearlyDefined) and is self-expiring — this action is PR-diff-scoped,
