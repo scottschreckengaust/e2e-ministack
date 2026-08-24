@@ -24,6 +24,7 @@ npm-audit.json
 clamdscan.txt
 sonar-issues.json
 suppression-inventory.txt
+vex-revisit.txt
 reports/
 .fuzz-corpus/
 # Committed fuzz corpora (#165) are byte-exact fixtures, not source to format.

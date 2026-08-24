@@ -72,6 +72,8 @@ clamdscan.txt
 sonar-issues.json
 # Suppression-inventory text report (#202; SARIF already covered above)
 suppression-inventory.txt
+# .vex/ revisit_by gate report (#336; outcome file already covered above)
+vex-revisit.txt
 # CI-downloaded scanner binaries
 /gitleaks
 /osv-scanner

@@ -4,6 +4,7 @@ import {
   normId,
   statementIds,
   revisitDate,
+  isCalendarDate,
   isRevisitOverdue,
   recordIds,
   activeRecordIds,
@@ -114,6 +115,35 @@ describe('revisitDate', () => {
   it('returns undefined for a structurally-ISO but invalid calendar date', () => {
     // matches the regex but `new Date` yields Invalid Date
     expect(revisitDate('2026-13-45')).toBeUndefined();
+  });
+});
+
+describe('isCalendarDate', () => {
+  it('accepts a real calendar day in exactly YYYY-MM-DD form', () => {
+    expect(isCalendarDate('2026-11-24')).toBe(true);
+    expect(isCalendarDate('2024-02-29')).toBe(true); // real leap day
+  });
+  // The whole reason this predicate exists: `new Date` rolls an overflowing DAY
+  // forward instead of rejecting it, so `revisitDate` alone (whose only guard is
+  // Invalid-Date) accepts `2026-02-30` as 2026-03-02.
+  it('rejects a day that overflows its month (which `new Date` silently rolls over)', () => {
+    expect(revisitDate('2026-02-30')?.toISOString()).toBe(
+      '2026-03-02T00:00:00.000Z',
+    );
+    expect(isCalendarDate('2026-02-30')).toBe(false);
+    expect(isCalendarDate('2026-04-31')).toBe(false);
+    expect(isCalendarDate('2026-02-29')).toBe(false); // 2026 is not a leap year
+  });
+  it('rejects an out-of-range month/day (Invalid Date)', () => {
+    expect(isCalendarDate('2026-13-45')).toBe(false);
+    expect(isCalendarDate('2026-00-10')).toBe(false);
+  });
+  it('rejects anything that is not exactly a bare ISO date', () => {
+    expect(isCalendarDate('soon')).toBe(false);
+    expect(isCalendarDate('2026-11-24T00:00:00Z')).toBe(false);
+    expect(isCalendarDate('revisit 2026-11-24')).toBe(false);
+    expect(isCalendarDate('x2026-11-24')).toBe(false);
+    expect(isCalendarDate('2026-11-24x')).toBe(false);
   });
 });
 

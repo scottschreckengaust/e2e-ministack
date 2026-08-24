@@ -54,6 +54,7 @@
     // them in `include`) and run by jest (ts-jest) + the unit coverage gate.
     "test/unit/vex-dialects.test.ts",
     "test/unit/npm-audit-gate.test.ts",
-    "test/unit/npm-audit-to-sarif.test.ts"
+    "test/unit/npm-audit-to-sarif.test.ts",
+    "test/unit/vex-revisit-gate.test.ts"
   ]
 }

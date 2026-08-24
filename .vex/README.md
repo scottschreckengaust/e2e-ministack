@@ -184,12 +184,26 @@ clock, and their expiry mechanism is the reconcile procedure, not the calendar.
 So: if an acceptance is genuinely time-boxed, use the **dated** form, because it
 is the only one a machine can nag you about.
 
-> **Known gap — presence is NOT yet enforced.** Nothing in CI fails a record that
-> omits `revisit_by`: every consumer treats it as optional (`revisit_by?:
-string`, and `revisitDate`/`ignoreUntilFrom` return `undefined` for a missing
-> value), so the `MUST` above is currently a convention a reviewer has to catch.
-> Most existing records predate the rule and lack the field. Closing this is a
-> **gate**, not more prose — see #76.
+**The `MUST` is a gate, not a convention (#336).** `.github/scripts/vex-revisit-gate.mjs`
+(hard-fail `vex-revisit` job in `security.yml`, and part of `npm run verify:all`)
+fails CI when a record carries no `revisit_by` at all, or one whose value is not
+one of the four forms above. It also checks each form's ARGUMENT, because the
+plausible-looking-but-wrong value is the one review misses:
+
+- a dated form must name a **real calendar day** — `revisit 2026-02-30` is
+  rejected even though `new Date` accepts it (it silently rolls over into March,
+  which would expire the acceptance on a day nobody authored);
+- `waiting-on-upstream-issue` must be followed by an **`https` URL** — a durable
+  citation, not a promise;
+- `waiting-for-fix` must be followed by a **CVE or GHSA id** (the two identifier
+  namespaces this ledger matches on), so the advisory it waits for is resolvable.
+
+The form token and its argument are the only machine-checked parts; anything
+after them is free text, so append the human reason if the record's
+`impact_statement` doesn't already carry it. A trigger nobody can verify is worse
+than a red gate — write the one that is TRUE for the record, and if none of the
+four fits, that is a signal the acceptance itself needs rethinking, not a new
+vocabulary word.
 
 ## Vendor-vs-tool severity honesty (#188)
 
@@ -371,8 +385,11 @@ The `.vex/` set must stay in lockstep with live findings: **#76** audits it —
 every record must still match a current scan finding, and resolved ones (a digest
 bump that drops the CVE, or an upstream-fixed CVE reaching the image) are pruned.
 A new CVE the scanners surface at the floor without a record here fails the gate
-until it is VEX-accepted (add a record) or the pin is bumped past it. Enforcing
-`revisit_by` presence (see the gap noted above) belongs to this audit.
+until it is VEX-accepted (add a record) or the pin is bumped past it. What the
+`revisit_by` gate cannot judge belongs to this audit: the gate proves every record
+names a trigger, but only a human can confirm the trigger is still the TRUE one
+(an `https` tracker that has since closed, a dated window renewed on autopilot, a
+`wait-for-image-rebuild` on a digest that already moved).
 
 ## Cross-references
 
