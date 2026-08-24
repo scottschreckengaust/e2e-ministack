@@ -694,7 +694,7 @@ jobs:
       - name: Build image SBOM (once)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
+          image: 'ministackorg/ministack:full@sha256:8674b54b185972791135a04bb06d6507df0027c88bf9c530b2173c0955e9a686'
           format: syft-json
           output-file: image.sbom.json
           upload-artifact: false
@@ -1007,7 +1007,7 @@ jobs:
           # below reuse the binary (skip-setup-trivy) + cached result.
           version: v0.70.0
           scan-type: image
-          image-ref: 'ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9'
+          image-ref: 'ministackorg/ministack:full@sha256:8674b54b185972791135a04bb06d6507df0027c88bf9c530b2173c0955e9a686'
           format: json
           output: trivy-image.json
           cache-dir: ${{ github.workspace }}/.cache/trivy

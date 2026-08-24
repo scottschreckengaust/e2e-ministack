@@ -26,16 +26,15 @@ vulnerability:
     - .vex/CVE-2025-70873.openvex.json
     - .vex/CVE-2026-11822.openvex.json
     - .vex/CVE-2026-11824.openvex.json
-    - .vex/CVE-2026-11940.openvex.json
-    - .vex/CVE-2026-11972.openvex.json
-    - .vex/CVE-2026-12087.openvex.json
     - .vex/CVE-2026-12151.openvex.json
     - .vex/CVE-2026-13149.openvex.json
-    - .vex/CVE-2026-13221.openvex.json
+    - .vex/CVE-2026-13697.openvex.json
+    - .vex/CVE-2026-14257.openvex.json
+    - .vex/CVE-2026-14456.openvex.json
+    - .vex/CVE-2026-14643.openvex.json
     - .vex/CVE-2026-1525.openvex.json
     - .vex/CVE-2026-1526.openvex.json
     - .vex/CVE-2026-1528.openvex.json
-    - .vex/CVE-2026-15308.openvex.json
     - .vex/CVE-2026-22036.openvex.json
     - .vex/CVE-2026-2229.openvex.json
     - .vex/CVE-2026-25547.openvex.json
@@ -45,31 +44,23 @@ vulnerability:
     - .vex/CVE-2026-33630.openvex.json
     - .vex/CVE-2026-33750.openvex.json
     - .vex/CVE-2026-41992.openvex.json
-    - .vex/CVE-2026-42496.openvex.json
-    - .vex/CVE-2026-42497.openvex.json
     - .vex/CVE-2026-45149.openvex.json
-    - .vex/CVE-2026-48615.openvex.json
     - .vex/CVE-2026-48617.openvex.json
     - .vex/CVE-2026-48619.openvex.json
     - .vex/CVE-2026-48930.openvex.json
     - .vex/CVE-2026-48933.openvex.json
     - .vex/CVE-2026-48937.openvex.json
-    - .vex/CVE-2026-48959.openvex.json
-    - .vex/CVE-2026-48961.openvex.json
-    - .vex/CVE-2026-48962.openvex.json
-    - .vex/CVE-2026-53615.openvex.json
     - .vex/CVE-2026-5435.openvex.json
     - .vex/CVE-2026-54369.openvex.json
     - .vex/CVE-2026-54370.openvex.json
     - .vex/CVE-2026-54371.openvex.json
     - .vex/CVE-2026-5450.openvex.json
-    - .vex/CVE-2026-57432.openvex.json
-    - .vex/CVE-2026-57433.openvex.json
+    - .vex/CVE-2026-56846.openvex.json
+    - .vex/CVE-2026-56848.openvex.json
+    - .vex/CVE-2026-58043.openvex.json
     - .vex/CVE-2026-5928.openvex.json
     - .vex/CVE-2026-6734.openvex.json
-    - .vex/CVE-2026-7017.openvex.json
-    - .vex/CVE-2026-8376.openvex.json
-    - .vex/CVE-2026-9538.openvex.json
+    - .vex/CVE-2026-69184.openvex.json
     - .vex/CVE-2026-9697.openvex.json
     - .vex/ecdsa-CVE-2024-23342.openvex.json
     - .vex/pytest-CVE-2025-71176.openvex.json
