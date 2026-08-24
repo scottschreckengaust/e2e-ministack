@@ -98,6 +98,28 @@ export function revisitDate(revisitBy: unknown): Date | undefined {
 }
 
 /**
+ * Whether `iso` is EXACTLY one real calendar day in `YYYY-MM-DD` form — the
+ * authoring contract for the dated `revisit <ISO-date>` form (#336).
+ *
+ * WHY this is not just `revisitDate(iso) !== undefined`: `new Date` accepts a
+ * day that OVERFLOWS its month and silently rolls it forward
+ * (`new Date('2026-02-30')` is 2026-03-02, NOT Invalid Date), so the
+ * Invalid-Date guard in `revisitDate` only catches an out-of-range MONTH
+ * (`2026-13-45`). A typo'd `revisit 2026-02-30` would therefore parse — and
+ * expire the acceptance on a date nobody authored. Rather than re-deriving
+ * calendar arithmetic (leap years, month lengths), this delegates the parse to
+ * `revisitDate` and then requires the round-trip to be LOSSLESS: a date-only
+ * string is specified to parse as UTC midnight, so a faithfully-parsed
+ * `YYYY-MM-DD` must serialize back to exactly `<iso>T00:00:00.000Z`. Any
+ * rollover, extra text, or truncation breaks that equality.
+ */
+export function isCalendarDate(iso: string): boolean {
+  const parsed = revisitDate(iso);
+  if (parsed === undefined) return false;
+  return parsed.toISOString() === `${iso}T00:00:00.000Z`;
+}
+
+/**
  * Whether a `revisit_by` names a DATE that is on/before `now` — i.e. the
  * acceptance is time-boxed and its window has passed, so it must stop covering
  * (the finding re-reds). An event-token `revisit_by` (no date) is NEVER overdue.

@@ -284,6 +284,22 @@ run_gate "threat-model (structural)" threat_model_gate
 # —— security.yml: VEX dialect drift-check (trivy.yaml / osv-scanner.toml) ——
 run_gate "VEX dialect drift-check" node .github/scripts/vex-dialects.mjs check
 
+# —— security.yml: VEX revisit_by presence + vocabulary (#336) ——
+vex_revisit_gate() {
+  set +e
+  local outcome=""
+  node .github/scripts/vex-revisit-gate.mjs
+  # The gate shim writes vex-revisit.outcome (KEY=VALUE, sets `outcome`) and always
+  # exits 0 (produce → enforce), exactly like the npm-audit gate above. The file is
+  # generated at runtime, so shellcheck can't follow it — `source=/dev/null` (treat
+  # as empty), NOT a `disable`. `local outcome=""` is the fail-closed default.
+  # shellcheck source=/dev/null
+  source vex-revisit.outcome
+  rm -f vex-revisit.txt vex-revisit.outcome
+  test "$outcome" = "success"
+}
+run_gate "VEX revisit_by gate" vex_revisit_gate
+
 # —— security.yml: MiniStack image-digest drift guard (ci.yml) ——
 run_gate "MiniStack digest drift guard" .github/scripts/check-ministack-digest-drift.sh
 

@@ -47,6 +47,12 @@ export default tseslint.config(
             '.github/scripts/npm-audit-to-sarif.ts',
             'test/unit/npm-audit-gate.test.ts',
             'test/unit/npm-audit-to-sarif.test.ts',
+            // #336: likewise — vex-revisit-gate.ts imports ./vex-ledger.ts,
+            // ./vex-to-sarif-suppressions.ts and ./npm-audit-gate.ts with
+            // explicit `.ts` extensions, so it + its sole-importer unit test are
+            // excluded from the emitting tsconfig.json and lint here.
+            '.github/scripts/vex-revisit-gate.ts',
+            'test/unit/vex-revisit-gate.test.ts',
           ],
           // typescript-eslint caps the inferred default program at 8 matched
           // files by default; the fuzz-regression `.ts` targets (one per logic
@@ -54,8 +60,10 @@ export default tseslint.config(
           // 9th). These are tiny corpus-replay specs, so the perf cost of a
           // slightly larger default program is negligible — raise the cap rather
           // than move them into an emitting tsconfig (which would resurrect the
-          // `.js`-shadows-`.ts` problem #165 avoids).
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 20,
+          // `.js`-shadows-`.ts` problem #165 avoids). Raised again at #336 (the
+          // 13 fuzz targets + 8 named entries = 21 matched files); keep a little
+          // headroom so the next logic module doesn't have to touch this line.
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 24,
         },
         tsconfigRootDir: import.meta.dirname,
       },

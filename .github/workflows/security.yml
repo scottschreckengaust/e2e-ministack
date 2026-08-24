@@ -1807,6 +1807,47 @@ jobs:
       - name: Check trivy.yaml / osv-scanner.toml match the .vex/ ledger
         run: node .github/scripts/vex-dialects.mjs check
 
+  # ── VEX revisit_by presence + vocabulary (hard-fail, #336) ──────────────────
+  # `.vex/README.md` has required a `revisit_by` on every record since #188 —
+  # naming HOW the acceptance ends — but every CONSUMER treats the field as
+  # optional, so the MUST was only a convention a reviewer had to catch, and most
+  # records predated it. This job makes it a gate: a record with no `revisit_by`,
+  # or one whose value is outside the four sanctioned forms (including a
+  # date-shaped value that is not a real calendar day), fails CI. Safe to make
+  # hard per the Gate Atomicity Law (#335): the asserted set is `.vex/` itself,
+  # which only changes when a PR edits it, so this can never red on its own.
+  vex-revisit:
+    name: VEX revisit_by gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # gate uses Node built-ins + the .ts logic only; no deps
+      # produce → always-upload → enforce: the shim always exits 0 and records the
+      # verdict in vex-revisit.outcome, so the report artifact exists precisely
+      # when the job fails.
+      - name: Check every .vex/ record carries a sanctioned revisit_by
+        run: node .github/scripts/vex-revisit-gate.mjs
+      - name: Upload revisit_by report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vex-revisit-report
+          path: vex-revisit.txt
+          if-no-files-found: warn
+      - name: Enforce revisit_by result
+        if: always()
+        run: |
+          source vex-revisit.outcome
+          echo "VEX revisit_by gate outcome=$outcome (fails on a missing or unsanctioned revisit_by, and on an empty ledger)"
+          test "$outcome" = "success"
+
   zizmor:
     name: Zizmor (Actions audit)
     runs-on: ubuntu-latest
