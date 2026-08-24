@@ -9,7 +9,7 @@ supply-chain safety. This file is the authoritative inventory.
 | ------------------------------------------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | GitHub Actions (all `uses:`)                           | `.github/workflows/*.yml`                           | commit SHA (`# vX` comment)                                                                              |
 | npm dependencies (transitive)                          | `package-lock.json` + `npm ci`                      | exact, lockfile-resolved                                                                                 |
-| `aws-cdk`, `aws-cdk-lib`                               | `package.json`                                      | exact (`2.1128.0`, `2.260.0`)                                                                            |
+| `aws-cdk`, `aws-cdk-lib`                               | `package.json`                                      | exact (`2.1138.0`, `2.266.0`)                                                                            |
 | Node.js                                                | `mise.toml`, workflow `node-version`                | exact patch (`24.17.0`)                                                                                  |
 | Local CI-parity scanners (#185)                        | `mise.toml` `[tools]`                               | exact, **mirrors** the `security.yml`/`ci.yml` engine pins (see below)                                   |
 | npm (via Corepack)                                     | `package.json` (`packageManager`)                   | exact (`npm@11.13.0`)                                                                                    |
@@ -30,7 +30,7 @@ supply-chain safety. This file is the authoritative inventory.
 | Prettier, markdownlint-cli2                            | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
 | Stryker (mutation testing)                             | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
 | fast-check, jazzer.js (fuzz)                           | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
-| `@aws-cdk/integ-runner` / `@aws-cdk/integ-tests-alpha` | `package.json` + lockfile                           | exact (`2.202.1` / `2.260.0-alpha.0`; runner line independent of `aws-cdk-lib`)                          |
+| `@aws-cdk/integ-runner` / `@aws-cdk/integ-tests-alpha` | `package.json` + lockfile                           | exact (`2.204.5` / `2.266.0-alpha.0`; runner line independent of `aws-cdk-lib`)                          |
 
 > **Scope of "exact" above.** Only `aws-cdk` and `aws-cdk-lib` are pinned to a
 > bare exact version _string_ in `package.json`. The other direct runtime deps

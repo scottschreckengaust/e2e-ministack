@@ -214,16 +214,20 @@ subset rather than all of `.vex/`:
 | prefix             | surface(s) that inject its SARIF suppression | example                     |
 | ------------------ | -------------------------------------------- | --------------------------- |
 | `CVE-*`            | grype **image** gate + suppression injector  | base-image emulator CVEs    |
-| `npm-*`            | **npm-audit** SARIF suppression (#295)       | `npm-brace-expansion-CVE-…` |
+| `npm-*`            | **npm-audit** SARIF suppression (#295)       | _(none active — see below)_ |
 | `mcp-*`, `ecdsa-*` | FS surface (broad `.vex/*` glob)             | pypi-surface records        |
 
 This scoping is why the SAME CVE can have TWO records with DIFFERENT statuses for
-DIFFERENT products without colliding: `CVE-2026-13149.openvex.json`
-(`pkg:deb/debian/node-brace-expansion`, `not_affected` — the emulator image) and
-`npm-brace-expansion-CVE-2026-13149.openvex.json` (`pkg:npm/brace-expansion`,
-`affected` — the bundled npm dep) coexist. The npm-audit injection is scoped to
-`.vex/npm-*` so the deb record's `not_affected` can NEVER suppress (hide) the npm
-`affected` finding — it stays a visible open alert, per #188.
+DIFFERENT products without colliding. The worked example was CVE-2026-13149:
+`CVE-2026-13149.openvex.json` (`pkg:deb/debian/node-brace-expansion`,
+`not_affected` — the emulator image) coexisted with a `npm-brace-expansion-…`
+record (`pkg:npm/brace-expansion`, `affected` — the then-bundled npm dep). The
+npm-audit injection is scoped to `.vex/npm-*` precisely so the deb record's
+`not_affected` can NEVER suppress (hide) an npm `affected` finding — it stays a
+visible open alert, per #188. The npm half of that pair was **retired in #323**
+(the `aws-cdk-lib` bump rebundled a patched `brace-expansion`), so only the
+image-scoped `CVE-2026-13149.openvex.json` remains — but the scoping rule stands
+and applies to the next such pair.
 
 The scanners that CANNOT glob `.vex/` — **Trivy** (`trivy.yaml`'s
 `vulnerability.vex` is an explicit file list) and **OSV-Scanner** (no OpenVEX
@@ -272,32 +276,42 @@ stays a visible finding (#188).
   still flags ecdsa as alert #13, so the **API dismissal** of #13
   (`tolerable_risk`) remains the active control for THAT surface.
 
-### `npm-audit` surface (npm dependency audit — live as of #295)
+### `npm-audit` surface (npm dependency audit — machinery live as of #295)
 
-- **`npm-brace-expansion-CVE-2026-13149.openvex.json`** — `affected` for
-  `pkg:npm/brace-expansion@5.0.6` (bundled inside `aws-cdk-lib` via its bundled
-  `minimatch`). CVE-2026-13149 / GHSA-3jxr-9vmj-r5cp is an exponential-time
-  brace-expansion DoS, fixed in 5.0.7. **No repo-side fix:** the copy ships
-  BUNDLED in the `aws-cdk-lib` tarball (`bundleDependencies`, `inBundle:true`);
-  npm `overrides` provably cannot rewrite bundled deps and `npm audit fix` bumps
-  only the un-bundled top-level copies, so only an `aws-cdk-lib` release that
-  rebundles 5.0.7 clears it. Reachable-but-accepted (glob expansion over the
-  repo's own non-adversarial CDK source at synth time), hence `affected` — the
-  finding stays VISIBLE (the gate prints it; the npm-scoped SARIF injection adds
-  no suppression) rather than being hidden.
+**There is currently NO active `npm-*` record — and that is the goal state.** The
+npm surface is at **0 uncovered advisories with 0 acceptances**: every npm finding
+is _fixed_, not accepted. Keep it that way — reach for a version bump (see
+AGENTS.md § Dependency notes on `npm update` vs `overrides` vs an `aws-cdk-lib`
+rebundle) before ever writing an `npm-*` record. The gate machinery below stays
+documented because it is still wired and will be needed for the next genuinely
+upstream-blocked npm advisory.
 
-  **Dated `revisit_by` (the staleness nag, #295).** Unlike the event-token form
-  (`wait-for-image-rebuild`), this record carries a DATED `revisit_by`
-  (`revisit 2026-10-22`). The npm-audit gate reads the ACTIVE record set
-  (`activeRecordIds`): once today is on/after that date, the record stops
-  covering and the gate **self-reds**, forcing a re-check for an aws-cdk-lib
-  rebundle. Use a dated `revisit_by` (not an event token) for override/bundled
-  "waiting-for-the-vendor" acceptances so they can't rot silently.
+The worked precedent was **`npm-brace-expansion-CVE-2026-13149.openvex.json`**
+(retired in **#323**): `affected` for `pkg:npm/brace-expansion@5.0.6` bundled
+inside `aws-cdk-lib` via its bundled `minimatch`. It was genuinely unfixable
+repo-side — npm `overrides` provably cannot rewrite `inBundle: true` deps and
+`npm audit fix` bumps only the un-bundled top-level copies — so it was accepted as
+`affected` (reachable-but-accepted: glob expansion over the repo's own
+non-adversarial CDK source at synth time), keeping the finding VISIBLE rather than
+hidden. `aws-cdk-lib@2.266.0` then rebundled `brace-expansion@5.0.9`, clearing it
+along with GHSA-mh99-v99m-4gvg and GHSA-rgw5-rvv9-x895.
 
-  **Distinct from `CVE-2026-13149.openvex.json`** (same CVE, `not_affected`, the
-  `pkg:deb/debian/node-brace-expansion` emulator-image component). The `npm-`
-  filename prefix scopes THIS record to the npm-audit SARIF injection only, so
-  the two never collide — see "Record-name prefix = surface scope" above.
+**Delete such a record, don't re-date it, once its premise is false.** This one's
+`action_statement` asserted "no fixed aws-cdk-lib release"; the moment a fixed
+release existed the record was _wrong_, not merely stale — so #323 deleted it
+ahead of its `revisit 2026-10-22` window rather than pushing the date out.
+
+**Dated `revisit_by` (the staleness nag, #295).** Unlike the event-token form
+(`wait-for-image-rebuild`), an npm/bundled acceptance carries a DATED `revisit_by`.
+The npm-audit gate reads the ACTIVE record set (`activeRecordIds`): once today is
+on/after that date the record stops covering and the gate **self-reds**, forcing a
+re-check. Use a dated `revisit_by` (not an event token) for override/bundled
+"waiting-for-the-vendor" acceptances so they can't rot silently.
+
+Note `CVE-2026-13149.openvex.json` **still exists and must not be confused with
+the retired record** — it is `not_affected` for the
+`pkg:deb/debian/node-brace-expansion` emulator-image component, a different
+product on a different surface. See "Record-name prefix = surface scope" above.
 
 ### `mcp` (server-transport CVEs — filesystem/lockfile surface, #226)
 
