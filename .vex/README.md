@@ -16,8 +16,8 @@ committed files drift. Regenerate after any record change with
 `node .github/scripts/vex-dialects.mjs write` (do **not** hand-edit trivy.yaml /
 osv-scanner.toml — they carry a GENERATED-FILE banner). The generator honors the
 SAME `SUPPRESSING_STATUSES` set (`not_affected`/`fixed`) as the SARIF injector
-(imported from `vex-to-sarif-suppressions.ts`, not re-derived), so `affected`
-records (e.g. mcp) never appear in any dialect. Grype needs no generated file —
+(imported from `vex-to-sarif-suppressions.ts`, not re-derived), so an `affected`
+record never appears in any dialect. Grype needs no generated file —
 it reads `.vex/` natively (see below).
 
 As of **#84** these records are **live**: the `security.yml` `ministack-image`
@@ -58,13 +58,15 @@ exactly as a `not_affected` one is). Why the change: grype's go-vex only moves
 `matches[]` (its `AugmentMatches` re-surfaces it — see below), so once the
 floating DB began rating the 3 `mcp` GHSAs high, the deliberately-`affected`
 `mcp` records could not suppress the finding and the **required** FS gate went
-red repo-wide. The JSON gate keeps the `mcp` records honestly `affected`
-(#188), still hard-fails on a genuinely-new uncovered finding, and handles
+red repo-wide. (Those `mcp` records are gone as of **#324** — fixed upstream
+rather than accepted — but the mechanism they forced remains, and applies to any
+future `affected` acceptance.) The JSON gate lets a record stay honestly
+`affected` (#188), still hard-fails on a genuinely-new uncovered finding, and handles
 GHSA↔CVE aliasing (grype may report the GHSA with the CVE in
 `relatedVulnerabilities`, or vice versa; each record names the CVE + aliases the
 GHSA). The `GRYPE_VEX_DOCUMENTS`-fed SARIF is retained as the Security-tab
 visibility view (a `not_affected` FS record like `ecdsa` is suppressed there; an
-`affected` `mcp` record still shows — honest, just no longer gate-failing).
+`affected` record still shows — honest, just no longer gate-failing).
 
 **Strictest floor — the FS ratchet is complete (#284).** Per the maintainer
 directive, the FS gate floor was dropped to grype's **lowest** rung: **every**
@@ -211,11 +213,11 @@ record's name+aliases), so a new record covers it automatically. But its
 scanner surfaces inject its suppression, because several surfaces glob a scoped
 subset rather than all of `.vex/`:
 
-| prefix             | surface(s) that inject its SARIF suppression | example                     |
-| ------------------ | -------------------------------------------- | --------------------------- |
-| `CVE-*`            | grype **image** gate + suppression injector  | base-image emulator CVEs    |
-| `npm-*`            | **npm-audit** SARIF suppression (#295)       | _(none active — see below)_ |
-| `mcp-*`, `ecdsa-*` | FS surface (broad `.vex/*` glob)             | pypi-surface records        |
+| prefix          | surface(s) that inject its SARIF suppression | example                     |
+| --------------- | -------------------------------------------- | --------------------------- |
+| `CVE-*`         | grype **image** gate + suppression injector  | base-image emulator CVEs    |
+| `npm-*`         | **npm-audit** SARIF suppression (#295)       | _(none active — see below)_ |
+| everything else | FS surface (broad `.vex/*` glob)             | `ecdsa-*`, `pytest-*`       |
 
 This scoping is why the SAME CVE can have TWO records with DIFFERENT statuses for
 DIFFERENT products without colliding. The worked example was CVE-2026-13149:
@@ -244,8 +246,8 @@ and commit the result. The hard-fail `vex-dialects` CI job runs
 `node .github/scripts/vex-dialects.mjs check` and fails if either committed file
 drifts from the generator output, so a forgotten regenerate can no longer
 silently desync a scanner. Only `not_affected`/`fixed` records are emitted; an
-`affected` record (e.g. mcp) is deliberately omitted from both dialects so it
-stays a visible finding (#188).
+`affected` record is deliberately omitted from both dialects so it stays a
+visible finding (#188).
 
 ## Records
 
@@ -313,53 +315,30 @@ the retired record** — it is `not_affected` for the
 `pkg:deb/debian/node-brace-expansion` emulator-image component, a different
 product on a different surface. See "Record-name prefix = surface scope" above.
 
-### `mcp` (server-transport CVEs — filesystem/lockfile surface, #226)
+### `mcp` — RETIRED (#324): fixed upstream, records DELETED
 
-- **`mcp-CVE-2026-59950.openvex.json`** (GHSA-vj7q-gjh5-988w, WebSocket
-  Host/Origin validation), **`mcp-CVE-2026-52869.openvex.json`**
-  (GHSA-jpw9-pfvf-9f58, streamable-HTTP principal check), and
-  **`mcp-CVE-2026-52870.openvex.json`** (GHSA-hvrp-rf83-w775, task-handler
-  cancellation) — all `status: affected` + `action_statement` for `mcp`
-  (`pkg:pypi/mcp@1.23.3`, a transitive dependency of Semgrep pinned in
-  `.github/scanner-requirements/semgrep.txt`). Semgrep **hard-pins
-  `mcp==1.23.3` unconditionally** in every release through the latest and bundles
-  it to back the `semgrep mcp` server subcommand — it cannot be bumped without
-  breaking `--require-hashes`, so this is a VEX acceptance, not a version bump
-  (upstream [semgrep#11506](https://github.com/semgrep/semgrep/issues/11506)
-  tracks making mcp an optional extra; open, won't-fix-soon).
+The three `mcp` server-transport records (`mcp-CVE-2026-59950` /
+GHSA-vj7q-gjh5-988w, `mcp-CVE-2026-52869` / GHSA-jpw9-pfvf-9f58,
+`mcp-CVE-2026-52870` / GHSA-hvrp-rf83-w775) were `status: affected` acceptances
+for `pkg:pypi/mcp@1.23.3`, a transitive dependency of the pinned Semgrep. **They
+were deleted in #324**: bumping `semgrep` `1.167.0` → `1.174.0` moves the
+hard-pinned `mcp` to `1.29.0`, which is past every fix (1.27.2 / 1.27.2 /
+1.28.1). Verified before deletion that **all three gate scanners agree** the CVEs
+are gone (grype 0.114.0, trivy 0.70.0, osv-scanner 2.4.0 each report zero `mcp`
+findings against the recompiled closure), per the "delete only when ALL scanners
+agree" rule above. The matching `allow-ghsas` entries in the `dependency-review`
+job were pruned in the same change.
 
-  **Why `affected`, not `not_affected` (#188 status-honesty policy).** All three
-  CVEs are in MCP's **server** transport, and that code IS present and loadable
-  (it backs `semgrep mcp`); this repo runs semgrep only as a SAST CLI
-  (`semgrep scan --config=auto`) and never starts the MCP server, so the code is
-  **reachable-but-not-exercised**. Per the policy table above, a
-  reachable-but-tolerated finding is honestly `affected` + `action_statement`,
-  **not** `not_affected` — the guardrail is "never file `not_affected` on a
-  reachable finding just to silence a scanner." Consequently these records
-  deliberately do **not** suppress grype/trivy (that is the intended `affected`
-  behavior); their value is being a durable, machine-readable, reviewable
-  decision. Full accepted-risk rationale lives in `docs/SECURITY-TOOLING.md`;
-  see **#226**.
-
-  Note: like the `ecdsa` record above, these target a filesystem/lockfile
-  surface — OSV.dev carries the advisories against `mcp`, but the grype/trivy
-  DBs did not at time of writing. **Dependabot** is the surface that flags
-  `mcp`, and Dependabot does **not** read VEX — the maintainer rejects a
-  Dependabot dismissal here, so these records ARE the honest acceptance. Wiring
-  the filesystem-surface VEX feed into a consuming scanner is tracked separately
-  under **#226** (PR 2).
-
-  **Update (#284): grype's DB now rates these three high.** When that happened,
-  the deliberately-`affected` records could NOT suppress the finding (grype only
-  suppresses `not_affected`/`fixed`), so the **required** Grype FS gate reddened
-  on `main` and every PR. The fix (see the "As of #284" note near the top of this
-  file) makes the FS gate **JSON-derived and VEX-aware for both statuses**: it no
-  longer reds on any CVE covered by a `.vex/` record (an `affected` acceptance is
-  as explicit and reviewed as a `not_affected` one), while still hard-failing on
-  a genuinely-new uncovered finding. **These three records stay honestly
-  `affected`** — the #188 status-honesty stance is unchanged; only the gate
-  mechanism changed. They still show as (un-suppressed) findings in the
-  Security-tab SARIF, so visibility is preserved.
+**Keep the lesson, not the records.** The original acceptance rested on the claim
+that Semgrep "hard-pins `mcp==1.23.3` **unconditionally** in every release
+through the latest", so a bump was impossible and VEX was the only channel. That
+claim was true when written and **silently expired** when Semgrep shipped a
+release with a newer pin. A "no upstream fix exists" / "the vendor pins it" claim
+is only true on the day it is written — **re-verify it against current upstream
+metadata before renewing any acceptance built on it.** These records also
+motivated the #284 JSON-derived, both-status-VEX-aware FS gate (an `affected`
+record cannot suppress in grype, so the required gate reddened); that mechanism
+stands and applies to any `affected` acceptance.
 
 ### `pytest` (filesystem-surface — surfaced by the strictest floor, #284)
 

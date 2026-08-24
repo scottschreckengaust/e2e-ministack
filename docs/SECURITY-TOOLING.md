@@ -456,11 +456,14 @@ ledger"); the reversal is maintainer-approved and recorded on PR #301.
   name (no version qualifier — matching is name-only per #161): `certifi`
   (MPL-2.0), `orjson` (MPL-2.0 conjunct), `semgrep` (LGPL-2.1-or-later, the
   scanner itself), `tqdm` (MPL-2.0 conjunct).
-- **`allow-ghsas`** — the four HIGH advisories in the closure (dependency-review
-  is `fail-on-severity: high`; these are the only high ones in GitHub's advisory
-  DB for the closure — `click`'s isn't in GitHub's DB, `idna`'s is moderate/below
-  floor): `GHSA-wj6h-64fc-37mp` (ecdsa), `GHSA-hvrp-rf83-w775` /
-  `GHSA-jpw9-pfvf-9f58` / `GHSA-vj7q-gjh5-988w` (mcp → semgrep).
+- **`allow-ghsas`** — the HIGH advisories in the closure (dependency-review is
+  `fail-on-severity: high`), now a single entry: `GHSA-wj6h-64fc-37mp` (ecdsa,
+  no upstream fix). It was one of four — the other three
+  (`GHSA-hvrp-rf83-w775` / `GHSA-jpw9-pfvf-9f58` / `GHSA-vj7q-gjh5-988w`,
+  `mcp` → semgrep) were **pruned in #324** once semgrep `1.174.0` pinned a
+  patched `mcp`, which is exactly the maintenance rule stated below.
+  (`click`'s advisory isn't in GitHub's DB and `idna`'s is moderate/below the
+  floor, so neither needs an entry.)
 
 **Maintenance model (asymmetric).** The **license** side is name-only: a version
 bump needs **no edit**; only a NEW package _name_ entering a closure with a
@@ -478,9 +481,9 @@ ClearlyDefined), not this standing ledger. **Tradeoff:** until re-harvest, a PR
 diffing one of the 3 could red dep-review — accepted by the maintainer; #127 owns
 resolution.
 
-**Second projection of the same accepted set.** The four `allow-ghsas` are the
-SAME advisories already accepted as `.vex/` records feeding the grype/trivy
-channel (`ecdsa-CVE-2024-23342`, `mcp-CVE-2026-52869/52870/59950`).
+**Second projection of the same accepted set.** Every `allow-ghsas` entry is an
+advisory already accepted as a `.vex/` record feeding the grype/trivy channel
+(after #324, that is just `ecdsa-CVE-2024-23342`).
 dependency-review has **no `.vex/` channel** and reads only `allow-ghsas`, so the
 set is projected twice. Unifying the two projections (one ledger → many scanner
 dialects) is **#251**, tracked as future work — not built here.
@@ -745,50 +748,28 @@ with a matching rationale, and re-opens the moment an upstream fix ships.
   to `requirements.txt` so those SCA scanners catalog them by filename, and wired
   the `.vex/` feed into the FS jobs — the record was formerly inert because no
   VEX-consuming FS scan cataloged ecdsa). **If a fix ever ships**, it flows
-  through the same coupled-closure mechanism as the `aiohttp==3.14.1` override (§
+  through the same coupled-closure mechanism as the `asteval==1.0.9` override (§
   Dependency notes / `overrides/requirements.txt`, AGENTS.md): add the floor to
   `.github/scanner-requirements/overrides/requirements.txt`, recompile
   `iac/requirements.txt` with `--require-hashes`, and install `--no-deps`.
 
 - **`mcp` (pip) — CVE-2026-59950 (GHSA-vj7q-gjh5-988w), CVE-2026-52869
-  (GHSA-jpw9-pfvf-9f58), CVE-2026-52870 (GHSA-hvrp-rf83-w775).** Three MCP
-  **server-transport** flaws (WebSocket Host/Origin validation; streamable-HTTP
-  principal check; task-handler cancellation) in `mcp==1.23.3`, a transitive
-  dependency of Semgrep pinned in `.github/scanner-requirements/semgrep.txt`.
-  **No fix to bump to:** semgrep **hard-pins `mcp==1.23.3` unconditionally** in
-  every release through the latest and bundles it to back the
-  `semgrep mcp` server subcommand, so it cannot be raised without breaking
-  semgrep's `--require-hashes` resolution — this is why it is a VEX acceptance,
-  not a version bump. Upstream tracks making mcp an optional extra in
-  [semgrep#11506](https://github.com/semgrep/semgrep/issues/11506) (open,
-  won't-fix-soon). **Reachable-but-not-exercised, so honestly `status: affected`
-  (not `not_affected`):** the vulnerable code is in MCP's **server** transport
-  and IS present and loadable (it backs `semgrep mcp`), but CI invokes semgrep
-  only as a SAST CLI (`semgrep scan --config=auto`) and never starts the MCP
-  server, so the server-transport code is not exercised. Per the #188
-  status-honesty policy (`.vex/README.md` § "Status-honesty policy"), a
-  reachable-but-tolerated finding is `affected` + `action_statement`, **not**
-  `not_affected` — and `affected` deliberately does **not** suppress grype/trivy
-  (by design); the record's value is being a durable, machine-readable,
-  reviewable decision. Accepted per-CVE via `.vex/mcp-CVE-*.openvex.json`
-  (`status: affected`). OSV.dev carries these advisories against `mcp`, but the
-  grype/trivy vulnerability DBs did not at time of writing. Wiring the
-  filesystem-surface VEX feed into the scanners is tracked separately (#226);
-  revisit when semgrep makes mcp an extra or advances the pin (semgrep#11506).
-  See `.vex/README.md` and **#226**.
-
-  **Update (#284) — grype's DB now rates these three high, and the Grype FS gate
-  is now JSON-derived.** Grype only suppresses `not_affected`/`fixed`, so once
-  its floating DB began rating the 3 `mcp` GHSAs high, the deliberately-`affected`
-  records could not suppress the finding and the **required** `grype` FS gate
-  reddened repo-wide. The fix (§ "Grype FS gate — JSON-derived, VEX-aware for both
-  statuses" below) derives the FS gate from grype's JSON — failing only on a high+
-  finding not covered by ANY `.vex/` record — mirroring how the `ministack-image`
-  Grype job already gates. **These records stay honestly `affected`** (the #188
-  stance is unchanged; only the gate MECHANISM changed): the FS scan no longer
-  reds on a VEX-accepted CVE regardless of its status, but still hard-fails on a
-  genuinely-new uncovered high+, and the SARIF still uploads so the `mcp` findings
-  stay visible on the Security tab.
+  (GHSA-jpw9-pfvf-9f58), CVE-2026-52870 (GHSA-hvrp-rf83-w775) — RESOLVED (#324),
+  no longer an accepted risk.** These three MCP **server-transport** flaws
+  (WebSocket Host/Origin validation; streamable-HTTP principal check;
+  task-handler cancellation) were carried from 2026-07 as honest `affected`
+  records (`.vex/mcp-CVE-*.openvex.json`, #188/#226/#284) because semgrep
+  hard-pins `mcp` **exactly**, so `mcp` could not be bumped on its own.
+  **The acceptance was retired by bumping the pin that carried it:** semgrep
+  `1.167.0` (→ `mcp==1.23.3`) → **`1.174.0`** (→ `mcp==1.29.0`) clears all three
+  (fixed in 1.27.2 / 1.27.2 / 1.28.1). The three `.vex/mcp-*` records were
+  **deleted** after grype 0.114.0, trivy 0.70.0 **and** OSV-Scanner 2.4.0 all
+  independently reported zero `mcp` findings against the recompiled closure — the
+  `.vex/README.md` "remove only when ALL gate scanners agree" rule.
+  **Lesson worth keeping:** the retired entry asserted semgrep pinned
+  `mcp==1.23.3` "unconditionally in every release through the latest". A
+  "no upstream fix exists" claim is true only on the day it is written — re-verify
+  it against current upstream metadata before renewing any acceptance built on it.
 
 ## Grype FS gate — JSON-derived, VEX-aware for both statuses (#284)
 
@@ -844,9 +825,11 @@ as the union of every record's name + aliases and tests each match against the
 union of its primary + related ids, so either direction maps onto the accepted
 set. The logic module is 100%-covered, Stryker-mutation-tested (0 survivors), and
 replayed in the fuzz-regression tier (`grype-fs-gate.regression.test.ts`); the
-`.mjs` is a thin Node-built-in CLI shim. The `mcp` records are **unchanged**
-(`status: affected`) — only the gate mechanism moved from `fail-build` to
-JSON-derived.
+`.mjs` is a thin Node-built-in CLI shim. #284 left the `mcp` records themselves
+**unchanged** (`status: affected`) — only the gate mechanism moved from
+`fail-build` to JSON-derived. Those records are now **gone** (#324 bumped semgrep
+so the CVEs are fixed, not accepted), but the mechanism they motivated stands for
+any future `affected` acceptance.
 
 ## Pinning
 

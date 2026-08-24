@@ -223,13 +223,15 @@ jobs:
       # relocated to `.github/scanner-requirements/<tool>/requirements.txt` so SCA
       # scanners recognize them by filename; point OSV at them so their findings
       # post to Code Scanning. REPORT-ONLY (its exit code is NOT enforced), mirroring
-      # trivy-fs: OSV v2.4.0 has no OpenVEX channel (only osv-scanner.toml
-      # `[[IgnoredVulns]]`, which we do NOT use — a per-ID ignore is the forbidden
-      # blanket-suppress, not honest VEX), and the sanctioned VEX status for the
-      # `mcp` CVEs is `affected` (#188), which by design suppresses in NO scanner.
-      # Report-only keeps those findings VISIBLE (open Code-Scanning alerts) without
-      # a false hard-fail. A single .vex/ ledger → per-scanner dialect (incl. an OSV
-      # generator) is the durable fix tracked in #251.
+      # trivy-fs: OSV has no native OpenVEX channel, so its only suppression dialect
+      # is osv-scanner.toml `[[IgnoredVulns]]` — GENERATED from the canonical `.vex/`
+      # ledger by vex-dialects.ts (#251) and, by design, carrying ONLY
+      # not_affected/fixed records. An honestly-`affected` acceptance therefore
+      # suppresses in NO scanner (#188) and would hard-fail here; report-only keeps
+      # such findings VISIBLE (open Code-Scanning alerts) without a false red.
+      # Ratcheting this to hard-fail is now a candidate — #324 cleared the `mcp`
+      # records, leaving no `affected` record on the pip surface — but that is a
+      # gate ratchet and belongs in its own reviewable change, not here.
       - name: Scan pip requirements (SARIF; report-only — never fails)
         if: always()
         run: |
@@ -391,20 +393,23 @@ jobs:
           # job (temporary; see #163) so no inline suppression is needed.
           allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b, pkg:pypi/certifi, pkg:pypi/orjson, pkg:pypi/semgrep, pkg:pypi/tqdm'
           # allow-ghsas: the high-severity advisories in the SAME scanner-tooling
-          # pip closures (#262). dependency-review is fail-on-severity:high, so
-          # these four HIGH GHSAs (the only high ones GitHub's advisory DB reports
-          # for the closure — click's isn't in GitHub's DB; idna's is moderate,
-          # below the floor) would red a closure-diffing PR (#78 bump path) even
-          # though they are tooling-only, not product deps. They are the SAME
+          # pip closures (#262). dependency-review is fail-on-severity:high, so a
+          # HIGH GHSA in the closure would red a closure-diffing PR (#78 bump path)
+          # even though it is tooling-only, not a product dep. It is the SAME
           # accepted set that already lives as `.vex/` records feeding the grype/
-          # trivy channel (ecdsa-CVE-2024-23342, mcp-CVE-2026-52869/52870/59950) —
-          # but dependency-review has NO .vex/ channel and reads only allow-ghsas,
-          # so this is a SECOND projection of the same accepted set. #251 (one
-          # ledger → many scanner dialects) is the unification opportunity; do NOT
-          # build it here. UNLIKE the name-only license side above, allow-ghsas is
-          # version-bound to the vulnerable range in spirit: PRUNE an entry once its
-          # dep is bumped past the fix (osv/grype/trivy stop reporting it).
-          allow-ghsas: 'GHSA-wj6h-64fc-37mp, GHSA-hvrp-rf83-w775, GHSA-jpw9-pfvf-9f58, GHSA-vj7q-gjh5-988w'
+          # trivy channel (ecdsa-CVE-2024-23342) — but dependency-review has NO
+          # .vex/ channel and reads only allow-ghsas, so this is a SECOND
+          # projection of the same accepted set. #251 (one ledger → many scanner
+          # dialects) is the unification opportunity; do NOT build it here.
+          # UNLIKE the name-only license side above, allow-ghsas is version-bound
+          # to the vulnerable range in spirit: PRUNE an entry once its dep is
+          # bumped past the fix (osv/grype/trivy stop reporting it).
+          # PRUNED in #324, per exactly that rule: the 3 mcp GHSAs
+          # (GHSA-hvrp-rf83-w775 / -jpw9-pfvf-9f58 / -vj7q-gjh5-988w) are gone now
+          # that semgrep 1.174.0 pins mcp==1.29.0 — grype/trivy/OSV all report zero
+          # mcp findings, so an unpruned entry would silently exempt a
+          # re-introduced vuln. Only the ecdsa advisory (no upstream fix) remains.
+          allow-ghsas: 'GHSA-wj6h-64fc-37mp'
           # Aside from the entries above, allow-dependencies-licenses stays empty for
           # the license-UNKNOWN path: "Could not detect a license" on a brand-new
           # release is upstream harvest lag (GitHub sources PyPI license data from
@@ -533,8 +538,10 @@ jobs:
       # NOT covered by ANY `.vex/` record — an `affected` record is an explicit,
       # reviewed acceptance exactly as a `not_affected` one is — so it still
       # hard-fails on a genuinely-new uncovered finding (the actionable signal)
-      # but no longer reds on VEX-accepted CVEs. The mcp records stay honestly
-      # `affected`; the SARIF still uploads so findings stay VISIBLE.
+      # but no longer reds on VEX-accepted CVEs. (Those mcp records are GONE as of
+      # #324 — semgrep 1.174.0 pins a patched `mcp`, so the CVEs were fixed rather
+      # than accepted; the gate design they motivated still stands for any future
+      # `affected` acceptance.) The SARIF still uploads so findings stay VISIBLE.
       #
       # STRICTEST FLOOR (#284 maintainer directive "drop it the most strict"):
       # the gate floor is grype's LOWEST rung — EVERY severity counts
@@ -593,7 +600,7 @@ jobs:
       # The Security-tab visibility view: a VEX-fed SARIF (fail-build:false so it
       # never fails the step). VEX-fed keeps parity with the pre-#284 Security-tab
       # behavior (a `not_affected` FS record like ecdsa is suppressed here; an
-      # `affected` mcp record still SHOWS — honest visibility, just no longer
+      # `affected` record still SHOWS — honest visibility, just no longer
       # gate-failing).
       - id: grype
         name: Grype SARIF scan (Security-tab view, VEX-fed)
@@ -1622,8 +1629,10 @@ jobs:
         # committed lockfile (--require-hashes), so a re-published PyPI artifact
         # is rejected. Pins live in scanner-requirements/iac/requirements.txt.
         # --no-deps: the lockfile is a complete closure, and overrides/requirements.txt
-        # forces aiohttp past checkov's declared <3.14.0 cap (security fix), which pip's
-        # resolver would otherwise reject as a conflict.
+        # forces asteval past checkov's exact `asteval==1.0.6` pin (security fix), which
+        # pip's resolver would otherwise reject as a conflict. (The aiohttp override this
+        # comment used to cite is GONE — checkov 3.3.13 declares aiohttp<3.15.0, so the
+        # patched 3.14.3 resolves naturally; #324.)
         run: pip install --require-hashes --no-deps -r .github/scanner-requirements/iac/requirements.txt
       - name: cfn-lint (text report; errors-only enforce after upload)
         # cfn-lint is a linter (not a vuln scanner) and its SARIF formatter
@@ -1730,8 +1739,8 @@ jobs:
   # a hand-edit or a forgotten `vex-dialects.mjs write` can never silently desync
   # a scanner's suppression set from the ledger (the "two-feed gotcha" #84/#226
   # documented — now a gate, not a convention). Only not_affected/fixed records
-  # suppress; the `affected` mcp records (#226/#227) are omitted so they stay
-  # visible in every scanner (#188), enforced by the shared SUPPRESSING_STATUSES.
+  # suppress; an `affected` record is omitted so it stays visible in every
+  # scanner (#188), enforced by the shared SUPPRESSING_STATUSES.
   vex-dialects:
     name: VEX dialect drift-check
     runs-on: ubuntu-latest
