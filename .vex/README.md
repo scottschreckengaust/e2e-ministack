@@ -6,90 +6,91 @@ actually **affected** by a CVE its scanners flag. A scanner that consumes VEX
 can then suppress a finding we have honestly assessed as not reachable, instead
 of leaving it as permanent red noise.
 
+**This file is instructions, not an inventory.** It states how to author, scope,
+and retire a record, and why each rule exists. It deliberately does **not**
+transcribe the current record set, counts, or per-record notes — that data lives
+in the records themselves, where it cannot drift out of sync with them. To see
+what is accepted right now, read the ledger:
+
+```bash
+ls .vex/*.openvex.json                     # the whole ledger IS the inventory
+node .github/scripts/vex-report.mjs        # rendered view (status, justification, revisit_by)
+```
+
+## The authoring contract
+
 **`.vex/` is the single authoring surface (#251).** You edit only the
 `.vex/*.openvex.json` records; every scanner's suppression dialect is a
 **generated artifact**. `.github/scripts/vex-dialects.ts` (jest-gated at 100%
 coverage + Stryker + fuzz) reads the ledger and emits both `trivy.yaml`'s
 `vulnerability.vex` list and `osv-scanner.toml`'s `[[IgnoredVulns]]`; a hard-fail
 CI job (`vex-dialects` in `security.yml`) regenerates them and fails if the
-committed files drift. Regenerate after any record change with
-`node .github/scripts/vex-dialects.mjs write` (do **not** hand-edit trivy.yaml /
-osv-scanner.toml — they carry a GENERATED-FILE banner). The generator honors the
-SAME `SUPPRESSING_STATUSES` set (`not_affected`/`fixed`) as the SARIF injector
-(imported from `vex-to-sarif-suppressions.ts`, not re-derived), so an `affected`
-record never appears in any dialect. Grype needs no generated file —
-it reads `.vex/` natively (see below).
+committed files drift. Regenerate after any record change with:
 
-As of **#84** these records are **live**: the `security.yml` `ministack-image`
-(Grype) and `trivy-image` (Trivy) jobs are **hard-fail, VEX-gated** and consume
-the `.vex/CVE-*.openvex.json` set. The feed channel differs per scanner (neither
-`--vex` accepts a bare directory): **Grype** reads them via the
-`GRYPE_VEX_DOCUMENTS` env (a comma-separated file list the `anchore/scan-action`
-forwards natively); **Trivy** reads them from the **generated** `trivy.yaml`
-`vulnerability.vex` list, which trivy auto-discovers from the CWD — the pinned
-`aquasecurity/trivy-action` has no `vex` input and does not forward a
-`TRIVY_VEX` env, so the config file is the channel that actually loads them (see
-`docs/SECURITY-TOOLING.md` § MiniStack image scan). **OSV-Scanner** (#251) has no
-OpenVEX channel — it reads the **generated** `osv-scanner.toml` `[[IgnoredVulns]]`
-(id + reason + `ignoreUntil` derived from a dated `revisit_by`). The image gate
-fails on any **new** high+ CVE not covered by a record here, and passes on the
-accepted set.
+```bash
+node .github/scripts/vex-dialects.mjs write   # regenerate trivy.yaml + osv-scanner.toml
+```
 
-As of **#226** the **filesystem** SCA scans are also VEX-aware: the `grype` FS job
-(hard-fail @ high) reads the whole `.vex/*.openvex.json` set via
-`GRYPE_VEX_DOCUMENTS`, and `trivy-fs` (report-only) reads the same set from
-`trivy.yaml`. go-vex only suppresses when a record's product purl matches the
-scanned component, so each record is inert off its own surface: the image
-`CVE-*` records (deb/generic purls) don't touch the FS scan, and the `ecdsa`
-record (a pypi purl) suppresses only the FS finding and is excluded from the
-image-gate `CVE-*` glob. This is what lit up the previously-staged `ecdsa`
-record (see its note below) — it fires now because the pinned pip files were
-relocated to `requirements.txt` (so grype/trivy catalog them by filename) and
-the FS jobs were wired to the `.vex/` feed.
+Do **not** hand-edit `trivy.yaml` / `osv-scanner.toml` — they carry a
+GENERATED-FILE banner. The generator honors the SAME `SUPPRESSING_STATUSES` set
+(`not_affected`/`fixed`) as the SARIF injector (imported from
+`vex-to-sarif-suppressions.ts`, not re-derived), so an `affected` record never
+appears in any dialect.
 
-As of **#284** the `grype` FS gate is **JSON-derived and VEX-aware for BOTH
-statuses**, mirroring the `ministack-image` job: the scan action runs
-`fail-build: false` (SARIF still uploads to the Security tab, so findings stay
-visible) and the gate is computed from grype's JSON by
-`.github/scripts/grype-fs-gate.ts` — it FAILS only on a finding **not covered by
-any `.vex/` record** (an `affected` record is an explicit, reviewed acceptance
-exactly as a `not_affected` one is). Why the change: grype's go-vex only moves
-`not_affected`/`fixed` to `ignoredMatches[]`; an `affected` record STAYS in
-`matches[]` (its `AugmentMatches` re-surfaces it — see below), so once the
-floating DB began rating the 3 `mcp` GHSAs high, the deliberately-`affected`
-`mcp` records could not suppress the finding and the **required** FS gate went
-red repo-wide. (Those `mcp` records are gone as of **#324** — fixed upstream
-rather than accepted — but the mechanism they forced remains, and applies to any
-future `affected` acceptance.) The JSON gate lets a record stay honestly
-`affected` (#188), still hard-fails on a genuinely-new uncovered finding, and handles
-GHSA↔CVE aliasing (grype may report the GHSA with the CVE in
-`relatedVulnerabilities`, or vice versa; each record names the CVE + aliases the
-GHSA). The `GRYPE_VEX_DOCUMENTS`-fed SARIF is retained as the Security-tab
-visibility view (a `not_affected` FS record like `ecdsa` is suppressed there; an
-`affected` record still shows — honest, just no longer gate-failing).
+## What reads these records
 
-**Strictest floor — the FS ratchet is complete (#284).** Per the maintainer
-directive, the FS gate floor was dropped to grype's **lowest** rung: **every**
-severity now counts (negligible → critical), not just high+. This is safe
-_because_ the gate is VEX-aware — anything with a `.vex/` record stays accepted
-at any severity, so lowering the floor only adds genuinely-uncovered findings.
-The floor lives in the TS gate, not grype's `severity-cutoff`: that flag only
-sets grype's exit code and does NOT filter the JSON `matches[]`/SARIF (proven
-empirically), and the gate reads the JSON with `fail-build: false`, so
-`grype-fs-gate.ts` (which counts every match with a severity) is authoritative;
-`severity-cutoff: negligible` is set on the steps for explicit intent. The one
-finding this surfaced beyond the accepted `mcp`/`ecdsa` set —
-**CVE-2025-71176 / GHSA-6w46-j5rx-g56g (Medium) on `pytest@8.4.2`**, cataloged
-only from `aws-cdk`'s bundled `cdk init` Python scaffolding templates (pytest is
-never installed/run here) — is recorded as an honest `not_affected` (see the
-`pytest` note below). This completes the high → medium → low ratchet documented
-in AGENTS.md for the **filesystem** surface.
+Each surface has its own feed channel, and **no two are the same** — this is the
+most common authoring mistake, because a record can be perfectly valid and still
+be inert on the surface you meant it for.
 
-Beyond the CI gate, these records also drive the **GitHub Security-tab** state:
-a covered CVE is surfaced as a _dismissed_ alert whose suppression is derived
-from its record here, and it auto-re-opens if the record is dropped (issue #181;
-`vex-to-sarif-suppressions` + `advanced-security/dismiss-alerts`, on the default
-branch). See `docs/SECURITY-TOOLING.md` § "VEX → Code Scanning".
+| surface                     | how it receives the ledger                                                        | gate                                                      |
+| --------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| grype **image** (#84)       | `GRYPE_VEX_DOCUMENTS` env, glob `.vex/CVE-*`                                      | hard-fail @ high+, VEX-gated                              |
+| grype **filesystem** (#226) | `GRYPE_VEX_DOCUMENTS` env, broad glob `.vex/*`                                    | hard-fail @ **all** severities, JSON-derived (#284)       |
+| trivy **image** (#84)       | **generated** `trivy.yaml` `vulnerability.vex`                                    | hard-fail @ high+, VEX-gated                              |
+| trivy **filesystem**        | **generated** `trivy.yaml` `vulnerability.vex`                                    | report-only                                               |
+| OSV-Scanner (#251)          | **generated** `osv-scanner.toml` `[[IgnoredVulns]]`                               | hard-fail                                                 |
+| `npm audit` (#295)          | broad glob `.vex/*` for the verdict; **scoped** `.vex/npm-*` for SARIF visibility | hard-fail, JSON-derived                                   |
+| GitHub Security tab (#181)  | `vex-to-sarif-suppressions` + `advanced-security/dismiss-alerts`                  | dismisses covered alerts; re-opens if a record is dropped |
+
+Two consequences worth internalizing:
+
+- **Neither `--vex` flag accepts a bare directory.** Grype reads `.vex/`
+  natively via the env var; trivy and OSV-Scanner can only be fed through their
+  generated config files. That asymmetry is why the dialect generator exists —
+  it used to be hand-maintained parity, the historical "two-feed gotcha".
+- **The pinned `aquasecurity/trivy-action` forwards no `vex` input and no
+  `TRIVY_VEX` env**, so `trivy.yaml` (auto-discovered from the CWD) is the only
+  channel that actually loads records into trivy. See
+  `docs/SECURITY-TOOLING.md` § MiniStack image scan.
+
+### Why the FS gate is JSON-derived for BOTH statuses (#284)
+
+The grype FS scan runs `fail-build: false` (SARIF still uploads, so findings stay
+visible) and the verdict is computed from grype's JSON by
+`.github/scripts/grype-fs-gate.ts`, which fails only on a finding **not covered
+by any `.vex/` record** — an `affected` record is an explicit, reviewed
+acceptance exactly as a `not_affected` one is.
+
+This is not a preference; it is forced. Grype's go-vex moves only
+`not_affected`/`fixed` into `ignoredMatches[]`; an `affected` record STAYS in
+`matches[]` (its `AugmentMatches` re-surfaces it). So the first time a floating
+vuln DB rated a deliberately-`affected` acceptance as high, the **required** FS
+gate went red repo-wide with no authoring error at all. The JSON gate lets a
+record stay honestly `affected` (#188), still hard-fails on a genuinely-new
+uncovered finding, and handles GHSA↔CVE aliasing (grype may report the GHSA with
+the CVE in `relatedVulnerabilities`, or vice versa; each record names the CVE and
+aliases the GHSA).
+
+**Strictest floor — the FS ratchet is complete (#284).** Per maintainer
+directive, the FS gate floor is grype's **lowest** rung: **every** severity
+counts (negligible → critical). This is safe _because_ the gate is VEX-aware —
+anything with a record stays accepted at any severity, so lowering the floor only
+adds genuinely-uncovered findings. The floor lives in the TS gate, not grype's
+`severity-cutoff`: that flag only sets grype's exit code and does **not** filter
+the JSON `matches[]`/SARIF (proven empirically), so `grype-fs-gate.ts` is
+authoritative; `severity-cutoff: negligible` is set on the steps for explicit
+intent.
 
 ## Why `not_affected` (not `affected`)
 
@@ -97,12 +98,12 @@ The maintainer's first instinct was `status: affected` + `action_statement`
 (an honest "we accept this risk" record). **That does not suppress in either
 scanner** — proven empirically against the pinned Grype (`anchore/scan-action`)
 and Trivy (`aquasecurity/trivy-action`) at the SHAs in `security.yml`: Grype's
-OpenVEX `FilterMatches` only moves
-`not_affected`/`fixed` to the ignored set, and its `AugmentMatches` re-SURFACES
-`affected` matches; Trivy's `pkg/vex/openvex.go` `Filter` likewise suppresses
-only `not_affected`/`fixed`. So the honest, working path is **`status:
-not_affected`** with a truthful justification enum, and the accepted-risk prose
-in `impact_statement`. See `docs/SECURITY-TOOLING.md` § "MiniStack image scan".
+OpenVEX `FilterMatches` only moves `not_affected`/`fixed` to the ignored set, and
+its `AugmentMatches` re-SURFACES `affected` matches; Trivy's
+`pkg/vex/openvex.go` `Filter` likewise suppresses only `not_affected`/`fixed`.
+So the honest, working path is **`status: not_affected`** with a truthful
+justification enum, and the accepted-risk prose in `impact_statement`. See
+`docs/SECURITY-TOOLING.md` § "MiniStack image scan".
 
 ## Status-honesty policy — which status, when (#188)
 
@@ -111,19 +112,19 @@ more base-image CVEs cross the gate and need a decision. The rule for choosing a
 `status` is dictated by the OpenVEX/CISA spec — it is **not** a preference, and
 it is the guardrail against blanket-suppression:
 
-| The finding is…                                               | Honest `status`                         | Suppresses in grype/trivy? | Use it for                                                                       |
-| ------------------------------------------------------------- | --------------------------------------- | -------------------------- | -------------------------------------------------------------------------------- |
-| present but **adversary-unreachable** in this deployment      | `not_affected` + a `justification` enum | **yes**                    | the MiniStack image CVEs today (loopback-only, ephemeral, never network-exposed) |
-| present, **reachable**, upstream **won't-fix**, risk accepted | `affected` + `action_statement`         | **no** (by design)         | a genuinely-reachable below-floor CVE we tolerate                                |
-| not yet assessed                                              | `under_investigation`                   | no                         | a triage placeholder; convert once assessed                                      |
-| fixed upstream / by a digest bump                             | `fixed` (or delete the record)          | yes                        | pruned by the #76 drift audit                                                    |
+| The finding is…                                               | Honest `status`                         | Suppresses in grype/trivy? | Use it for                                                                 |
+| ------------------------------------------------------------- | --------------------------------------- | -------------------------- | -------------------------------------------------------------------------- |
+| present but **adversary-unreachable** in this deployment      | `not_affected` + a `justification` enum | **yes**                    | the MiniStack image CVEs (loopback-only, ephemeral, never network-exposed) |
+| present, **reachable**, upstream **won't-fix**, risk accepted | `affected` + `action_statement`         | **no** (by design)         | a genuinely-reachable below-floor CVE we tolerate                          |
+| not yet assessed                                              | `under_investigation`                   | no                         | a triage placeholder; convert once assessed                                |
+| fixed upstream / by a digest bump                             | `fixed` (or delete the record)          | yes                        | pruned by the #76 drift audit                                              |
 
 The five `not_affected` justification enums (only these are valid, per CISA
 "Status Justifications"): `component_not_present`, `vulnerable_code_not_present`,
 `vulnerable_code_not_in_execute_path`,
-`vulnerable_code_cannot_be_controlled_by_adversary` (ours — CISA notes it is
-"difficult to prove conclusively", so the `impact_statement` must carry the
-reachability argument), `inline_mitigations_already_exist`.
+`vulnerable_code_cannot_be_controlled_by_adversary` (CISA notes it is "difficult
+to prove conclusively", so the `impact_statement` must carry the reachability
+argument), `inline_mitigations_already_exist`.
 
 **The guardrail:** never file `not_affected` on a **reachable** finding just to
 silence a scanner — that misrepresents the record. `not_affected` means "no
@@ -146,37 +147,49 @@ finding to accept; a speculative acceptance is the blanket-VEX anti-pattern):
   "products": [{ "@id": "pkg:deb/debian/<name>@<version>" }],
   "status": "affected",
   "action_statement": "No upstream fix (vendor won't-fix). Reachable but accepted: <why tolerated>. Revisit on upstream release.",
-  "action_statement_timestamp": "2026-07-14T00:00:00Z",
+  "action_statement_timestamp": "YYYY-MM-DDT00:00:00Z",
 }
 ```
 
-## Revisit cadence — `revisit_by` (#188)
+## Every record MUST carry a reason and a timeline — `revisit_by` (#188)
 
 OpenVEX has **no expiry field** — only `timestamp` (required), `last_updated`,
 and a monotonic `version`, so a record can rot silently. To keep acceptances
 **durable, not forgotten**, each record MUST carry a custom **`revisit_by`**
-date + reason. `MUST`, not `MAY`: the whole point is that an acceptance is never
-open-ended — an optional field would rot exactly like the bare timestamp it
-replaces. This is safe to add: go-vex parses records with the Go stdlib
-`json.Unmarshal` (no `DisallowUnknownFields`), so an unknown top-level key is
-ignored by both scanners while remaining readable by humans and the #76 drift
-audit. The `affected` path also has the spec-native
-`action_statement_timestamp` for the same purpose.
+naming a trigger and a reason. `MUST`, not `MAY`: the whole point is that an
+acceptance is never open-ended — an optional field would rot exactly like the
+bare timestamp it replaces.
 
-Every record needs an authorable revisit trigger, so `MUST` is a real bar, not
-an aspiration: the `not_affected` **image** CVEs revisit **on the next digest
-bump** (`revisit_by: "wait-for-image-rebuild"`) — when the image changes, the
-reachability claim is re-verified; a genuinely-open `affected` item revisits on
-the upstream fix or a dated review. The **#76** drift audit **enforces presence**
-(a record lacking `revisit_by` is flagged) and keys off `last_updated` /
-`revisit_by` to force periodic re-review and prune resolved records.
+This is safe to add: go-vex parses records with the Go stdlib `json.Unmarshal`
+(no `DisallowUnknownFields`), so an unknown top-level key is ignored by both
+scanners while remaining readable by humans and by the drift audit. The
+`affected` path also has the spec-native `action_statement_timestamp` for the
+same purpose.
 
-Suggested `revisit_by` reason vocabulary (free text, but standardize):
-`wait-for-image-rebuild` · `waiting-on-upstream-issue <url>` ·
-`waiting-for-fix <advisory>` · `revisit <ISO-date>`. (Trivy also honors a
-per-CVE `expired_at` + `statement` in `.trivyignore.yaml`, the only scanner with
-first-class expiry — an option if a tool-enforced expiry is later wanted; grype
-ignore-rules have neither.)
+**Vocabulary — pick the form that matches how the acceptance actually ends:**
+
+| form                              | ends when                 | use for                                             |
+| --------------------------------- | ------------------------- | --------------------------------------------------- |
+| `revisit <ISO-date>`              | **the date passes**       | override/bundled-dep "waiting for the vendor"       |
+| `wait-for-image-rebuild`          | the pinned digest bumps   | base-image CVEs, re-verified by the reconcile below |
+| `waiting-on-upstream-issue <url>` | that issue resolves       | a tracked upstream defect                           |
+| `waiting-for-fix <advisory>`      | that advisory ships a fix | a known-fix-pending dependency                      |
+
+**Only the dated form self-expires.** `vex-ledger.ts` drops a record from the
+active set once its embedded ISO date is on/before today, so the finding re-reds
+automatically instead of rotting (`revisitDate` / `activeRecordIds`; the same
+date feeds `osv-scanner.toml`'s `ignoreUntil` via `vex-dialects.ts`). The
+event-token forms never expire **by design** — they wait on an event, not a
+clock, and their expiry mechanism is the reconcile procedure, not the calendar.
+So: if an acceptance is genuinely time-boxed, use the **dated** form, because it
+is the only one a machine can nag you about.
+
+> **Known gap — presence is NOT yet enforced.** Nothing in CI fails a record that
+> omits `revisit_by`: every consumer treats it as optional (`revisit_by?:
+string`, and `revisitDate`/`ignoreUntilFrom` return `undefined` for a missing
+> value), so the `MUST` above is currently a convention a reviewer has to catch.
+> Most existing records predate the rule and lack the field. Closing this is a
+> **gate**, not more prose — see #76.
 
 ## Vendor-vs-tool severity honesty (#188)
 
@@ -195,223 +208,157 @@ severity as `badge / gate X` whenever the scanner's distro/gate rating diverges
 from GitHub's NVD-derived badge (#208, sourced from the scanners' structured
 JSON via `gate-findings.*` — never SARIF-scraped).
 
-## Adding a record — now generated, no more two-feed gotcha (#251)
+## Prefer a fix over an acceptance
 
-A new `.vex/CVE-*.openvex.json` reaches the **grype image gate** automatically
-(its feed is a glob over `.vex/CVE-*.openvex.json`), the **grype FS gate** (which
-globs the broader `.vex/*.openvex.json`, so it also picks up pypi-surface records
-like `ecdsa`), and the **suppression injector** the same way — all read `.vex/`
-directly.
+**A record is the last resort, not the first tool.** Before writing one, exhaust
+the remediation paths — a version bump leaves nothing to accept, needs no
+reachability argument, and cannot rot. For npm specifically see AGENTS.md
+§ Dependency notes on `npm update` vs `overrides` vs an `aws-cdk-lib` rebundle;
+for the pinned pip scanner closures, an entry in
+`.github/scanner-requirements/overrides/` that _fixes_ the version is
+categorically stronger than a record that _accepts_ the finding.
 
-The **npm-audit gate** (#295) reads the broad `.vex/*.openvex.json` glob for its
-pass/fail decision (id-only match: an advisory's GHSA vs the union of every
-record's name+aliases), so a new record covers it automatically. But its
-**SARIF suppression** (which controls Security-tab VISIBILITY) is fed the
-**scoped** `.vex/npm-*.openvex.json` glob ONLY — see the naming convention below.
+The goal state for any surface is **zero acceptances**, and the surfaces that
+have reached it should stay there. Keep the gate machinery documented even when a
+surface has no active record — it is still wired, and it will be needed for the
+next genuinely upstream-blocked advisory.
 
-**Record-name prefix = surface scope.** A record's FILENAME prefix selects which
-scanner surfaces inject its suppression, because several surfaces glob a scoped
-subset rather than all of `.vex/`:
+## Adding a record
 
-| prefix          | surface(s) that inject its SARIF suppression | example                     |
-| --------------- | -------------------------------------------- | --------------------------- |
-| `CVE-*`         | grype **image** gate + suppression injector  | base-image emulator CVEs    |
-| `npm-*`         | **npm-audit** SARIF suppression (#295)       | _(none active — see below)_ |
-| everything else | FS surface (broad `.vex/*` glob)             | `ecdsa-*`, `pytest-*`       |
+A new `.vex/*.openvex.json` reaches the surfaces per the feed table above with no
+extra wiring — but **the filename prefix selects the scope**, because several
+surfaces glob a subset rather than all of `.vex/`.
+
+**Record-name prefix = surface scope.**
+
+| prefix          | surface(s) that inject its SARIF suppression | shape of the name              |
+| --------------- | -------------------------------------------- | ------------------------------ |
+| `CVE-*`         | grype **image** gate + suppression injector  | `CVE-YYYY-NNNNN`               |
+| `npm-*`         | **npm-audit** SARIF suppression (#295)       | `npm-<package>-CVE-YYYY-NNNNN` |
+| everything else | FS surface (broad `.vex/*` glob)             | `<package>-CVE-YYYY-NNNNN`     |
 
 This scoping is why the SAME CVE can have TWO records with DIFFERENT statuses for
-DIFFERENT products without colliding. The worked example was CVE-2026-13149:
-`CVE-2026-13149.openvex.json` (`pkg:deb/debian/node-brace-expansion`,
-`not_affected` — the emulator image) coexisted with a `npm-brace-expansion-…`
-record (`pkg:npm/brace-expansion`, `affected` — the then-bundled npm dep). The
-npm-audit injection is scoped to `.vex/npm-*` precisely so the deb record's
+DIFFERENT products without colliding — e.g. a `CVE-…` record marking a
+`pkg:deb/debian/<name>` component in the emulator image `not_affected`, coexisting
+with an `npm-<name>-CVE-…` record marking `pkg:npm/<name>` `affected`. The
+npm-audit injection is scoped to `.vex/npm-*` precisely so a deb record's
 `not_affected` can NEVER suppress (hide) an npm `affected` finding — it stays a
-visible open alert, per #188. The npm half of that pair was **retired in #323**
-(the `aws-cdk-lib` bump rebundled a patched `brace-expansion`), so only the
-image-scoped `CVE-2026-13149.openvex.json` remains — but the scoping rule stands
-and applies to the next such pair.
+visible open alert, per #188.
 
-The scanners that CANNOT glob `.vex/` — **Trivy** (`trivy.yaml`'s
-`vulnerability.vex` is an explicit file list) and **OSV-Scanner** (no OpenVEX
-channel at all, only `osv-scanner.toml` `[[IgnoredVulns]]`) — used to require
-**hand-maintained parity** with `.vex/`, the historical "two-feed gotcha". As of
-**#251** that parity is **generated, not hand-maintained**: after adding or
-removing a record, run
+> **Caveat — the verdict matchers are id-only, and that leaks across surfaces.**
+> The grype FS gate and the generated OSV dialect match a record to a finding by
+> **identifier alone, never by purl**. So an image-scoped `CVE-*` record will
+> suppress a _same-CVE_ finding on the repo tree (npm/pip), on a different
+> product, silently. Trivy FS is purl-precise and still reports it, which is how
+> the divergence becomes visible. Until this is fixed, treat a `CVE-*` record as
+> potentially broader than its purl claims.
+
+**Product-purl shape (non-obvious).** List the **direct product purl** for the
+component the scanner catalogs — NOT a parent-subcomponent form. A filesystem
+scan of a requirements/lock file catalogs a transitive dependency as a
+**top-level** component, and go-vex only suppresses when the statement's product
+purl equals the scanned component; a `parent → child` subcomponent statement does
+**not** match an FS scan (verified against both grype and trivy). So a record for
+a pip transitive dep uses `pkg:pypi/<name>@<version>`, not a checkov-subcomponent
+form.
+
+After adding or removing a record, regenerate the dialects and commit the result
+(the hard-fail `vex-dialects` job fails on drift):
 
 ```bash
-node .github/scripts/vex-dialects.mjs write   # regenerate trivy.yaml + osv-scanner.toml
+node .github/scripts/vex-dialects.mjs write
 ```
 
-and commit the result. The hard-fail `vex-dialects` CI job runs
-`node .github/scripts/vex-dialects.mjs check` and fails if either committed file
-drifts from the generator output, so a forgotten regenerate can no longer
-silently desync a scanner. Only `not_affected`/`fixed` records are emitted; an
-`affected` record is deliberately omitted from both dialects so it stays a
-visible finding (#188).
+## Purl-matching method (the non-obvious part)
 
-## Records
-
-### `ecdsa` (filesystem/lockfile surface — live as of #226)
-
-- **`ecdsa-CVE-2024-23342.openvex.json`** — `not_affected` /
-  `vulnerable_code_not_in_execute_path` for `ecdsa` (`pkg:pypi/ecdsa@0.19.2`, a
-  transitive dependency of checkov pinned in
-  `.github/scanner-requirements/iac/requirements.txt`). CVE-2024-23342
-  ("Minerva") is a timing side-channel in ECDSA **signing**; we only run checkov
-  to scan local CloudFormation templates offline (no signing, no private keys, no
-  attacker-observable timing), so the vulnerable path is unreachable. Full
-  accepted-risk rationale lives in `docs/SECURITY-TOOLING.md`; see **#155**.
-
-  **Product-purl shape (non-obvious).** The record lists the **direct product
-  purl** `pkg:pypi/ecdsa@0.19.2` — NOT a checkov-subcomponent form. A filesystem
-  scan of the requirements file catalogs `ecdsa` as a **top-level** component, and
-  go-vex only suppresses when the statement's product purl equals the scanned
-  component; a `checkov → ecdsa` subcomponent statement does NOT match an FS scan
-  (verified against both grype and trivy). #226 reshaped the record from the
-  subcomponent form to this direct-product form for exactly this reason.
-
-  **Now live (#226).** Formerly staged — this record now suppresses the `ecdsa`
-  high+ finding on the VEX-aware `grype` FS gate (hard-fail) and `trivy-fs`
-  (report-only), because the pinned pip files were relocated to
-  `requirements.txt` (so grype/trivy catalog them by filename) and both FS jobs
-  were wired to the `.vex/` feed. **Dependabot** (which does **not** read VEX)
-  still flags ecdsa as alert #13, so the **API dismissal** of #13
-  (`tolerable_risk`) remains the active control for THAT surface.
-
-### `npm-audit` surface (npm dependency audit — machinery live as of #295)
-
-**There is currently NO active `npm-*` record — and that is the goal state.** The
-npm surface is at **0 uncovered advisories with 0 acceptances**: every npm finding
-is _fixed_, not accepted. Keep it that way — reach for a version bump (see
-AGENTS.md § Dependency notes on `npm update` vs `overrides` vs an `aws-cdk-lib`
-rebundle) before ever writing an `npm-*` record. The gate machinery below stays
-documented because it is still wired and will be needed for the next genuinely
-upstream-blocked npm advisory.
-
-The worked precedent was **`npm-brace-expansion-CVE-2026-13149.openvex.json`**
-(retired in **#323**): `affected` for `pkg:npm/brace-expansion@5.0.6` bundled
-inside `aws-cdk-lib` via its bundled `minimatch`. It was genuinely unfixable
-repo-side — npm `overrides` provably cannot rewrite `inBundle: true` deps and
-`npm audit fix` bumps only the un-bundled top-level copies — so it was accepted as
-`affected` (reachable-but-accepted: glob expansion over the repo's own
-non-adversarial CDK source at synth time), keeping the finding VISIBLE rather than
-hidden. `aws-cdk-lib@2.266.0` then rebundled `brace-expansion@5.0.9`, clearing it
-along with GHSA-mh99-v99m-4gvg and GHSA-rgw5-rvv9-x895.
-
-**Delete such a record, don't re-date it, once its premise is false.** This one's
-`action_statement` asserted "no fixed aws-cdk-lib release"; the moment a fixed
-release existed the record was _wrong_, not merely stale — so #323 deleted it
-ahead of its `revisit 2026-10-22` window rather than pushing the date out.
-
-**Dated `revisit_by` (the staleness nag, #295).** Unlike the event-token form
-(`wait-for-image-rebuild`), an npm/bundled acceptance carries a DATED `revisit_by`.
-The npm-audit gate reads the ACTIVE record set (`activeRecordIds`): once today is
-on/after that date the record stops covering and the gate **self-reds**, forcing a
-re-check. Use a dated `revisit_by` (not an event token) for override/bundled
-"waiting-for-the-vendor" acceptances so they can't rot silently.
-
-Note `CVE-2026-13149.openvex.json` **still exists and must not be confused with
-the retired record** — it is `not_affected` for the
-`pkg:deb/debian/node-brace-expansion` emulator-image component, a different
-product on a different surface. See "Record-name prefix = surface scope" above.
-
-### `mcp` — RETIRED (#324): fixed upstream, records DELETED
-
-The three `mcp` server-transport records (`mcp-CVE-2026-59950` /
-GHSA-vj7q-gjh5-988w, `mcp-CVE-2026-52869` / GHSA-jpw9-pfvf-9f58,
-`mcp-CVE-2026-52870` / GHSA-hvrp-rf83-w775) were `status: affected` acceptances
-for `pkg:pypi/mcp@1.23.3`, a transitive dependency of the pinned Semgrep. **They
-were deleted in #324**: bumping `semgrep` `1.167.0` → `1.174.0` moves the
-hard-pinned `mcp` to `1.29.0`, which is past every fix (1.27.2 / 1.27.2 /
-1.28.1). Verified before deletion that **all three gate scanners agree** the CVEs
-are gone (grype 0.114.0, trivy 0.70.0, osv-scanner 2.4.0 each report zero `mcp`
-findings against the recompiled closure), per the "delete only when ALL scanners
-agree" rule above. The matching `allow-ghsas` entries in the `dependency-review`
-job were pruned in the same change.
-
-**Keep the lesson, not the records.** The original acceptance rested on the claim
-that Semgrep "hard-pins `mcp==1.23.3` **unconditionally** in every release
-through the latest", so a bump was impossible and VEX was the only channel. That
-claim was true when written and **silently expired** when Semgrep shipped a
-release with a newer pin. A "no upstream fix exists" / "the vendor pins it" claim
-is only true on the day it is written — **re-verify it against current upstream
-metadata before renewing any acceptance built on it.** These records also
-motivated the #284 JSON-derived, both-status-VEX-aware FS gate (an `affected`
-record cannot suppress in grype, so the required gate reddened); that mechanism
-stands and applies to any `affected` acceptance.
-
-### `pytest` (filesystem-surface — surfaced by the strictest floor, #284)
-
-- **`pytest-CVE-2025-71176.openvex.json`** (GHSA-6w46-j5rx-g56g, insecure
-  tmpdir handling; fixed upstream in pytest 9.0.3) — `status: not_affected` /
-  justification `vulnerable_code_not_present` for `pkg:pypi/pytest@8.4.2`.
-  Surfaced only when the FS gate floor was dropped to its **strictest** rung in
-  #284 (it is a Medium, below the former `high` floor). grype catalogs
-  `pytest@8.4.2` **solely** because the `aws-cdk` npm package bundles Python
-  project **scaffolding templates**
-  (`node_modules/aws-cdk/lib/init-templates/{app,sample-app}/python/requirements-dev.txt`)
-  that `cdk init --language python` copies to generate a NEW, separate Python
-  project. This is a TypeScript/Node repo: pytest is never installed into a
-  Python environment, never imported, never executed — the template files are
-  inert data inside a dependency, so the vulnerable code is **not present** in
-  anything this repo runs. Like the `ecdsa` record, it is modeled as a **direct
-  pypi product purl** (not an `aws-cdk` subcomponent) because go-vex only
-  suppresses when the statement's product purl matches the scanned component, and
-  the FS scanners catalog `pytest` as a top-level component of the template
-  requirements file. Being `not_affected`, it is natively suppressed into grype's
-  `ignoredMatches[]` (verified). Revisit when `aws-cdk` bumps the pytest pin in
-  its bundled init-templates — cosmetic here, since it changes no code this repo
-  executes.
-
-### MiniStack image base CVEs (`CVE-*.openvex.json`, #84)
-
-One record per accepted high+ CVE on the pinned MiniStack image. **The record
-set IS the inventory** — `ls .vex/CVE-*.openvex.json` is the current list; the
-pinned image is in `services/_registry/ministack-pin.json`. Each is
-`status: not_affected` with justification
-**`vulnerable_code_cannot_be_controlled_by_adversary`** — a genuine
-adversary-reachability claim: MiniStack is a local-only CI emulator (binds port
-4566 on loopback, ephemeral per-run container, never network-exposed, exercised
-only by this repo's own CDK/SDK test traffic, not a deployed/production
-artifact), so no adversary can supply crafted input reaching the vulnerable
-code. Each record's `impact_statement` carries its own reachability rationale +
-fix state (including any in-flight "awaiting an upstream/image fix" note).
-
-**Purl-matching method (the non-obvious part).** The `products[].@id` are
-**qualifier-less package purls** (`pkg:deb/debian/<name>@<version>`,
-`pkg:generic/python@<version>`) — NOT the scanner's full purl. This is deliberate:
-grype and trivy emit different qualifiers for the same package (grype
-`?arch=amd64&distro=debian-13`, trivy `?arch=all&distro=debian-13.5`), and
+The `products[].@id` are **qualifier-less package purls**
+(`pkg:deb/debian/<name>@<version>`, `pkg:generic/python@<version>`) — NOT the
+scanner's full purl. This is deliberate: grype and trivy emit different
+qualifiers for the same package (grype `?arch=amd64&distro=debian-13`, trivy
+`?arch=all&distro=debian-13.5`), and
 [go-vex](https://github.com/openvex/go-vex) only matches when the statement's
 qualifiers equal the scanned component's. A base purl matches BOTH scanners
-across arch / distro-minor differences. For debian packages carrying an **epoch**,
-grype keeps it in the version (`name@1:2.41-5`) while trivy strips it to a
-qualifier and uses the epoch-less version (`name@2.41-5`); those records therefore
-list **both** version forms as products.
+across arch / distro-minor differences.
 
-**Reconciling after a digest bump (method).** A bump changes package versions,
-so the purl in every affected record no longer matches — **a version-bearing
-record must be repinned to the new version or go-vex silently stops suppressing
-it** (most visible for the interpreter, `pkg:generic/python@<v>`). Procedure:
+For debian packages carrying an **epoch**, grype keeps it in the version
+(`name@1:2.41-5`) while trivy strips it to a qualifier and uses the epoch-less
+version (`name@2.41-5`); such records must list **both** version forms as
+products.
+
+## The MiniStack image base-CVE class (`CVE-*`, #84)
+
+One record per accepted CVE on the pinned MiniStack image (pinned in
+`services/_registry/ministack-pin.json`). These share one class-wide
+justification: **`vulnerable_code_cannot_be_controlled_by_adversary`** — a
+genuine adversary-reachability claim, because MiniStack is a local-only CI
+emulator (binds port 4566 on loopback, ephemeral per-run container, never
+network-exposed, exercised only by this repo's own CDK/SDK test traffic, not a
+deployed or production artifact), so no adversary can supply crafted input
+reaching the vulnerable code.
+
+**The class-wide claim is not a licence to skip the per-CVE one.** Each record's
+`impact_statement` must still carry its own reachability rationale and fix state,
+naming what the vulnerable code actually is and which precondition this
+deployment fails to meet. Two CVEs in the same package are two separate
+arguments.
+
+### Reconciling after a digest bump (the procedure)
+
+A bump changes package versions, so the purl in every version-bearing record no
+longer matches — **a version-bearing record must be repinned to the new version
+or go-vex silently stops suppressing it** (most visible for the interpreter,
+`pkg:generic/python@<v>`). This procedure IS the expiry mechanism for every
+`wait-for-image-rebuild` acceptance:
 
 1. Scan the new digest with **every** scanner in the gate — currently **both**
    grype (`GRYPE_VEX_DOCUMENTS=…`) and trivy (`trivy.yaml` vex, auto-discovered
-   from cwd) — at HIGH+ severity.
-2. For each surviving high+ finding, **repin** its record to the new purl.
+   from cwd) — at the gate's floor.
+2. For each surviving finding, **repin** its record to the new purl.
 3. **Delete a record ONLY when ALL scanners agree** the CVE is gone or has
-   dropped below the `high` floor on the new image. The gate is the grype ∪
-   trivy **union**, and the two rate the same CVE differently (grype uses
+   dropped below the floor on the new image. The gate is the grype ∪ trivy
+   **union**, and the two rate the same CVE differently (grype uses
    distro/vendor qualitative severity — often `low`/`negligible` for Debian
    no-fix base CVEs — while trivy leans NVD and rates them `HIGH`). Deleting on
    one scanner's say-so re-opens the gate on the other.
 4. A CVE fixed upstream but not yet in the image stays as a record whose
    `impact_statement` says so; drop it when a later digest ships the fix.
-5. Regenerate the dialects (`node .github/scripts/vex-dialects.mjs write`) and
-   commit trivy.yaml + osv-scanner.toml — the `vex-dialects` CI drift-check
-   enforces they match `.vex/` (#251, replacing the old manual parity).
+5. Regenerate the dialects and commit `trivy.yaml` + `osv-scanner.toml` — the
+   `vex-dialects` CI drift-check enforces they match `.vex/` (#251).
 
-Verify BOTH scanners report **0 uncovered high+** locally before pushing; CI's
-grype + trivy are the final arbiters.
+Verify BOTH scanners report **0 uncovered** at the floor locally before pushing;
+CI's grype + trivy are the final arbiters.
+
+Note that a digest bump also invalidates the compat registry: every
+`services/_registry/provisioning.json` row whose `lastVerifiedDigest` no longer
+equals the new pin is re-verified by the `ministack-compat` workflow. That field
+is deliberately **excluded** from `scripts/update-ministack.ts` — it is a
+semantic provenance record, not a blind pin, and the workflow never edits the
+registry itself.
+
+## Lessons that outlive their records
+
+Retired records leave behind rules worth keeping. These were each learned the
+hard way, from a record that has since been deleted:
+
+- **Delete a record when its premise becomes false — don't re-date it.** An
+  `action_statement` asserting "no fixed release exists" is _wrong_, not merely
+  stale, the moment one does. Deleting it ahead of its `revisit_by` window is
+  correct; pushing the date out launders a false claim into a live one.
+- **A "no upstream fix" / "the vendor pins it" claim is only true on the day it
+  is written.** One acceptance rested on a vendor "unconditionally hard-pins this
+  version in every release" claim that was true when written and **silently
+  expired** when the vendor shipped a newer pin. Re-verify such a claim against
+  current upstream metadata before renewing any acceptance built on it.
+- **A record is keyed to ONE identifier, not to a package.** Accepting CVE-X on
+  package P gives **zero** cover for CVE-Y later disclosed against the same code,
+  and nothing warns you the ledger has gone partial. Before concluding a package
+  is handled, enumerate **all** open advisories against it, and name the in-scope
+  ids in the `impact_statement`.
+- **A fix may need two halves.** Bundled copies (`inBundle: true`) are
+  unreachable by npm `overrides` and need a parent bump; non-bundled copies need
+  `npm update`, because `npm install` is conservative and keeps any pin that
+  still satisfies its parent's range. Clearing one half looks like success to a
+  partial scan.
 
 ## Authored date
 
@@ -421,11 +368,11 @@ The `timestamp` in each record is the **authored date**, set deterministically
 ## Drift / lifecycle (#76)
 
 The `.vex/` set must stay in lockstep with live findings: **#76** audits it —
-every record must still match a current scan finding, and resolved ones (a
-digest bump that drops the CVE, or an upstream-fixed python CVE reaching the
-image) are pruned. A new high+ CVE the scanners surface without a record here
-fails the image gate until it is VEX-accepted (add a record) or the digest is
-bumped past it.
+every record must still match a current scan finding, and resolved ones (a digest
+bump that drops the CVE, or an upstream-fixed CVE reaching the image) are pruned.
+A new CVE the scanners surface at the floor without a record here fails the gate
+until it is VEX-accepted (add a record) or the pin is bumped past it. Enforcing
+`revisit_by` presence (see the gap noted above) belongs to this audit.
 
 ## Cross-references
 
@@ -433,3 +380,4 @@ bumped past it.
   the hard-fail flip. Start here for the rationale behind this whole directory.
 - **#76** — the recurring `.vex/` drift/staleness audit (the ongoing process that
   keeps these records in lockstep with live findings).
+- **`docs/SECURITY-TOOLING.md`** — the security posture this directory serves.
