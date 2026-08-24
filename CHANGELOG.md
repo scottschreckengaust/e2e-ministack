@@ -10,6 +10,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.12.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.11.0...v0.12.0) (2026-08-24)
+
+
+### Features
+
+* **security:** enforce the .vex/ revisit_by MUST — backfill every record + gate it ([#340](https://github.com/scottschreckengaust/e2e-ministack/issues/340)) ([da3da3f](https://github.com/scottschreckengaust/e2e-ministack/commit/da3da3f1896ae72008020803ec5f233b9dc63007)), closes [#336](https://github.com/scottschreckengaust/e2e-ministack/issues/336)
+
+
+### Bug Fixes
+
+* **security:** Phase 0 vuln sweep — clear all five set-based gates in one atomic PR ([#338](https://github.com/scottschreckengaust/e2e-ministack/issues/338)) ([ab69913](https://github.com/scottschreckengaust/e2e-ministack/commit/ab69913ea71361ce496b54a71aeab2c48c15b855))
+
 ## [0.11.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.10.0...v0.11.0) (2026-07-24)
 
 
