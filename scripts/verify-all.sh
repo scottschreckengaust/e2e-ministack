@@ -187,7 +187,26 @@ grype_fs_gate() {
   # (grype's severity-cutoff sets only the exit code — the TS gate is the
   # authoritative floor, counting every severity — so we don't pass a cutoff),
   # then the JSON-derived gate. JSON goes under WORK_DIR, not the tree.
-  GRYPE_VEX_DOCUMENTS="$docs" grype dir:. --output json --file "$json" -q >/dev/null 2>&1
+  #
+  # SCAN THE SAME TREE CI SCANS (the whole point of this script). The CI grype job
+  # is `actions/checkout` + scan — it never runs `npm ci` and never synths, so
+  # `node_modules/` and `cdk.out/` DO NOT EXIST there. Locally both do (the jest
+  # tiers need the install; the cdk-nag gate above writes `cdk.out`), so an
+  # unexcluded `dir:.` is STRICTER than CI and reds on artifacts CI cannot see.
+  # Proven: `node_modules/aws-cdk/lib/init-templates/` — the `cdk init` scaffolding
+  # shipped inside the CLI package, never installed or executed here — yields
+  # `aws-cdk-lib@%cdk-version%` (an UNSUBSTITUTED placeholder in the Java template's
+  # pom.xml, which grype's maven cataloger reads as a version string and therefore
+  # cannot rule out `< 2.253.0`) plus `pytest` from two python `requirements-dev.txt`
+  # templates. Excluding these loses NO real coverage: the npm surface is gated from
+  # the LOCKFILE by three other gates (npm audit, OSV-Scanner, trivy-fs), and grype's
+  # unique contribution on `dir:.` is the committed pip closures under
+  # `.github/scanner-requirements/`, which stay in scope. Trivy's local run already
+  # skips exactly these two dirs (generated `trivy.yaml` `scan.skip-dirs`) — this
+  # brings grype in line with both CI and its sibling scanner.
+  GRYPE_VEX_DOCUMENTS="$docs" grype dir:. \
+    --exclude './node_modules/**' --exclude './cdk.out/**' \
+    --output json --file "$json" -q >/dev/null 2>&1
   node .github/scripts/grype-fs-gate.mjs "$json" "${vex[@]}"
   # The gate shim writes grype-fs.outcome (KEY=VALUE, sets `outcome`, gitignored)
   # and always exits 0. The file is generated at runtime, so shellcheck can't
