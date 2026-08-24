@@ -329,11 +329,32 @@ jobs:
           # `(BSD-2-Clause OR MIT OR Apache-2.0)` stay GREEN — the OR is
           # satisfied by an allowed member. Refresh this list when a new
           # permissive dep is introduced (the PR adding it will flag it here).
+          #
+          # The 5 ids on the second half of the list below joined in #338 by
+          # exactly that rule — a scanner-closure recompile (the #78 bump path)
+          # diffed 6 tooling deps, and because this action is PR-DIFF-SCOPED they
+          # were evaluated for the FIRST time even though `main` already carried
+          # them at older versions. All 5 are OSI/FSF-permissive, so they belong
+          # HERE and not in the copyleft carve-out below (that taxonomy split is
+          # the whole point of having two knobs). Verified against each package's
+          # DECLARED license in PyPI metadata, not an aggregator:
+          #   - MIT-0             cffi 2.1.1 (declared `MIT-0`; cffi 2.0.0 was
+          #                       plain MIT — a real upstream relicense to MIT
+          #                       No Attribution, i.e. strictly MORE permissive)
+          #   - Zlib              numpy (bundled zlib-licensed sources)
+          #   - PSF-2.0           declared license of aiohappyeyeballs AND
+          #                       typing-extensions (accepted ON THE MERITS —
+          #                       see the group (3) note below for why those two
+          #                       ALSO need a package entry)
+          #   - CNRI-Python       regex (`Apache-2.0 AND CNRI-Python`)
+          #   - HPND-Markus-Kuhn  wcwidth (vendors Markus Kuhn's reference
+          #                       wcwidth() C implementation; LICENSE is plain MIT)
           allow-licenses: >-
             MIT, Apache-2.0, ISC,
             BSD-2-Clause, BSD-3-Clause, 0BSD,
             BlueOak-1.0.0, Python-2.0,
-            CC0-1.0, CC-BY-4.0, Unlicense
+            CC0-1.0, CC-BY-4.0, Unlicense,
+            MIT-0, Zlib, PSF-2.0, CNRI-Python, HPND-Markus-Kuhn
           # allow-dependencies-licenses carries two documented GROUPS, both under
           # the SAME CI-only external-invocation carve-out (copyleft that never
           # links/redistributes into repo output — the line that clears shellcheck/
@@ -376,6 +397,36 @@ jobs:
           #     (below), NOT this standing ledger. Tradeoff: until re-harvest, a PR
           #     diffing one of the 3 could red dep-review — accepted; #127 resolves.
           #
+          # (3) PSF-LICENSE-TEXT DETECTOR ARTIFACT (#338), same closures, same
+          #     CI-only carve-out. `aiohappyeyeballs` and `typing-extensions` are
+          #     BOTH declared PSF-2.0 (PyPI metadata; PSF-2.0 is on the allow-list
+          #     above, accepted on the merits) — yet GitHub reports them as
+          #     `... AND GPL-1.0-or-later AND ...`. That id is a FALSE POSITIVE of
+          #     GitHub's file-scanning license detector, NOT a copyleft grant:
+          #     both ship CPython's verbatim PSF `LICENSE`, whose only GPL mentions
+          #     are (a) the historical GPL-COMPATIBILITY table, whose own footnote
+          #     reads "GPL-compatible doesn't mean that we're distributing Python
+          #     under the GPL. All Python licenses, unlike the GPL, let you
+          #     distribute a modified version without making your changes open
+          #     source", and (b) CNRI License Agreement paragraph 7, a
+          #     CHOICE-OF-LAW clause (Virginia law governs derivative works
+          #     incorporating material "previously distributed under the GPL").
+          #     Neither grants anything under the GPL. Verified by extracting
+          #     LICENSE from both sdists and reading every `grep -i gpl` hit.
+          #     WHY a package entry and not a `GPL-1.0-or-later` allow-list id:
+          #     adding that id would admit REAL copyleft repo-wide, including to
+          #     product deps — squarely against the AGENTS.md "copyleft is a
+          #     near-dealbreaker" line. A package entry confines the exemption to
+          #     these two tooling deps. RESIDUAL COST, stated honestly (the #335
+          #     "nothing gets quieter" constraint): because entries are name-only
+          #     (below), these two are now exempt from license review at ALL future
+          #     versions, so a genuine upstream relicense of either would pass
+          #     unnoticed. dependency-review offers no per-package-per-license knob,
+          #     so 2 packages is the minimum-quieting option that clears the gate;
+          #     capping the blast radius at 2 (not all 6) is exactly why the other
+          #     4 went to the allow-list instead. Re-check both if #337's
+          #     surface-scoping work gives the ledger a finer channel.
+          #
           # #161 Q1 (verified against the action's src/purl.ts `purlsMatch` at the
           # pinned SHA): exemptions match by NAME ONLY — `purlsMatch` compares
           # type + namespace/name and IGNORES the version. So the @<sha>s below are
@@ -391,7 +442,7 @@ jobs:
           # detected-sonarqube-docs-api-key secrets rule would match the SHA-bearing
           # SonarSource purls, but it is globally --exclude-rule'd in the semgrep
           # job (temporary; see #163) so no inline suppression is needed.
-          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b, pkg:pypi/certifi, pkg:pypi/orjson, pkg:pypi/semgrep, pkg:pypi/tqdm'
+          allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b, pkg:pypi/certifi, pkg:pypi/orjson, pkg:pypi/semgrep, pkg:pypi/tqdm, pkg:pypi/aiohappyeyeballs, pkg:pypi/typing-extensions'
           # allow-ghsas: the high-severity advisories in the SAME scanner-tooling
           # pip closures (#262). dependency-review is fail-on-severity:high, so a
           # HIGH GHSA in the closure would red a closure-diffing PR (#78 bump path)

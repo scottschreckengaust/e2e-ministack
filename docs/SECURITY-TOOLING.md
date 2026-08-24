@@ -140,9 +140,37 @@ allow-list** — there is no list of bad ids to maintain.
 
 ### Enforced `allow-licenses`
 
-See `security.yml` → `dependency-review` job:
-`MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0,
-Python-2.0, CC0-1.0, CC-BY-4.0, Unlicense`.
+**The list itself lives in ONE place** — `security.yml` → `dependency-review`
+job → `allow-licenses` — and is not transcribed here, because a second copy
+only rots (the same reason `license-review-poller.yml` extracts it from that
+workflow at runtime rather than holding its own copy). Read it there.
+
+What is durable is **which knob a new license belongs in**, since the two are
+not interchangeable:
+
+- A **permissive** license (OSI/FSF, no copyleft) appears in the tree →
+  **`allow-licenses`**. Repo-wide is correct: the policy accepts that license on
+  its merits, for any dependency.
+- **Copyleft** in a CI-only tool we merely _invoke_ (never link or redistribute)
+  → **`allow-dependencies-licenses`**. Confines the exemption to that one
+  package and keeps copyleft off the repo-wide list.
+- GitHub reports copyleft the package does **not actually grant** (a detector
+  artifact) → **`allow-dependencies-licenses`**, for the same reason:
+  allow-listing the false-positive id would admit the real license everywhere.
+- **"Could not detect a license"** → _neither_. That is harvest lag; route it to
+  `review:license` triage (below), never a standing exemption.
+
+Two rules make that table safe to apply:
+
+1. **Verify against the DECLARED license in the primary source** (PyPI
+   `License-Expression:`/`License:` metadata, or the package's own `LICENSE`
+   file) before adding anything. GitHub's reported expression is a
+   file-scanning _union_, so it can name a license the package never grants —
+   see the worked example under "`allow-dependencies-licenses`" below.
+2. **Never add a copyleft id to `allow-licenses`** to clear one dependency;
+   that admits it repo-wide, including to product deps. Use the
+   package-scoped knob, and record the residual cost (exemptions are
+   **name-only** — see #161 below — so they apply to all future versions).
 
 ### Known limitations (documented, not hidden)
 
@@ -452,10 +480,26 @@ ledger"); the reversal is maintainer-approved and recorded on PR #301.
 
 **What is enumerated (all in the `dependency-review` job of `security.yml`):**
 
-- **`allow-dependencies-licenses`** — the four genuine copyleft tooling deps, by
-  name (no version qualifier — matching is name-only per #161): `certifi`
-  (MPL-2.0), `orjson` (MPL-2.0 conjunct), `semgrep` (LGPL-2.1-or-later, the
-  scanner itself), `tqdm` (MPL-2.0 conjunct).
+- **`allow-dependencies-licenses`** — the tooling deps the permissive allow-list
+  can't cover, by name (no version qualifier — matching is name-only per #161).
+  The workflow comment groups them by _reason_, which is what matters on review;
+  read it there for the current membership. Two reasons exist today:
+  - **Genuine copyleft in a scanner we invoke** (#262) — `certifi` (MPL-2.0),
+    `orjson` / `tqdm` (MPL-2.0 conjunct), `semgrep` (LGPL-2.1-or-later, the
+    scanner itself).
+  - **A detector artifact: GitHub names a license the package does not grant**
+    (#338) — `aiohappyeyeballs` and `typing-extensions` both **declare PSF-2.0**
+    (PyPI metadata; PSF-2.0 _is_ on the permissive allow-list, accepted on the
+    merits), yet GitHub reports `… AND GPL-1.0-or-later AND …`. Both vendor
+    CPython's verbatim PSF `LICENSE`, whose only GPL mentions are the historical
+    **GPL-compatibility table** — whose own footnote reads _"GPL-compatible
+    doesn't mean that we're distributing Python under the GPL"_ — and CNRI
+    Agreement ¶7, a **choice-of-law** clause. Neither is a grant. Allow-listing
+    `GPL-1.0-or-later` to clear these would admit real copyleft repo-wide, so
+    the package-scoped knob is the correct (and minimum-quieting) instrument.
+    **This is the pattern to copy** when GitHub's file-scan union disagrees with
+    a package's declared license: verify the declared license and the actual
+    `LICENSE` text first, then scope by package — never by license id.
 - **`allow-ghsas`** — the HIGH advisories in the closure (dependency-review is
   `fail-on-severity: high`), now a single entry: `GHSA-wj6h-64fc-37mp` (ecdsa,
   no upstream fix). It was one of four — the other three
