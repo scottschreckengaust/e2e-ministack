@@ -1159,8 +1159,9 @@ jobs:
           # report. Beyond the image scans, this now includes the FS/dependency
           # surfaces (#295): `npm-audit` (the converted npm-audit SARIF) and the
           # OSV lockfile/pip scans — so a `.vex/` acceptance on ANY of these
-          # (e.g. the bundled brace-expansion npm record) is reconciled and
-          # surfaced in the report, not just the image CVEs.
+          # (e.g. the `ecdsa` pip record) is reconciled and surfaced in the
+          # report, not just the image CVEs. The npm surface has NO active
+          # record since #323 retired the last one; the wiring stays for the next.
           # shellcheck disable=SC2086  # $main_arg is an intentional flag pair
           node .github/scripts/alerts-findings.mjs alerts.json findings.json \
             $main_arg grype-ministack-image trivy-image npm-audit osv-scanner osv-scanner-pip
