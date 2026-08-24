@@ -55,7 +55,7 @@ flowchart LR
 docker run -d --name ministack --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e LAMBDA_EXECUTOR=docker -e MINISTACK_RDS_PUBLIC_ENDPOINT=1 -e MINISTACK_HOST=localhost \
-  ministackorg/ministack:full@sha256:636c4ef52bff20e29f161d24e895359b2927f72a143d726792faa86160043ca9
+  ministackorg/ministack:full@sha256:8674b54b185972791135a04bb06d6507df0027c88bf9c530b2173c0955e9a686
 
 # 2️⃣ Point the AWS toolchain at MiniStack (both endpoint vars required)
 export AWS_ENDPOINT_URL=http://localhost:4566 AWS_ENDPOINT_URL_S3=http://localhost:4566 \

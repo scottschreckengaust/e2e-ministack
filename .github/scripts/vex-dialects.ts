@@ -1,7 +1,7 @@
 // Generate every scanner's VEX suppression DIALECT from the ONE canonical
 // `.vex/*.openvex.json` ledger (issue #251).
 //
-// WHY (see .vex/README.md § "Adding a record — the two-feed gotcha" and
+// WHY (see .vex/README.md § "What reads these records" / "Adding a record" and
 // docs/SECURITY-TOOLING.md): a single accept/ignore decision lives in
 // `.vex/*.openvex.json`, but each scanner speaks a different suppression
 // dialect. Grype reads the OpenVEX files natively via `GRYPE_VEX_DOCUMENTS`

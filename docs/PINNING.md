@@ -9,7 +9,7 @@ supply-chain safety. This file is the authoritative inventory.
 | ------------------------------------------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | GitHub Actions (all `uses:`)                           | `.github/workflows/*.yml`                           | commit SHA (`# vX` comment)                                                                              |
 | npm dependencies (transitive)                          | `package-lock.json` + `npm ci`                      | exact, lockfile-resolved                                                                                 |
-| `aws-cdk`, `aws-cdk-lib`                               | `package.json`                                      | exact (`2.1128.0`, `2.260.0`)                                                                            |
+| `aws-cdk`, `aws-cdk-lib`                               | `package.json`                                      | exact (`2.1138.0`, `2.266.0`)                                                                            |
 | Node.js                                                | `mise.toml`, workflow `node-version`                | exact patch (`24.17.0`)                                                                                  |
 | Local CI-parity scanners (#185)                        | `mise.toml` `[tools]`                               | exact, **mirrors** the `security.yml`/`ci.yml` engine pins (see below)                                   |
 | npm (via Corepack)                                     | `package.json` (`packageManager`)                   | exact (`npm@11.13.0`)                                                                                    |
@@ -18,8 +18,8 @@ supply-chain safety. This file is the authoritative inventory.
 | SonarQube image                                        | `security.yml` (`sonarqube` service)                | digest (`@sha256:160bd2f6…`)                                                                             |
 | SonarSource actions                                    | `security.yml`                                      | commit SHA (`sonarqube-scan-action` v8.2.0, `-quality-gate-action` v1.2.0)                               |
 | CodeQL analyzer bundle                                 | `security.yml` (`tools:`)                           | `codeql-bundle-v2.25.6`                                                                                  |
-| Semgrep                                                | `security.yml`                                      | `==1.167.0`                                                                                              |
-| cfn-lint / checkov                                     | `security.yml`                                      | `==1.52.0` / `==3.3.8`                                                                                   |
+| Semgrep                                                | `security.yml`                                      | `==1.174.0`                                                                                              |
+| cfn-lint / checkov                                     | `security.yml`                                      | `==1.52.0` / `==3.3.13`                                                                                  |
 | OSV-Scanner                                            | `security.yml`                                      | `v2.4.0` **+ SHA-256 verify**                                                                            |
 | Grype (`anchore/scan-action`)                          | `security.yml`                                      | action SHA + engine `grype-version:`; vuln **DB floats** (#183)                                          |
 | Trivy (`trivy-action`)                                 | `security.yml`                                      | action SHA + engine `version:`; vuln **DB floats**, cached (#183)                                        |
@@ -30,7 +30,7 @@ supply-chain safety. This file is the authoritative inventory.
 | Prettier, markdownlint-cli2                            | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
 | Stryker (mutation testing)                             | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
 | fast-check, jazzer.js (fuzz)                           | `package.json` + lockfile                           | exact, lockfile-resolved                                                                                 |
-| `@aws-cdk/integ-runner` / `@aws-cdk/integ-tests-alpha` | `package.json` + lockfile                           | exact (`2.202.1` / `2.260.0-alpha.0`; runner line independent of `aws-cdk-lib`)                          |
+| `@aws-cdk/integ-runner` / `@aws-cdk/integ-tests-alpha` | `package.json` + lockfile                           | exact (`2.204.5` / `2.266.0-alpha.0`; runner line independent of `aws-cdk-lib`)                          |
 
 > **Scope of "exact" above.** Only `aws-cdk` and `aws-cdk-lib` are pinned to a
 > bare exact version _string_ in `package.json`. The other direct runtime deps
@@ -48,10 +48,12 @@ supply-chain safety. This file is the authoritative inventory.
 > filename — the old flat `{semgrep,iac,overrides}.txt` names were invisible to
 > those tools (#226). `iac/requirements.txt` additionally carries a resolution
 > override — `.github/scanner-requirements/overrides/requirements.txt` forces
-> `aiohttp==3.14.1` past checkov's `<3.14.0` cap (security fix; Dependabot alerts
-> #14–#24) — so `security.yml` installs it with `--no-deps` (see AGENTS.md
-> "Dependency notes"). Drop the override when checkov's cap allows
-> `aiohttp>=3.14.1`.
+> `asteval==1.0.9` past checkov's **exact** `asteval==1.0.6` pin (security fix:
+> GHSA-89v8-rhwq-hf77 / GHSA-9w56-46f6-3qhx, sandbox escapes) — so `security.yml`
+> installs it with `--no-deps` (see AGENTS.md "Dependency notes"). Drop the
+> override when checkov's asteval pin allows `>=1.0.9`. The former `aiohttp`
+> override was **removed in #324**: checkov 3.3.13 widened its declared cap to
+> `aiohttp<3.15.0`, so the patched `3.14.3` now resolves naturally.
 
 ### Local CI-parity scanner pins (#185) — a synced second site
 
