@@ -864,10 +864,25 @@ pytest is never installed or run in this Node/TS repo. Recorded as an honest
 The gate handles **GHSA↔CVE aliasing** (the crux): grype may report the GHSA as
 the primary `vulnerability.id` with the CVE in `relatedVulnerabilities[]` (or
 vice versa), while the `.vex/` records name the CVE in `vulnerability.name` and
-alias the GHSA in `vulnerability.aliases[]`. The decider builds the accepted set
-as the union of every record's name + aliases and tests each match against the
-union of its primary + related ids, so either direction maps onto the accepted
-set. The logic module is 100%-covered, Stryker-mutation-tested (0 survivors), and
+alias the GHSA in `vulnerability.aliases[]`. The decider reads every record's
+name plus its aliases and tests each match against the union of its primary +
+related ids, so either direction maps onto the accepted set.
+
+**An id match alone is NOT coverage (#337).** A finding is covered only when ONE
+`.vex/` statement matches it on **both** an identifier **and** a product purl —
+the surface the statement actually argues about. Matching on the id alone let an
+image-scoped `pkg:deb/...` record silence the same CVE on an npm/pip package in
+the repo TREE: over-suppression, the one direction this posture forbids. The purl
+comparison is the go-vex `PurlMatches` relation, re-implemented in
+`.github/scripts/vex-ledger.ts` (the CI grype job is a bare checkout with no
+`npm ci`, so the gate may import nothing outside Node built-ins + repo siblings)
+against the purl-spec conformance corpus, and is deliberately
+**qualifier-insensitive** so the qualifier-less record purls this repo mandates
+(above) keep working. It is fail-closed in both directions: an unparseable purl on
+the RECORD side makes the statement inert (the gate reds), and one on the FINDING
+side makes it uncovered (the finding surfaces). The same scoping constrains what
+the OSV dialect may emit — see `.vex/README.md`. The logic module is
+100%-covered, Stryker-mutation-tested (0 survivors), and
 replayed in the fuzz-regression tier (`grype-fs-gate.regression.test.ts`); the
 `.mjs` is a thin Node-built-in CLI shim. #284 left the `mcp` records themselves
 **unchanged** (`status: affected`) — only the gate mechanism moved from

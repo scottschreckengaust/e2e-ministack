@@ -17,11 +17,18 @@
 // `grype-fs.outcome` (KEY=VALUE lines the enforce step `source`s) and prints the
 // uncovered ids. The floor is grype's STRICTEST rung — EVERY severity counts
 // (#284, "drop it the most strict") — so any finding not covered by a `.vex/`
-// record fails. Exit is always 0 — the workflow's produce → always-upload →
-// ENFORCE pattern reads the `.outcome` file in a later `if: always()` step, so
-// this shim never fails the job directly (the SARIF must always upload first).
+// record fails. Coverage is SURFACE-SCOPED (#337): a record covers a finding only
+// when an identifier AND the product purl agree, so an image-scoped record cannot
+// suppress a same-CVE finding on the repo tree. Exit is always 0 — the workflow's
+// produce → always-upload → ENFORCE pattern reads the `.outcome` file in a later
+// `if: always()` step, so this shim never fails the job directly (the SARIF must
+// always upload first).
 import { readFileSync, writeFileSync } from 'node:fs';
-import { uncoveredVulns, vexAcceptedIds } from './grype-fs-gate.ts';
+import { uncoveredVulns } from './grype-fs-gate.ts';
+// The acceptance builder comes straight from the shared ledger — the ONE place
+// that decides what a `.vex/` record covers (#295/#337). Imported here rather
+// than re-exported through the gate module so no logic hides behind an alias.
+import { recordAcceptances } from './vex-ledger.ts';
 
 const [grypeFile, ...vexFiles] = process.argv.slice(2);
 if (!grypeFile) {
@@ -42,8 +49,8 @@ function readJson(file) {
 }
 
 const grype = readJson(grypeFile);
-const accepted = vexAcceptedIds(vexFiles.map(readJson));
-const uncovered = uncoveredVulns(grype, accepted);
+const acceptances = recordAcceptances(vexFiles.map(readJson));
+const uncovered = uncoveredVulns(grype, acceptances);
 
 // HONEST fail-closed: if the grype JSON could not be read at all, we cannot
 // prove the scan was clean — fail so a broken scan never passes silently
@@ -56,7 +63,7 @@ if (grype === undefined) {
 
 if (uncovered.length === 0) {
   console.error(
-    `grype-fs-gate: 0 uncovered findings at any severity (${accepted.size} VEX-accepted id(s)) — PASS`,
+    `grype-fs-gate: 0 uncovered findings at any severity (${acceptances.length} surface-scoped VEX acceptance(s)) — PASS`,
   );
   writeFileSync('grype-fs.outcome', 'outcome=success\n');
 } else {

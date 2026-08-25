@@ -11,9 +11,10 @@ import * as path from 'path';
 import { FuzzedDataProvider } from '@jazzer.js/core/dist/FuzzedDataProvider';
 import {
   uncoveredVulns,
-  vexAcceptedIds,
   matchVulnIds,
+  matchPurl,
 } from '../.github/scripts/grype-fs-gate';
+import { recordAcceptances } from '../.github/scripts/vex-ledger';
 
 const CORPUS_DIR = path.join(__dirname, 'corpus-grype-fs-gate');
 
@@ -40,9 +41,11 @@ const corpusFiles = fs
   )
   .sort();
 
-// The 3 mcp records' accepted id set — the real #284 acceptance (CVE names +
-// GHSA aliases), so the corpus replay exercises the aliasing path.
-const MCP_ACCEPTED = vexAcceptedIds([
+// The 3 mcp records as the gate sees them — the real #284 acceptance (CVE names +
+// GHSA aliases) scoped to the pypi product each argues about (#337), so the
+// corpus replay exercises BOTH the aliasing and the surface-matching paths.
+const MCP_PURL = 'pkg:pypi/mcp@1.23.3';
+const MCP_ACCEPTED = recordAcceptances([
   {
     statements: [
       {
@@ -50,6 +53,7 @@ const MCP_ACCEPTED = vexAcceptedIds([
           name: 'CVE-2026-52869',
           aliases: ['GHSA-jpw9-pfvf-9f58'],
         },
+        products: [{ '@id': MCP_PURL, identifiers: { purl: MCP_PURL } }],
         status: 'affected',
       },
     ],
@@ -61,6 +65,7 @@ const MCP_ACCEPTED = vexAcceptedIds([
           name: 'CVE-2026-52870',
           aliases: ['GHSA-hvrp-rf83-w775'],
         },
+        products: [{ '@id': MCP_PURL, identifiers: { purl: MCP_PURL } }],
         status: 'affected',
       },
     ],
@@ -72,6 +77,7 @@ const MCP_ACCEPTED = vexAcceptedIds([
           name: 'CVE-2026-59950',
           aliases: ['GHSA-vj7q-gjh5-988w'],
         },
+        products: [{ '@id': MCP_PURL, identifiers: { purl: MCP_PURL } }],
         status: 'affected',
       },
     ],
@@ -116,9 +122,9 @@ describe('grype-fs-gate — corpus replay (regression)', () => {
         fs.readFileSync(path.join(CORPUS_DIR, sanitizeCorpusName(file))),
       );
       assertWellFormed(uncoveredVulns(parsed, MCP_ACCEPTED));
-      // An empty accepted set is fail-closed: never fewer uncovered than with
-      // the mcp set (an accepted id can only REMOVE entries, never add).
-      const withEmpty = uncoveredVulns(parsed, new Set());
+      // No acceptances is fail-closed: never fewer uncovered than with the mcp
+      // set (an acceptance can only REMOVE entries, never add).
+      const withEmpty = uncoveredVulns(parsed, []);
       assertWellFormed(withEmpty);
       expect(withEmpty.length).toBeGreaterThanOrEqual(
         uncoveredVulns(parsed, MCP_ACCEPTED).length,
@@ -164,18 +170,68 @@ describe('grype-fs-gate — corpus replay (regression)', () => {
     ]) {
       expect(() => uncoveredVulns(v, MCP_ACCEPTED)).not.toThrow();
       expect(() => matchVulnIds(v)).not.toThrow();
+      expect(() => matchPurl(v)).not.toThrow();
     }
   });
 
-  it('never throws building the accepted set from adversarial VEX docs', () => {
+  it('never throws reading an adversarial artifact purl (#337 surface parsing)', () => {
+    // The purl comparison is the newest decision in the gate, so its parser gets
+    // the fuzz tier's totality guarantee too: every one of these must yield a
+    // value (or null) rather than throwing — `%zz` in particular would throw from
+    // a naive decodeURIComponent.
+    for (const purl of [
+      '',
+      'pkg:',
+      'pkg:/',
+      'pkg://npm/x',
+      'pkg:npm',
+      'pkg:npm/',
+      'pkg:npm/%zz',
+      'pkg:npm/x@%zz',
+      'pkg:npm/x?%zz=1',
+      'pkg:npm/@scope/x@1.0.0',
+      'pkg:npm/x@1.0.0?a=1&&=2&b&c=',
+      'pkg:npm/x@1.0.0#/sub/path',
+      `pkg:npm/${'a'.repeat(5000)}@1.0.0`,
+      'pkg:npm/x@1.0.0?a=' + '%'.repeat(500),
+      '\0pkg:npm/x',
+      'PKG:NPM/X@1.0.0',
+    ]) {
+      expect(() => matchPurl({ artifact: { purl } })).not.toThrow();
+    }
+  });
+
+  it('never throws building the acceptances from adversarial VEX docs', () => {
     for (const v of [
       undefined,
       null,
       'x',
       [{ statements: 'nope' }],
       [{ statements: [{ vulnerability: { name: 42, aliases: 7 } }] }],
+      [
+        {
+          statements: [{ vulnerability: { name: 'CVE-1' }, products: 'nope' }],
+        },
+      ],
+      [
+        {
+          statements: [
+            { vulnerability: { name: 'CVE-1' }, products: [null, 7] },
+          ],
+        },
+      ],
+      [
+        {
+          statements: [
+            {
+              vulnerability: { name: 'CVE-1' },
+              products: [{ '@id': 42, identifiers: 'nope' }],
+            },
+          ],
+        },
+      ],
     ]) {
-      expect(() => vexAcceptedIds(v as unknown as unknown[])).not.toThrow();
+      expect(() => recordAcceptances(v as unknown as unknown[])).not.toThrow();
     }
   });
 });

@@ -1,6 +1,8 @@
 import {
   SUPPRESSING_STATUSES,
+  OSV_SCANNED_PURL_TYPES,
   suppressingRecords,
+  osvEmittable,
   ignoredVulns,
   reasonFor,
   ignoreUntilFrom,
@@ -24,8 +26,24 @@ import {
 // same `SUPPRESSING_STATUSES` set): only `not_affected`/`fixed` generate a
 // suppression in ANY dialect; `affected` NEVER suppresses anywhere (the mcp
 // records — #226/#227 — must stay visible in grype/trivy/OSV/Code-Scanning).
+//
+// The SECOND invariant (#337) is SURFACE SCOPE, and it is why every fixture here
+// carries a `products` purl. Trivy scopes a suppression by product purl itself
+// (it reads the OpenVEX document), but OSV's `[[IgnoredVulns]]` keys on the
+// vulnerability id ALONE — so a row generated for an IMAGE-scoped `pkg:deb/...`
+// record could only ever silence a same-CVE finding on the repo TREE. Emission
+// is the only lever, hence `osvEmittable`: the deb fixtures below MUST appear in
+// the trivy dialect and MUST NOT appear in the OSV one.
 
-// A not_affected image-CVE record, shaped like .vex/CVE-*.openvex.json.
+// The three surfaces the fixtures argue about. `@id` is the purl form
+// `.vex/README.md` mandates (qualifier-less, canonical); `statementPurls` reads
+// it (and `identifiers.purl`) — see vex-ledger.ts.
+const DEB_PRODUCTS = [{ '@id': 'pkg:deb/debian/node-brace-expansion' }];
+const NPM_PRODUCTS = [{ '@id': 'pkg:npm/some-package' }];
+const PYPI_PRODUCTS = [{ '@id': 'pkg:pypi/ecdsa' }];
+
+// A not_affected image-CVE record, shaped like .vex/CVE-*.openvex.json — an
+// IMAGE surface (`pkg:deb/...`), which OSV never scans here.
 const NA_IMAGE: VexFile = {
   path: '.vex/CVE-2026-11822.openvex.json',
   doc: {
@@ -35,6 +53,7 @@ const NA_IMAGE: VexFile = {
         status: 'not_affected',
         justification: 'vulnerable_code_cannot_be_controlled_by_adversary',
         impact_statement: 'Accepted risk: local-only CI emulator.',
+        products: DEB_PRODUCTS,
       },
     ],
   },
@@ -50,6 +69,7 @@ const NA_FS: VexFile = {
         status: 'not_affected',
         justification: 'vulnerable_code_not_in_execute_path',
         impact_statement: 'Signing path unreachable.',
+        products: PYPI_PRODUCTS,
       },
     ],
   },
@@ -62,16 +82,26 @@ const AFFECTED_MCP: VexFile = {
     revisit_by:
       'waiting-on-upstream-issue https://github.com/semgrep/semgrep/issues/11506',
     statements: [
-      { vulnerability: { name: 'CVE-2026-52869' }, status: 'affected' },
+      {
+        vulnerability: { name: 'CVE-2026-52869' },
+        status: 'affected',
+        products: PYPI_PRODUCTS,
+      },
     ],
   },
 };
 
-// A `fixed` record.
+// A `fixed` record on the npm surface.
 const FIXED: VexFile = {
   path: '.vex/CVE-2026-0001.openvex.json',
   doc: {
-    statements: [{ vulnerability: { name: 'CVE-2026-0001' }, status: 'fixed' }],
+    statements: [
+      {
+        vulnerability: { name: 'CVE-2026-0001' },
+        status: 'fixed',
+        products: NPM_PRODUCTS,
+      },
+    ],
   },
 };
 
@@ -218,12 +248,124 @@ describe('ignoreUntilFrom', () => {
   });
 });
 
+describe('OSV_SCANNED_PURL_TYPES / osvEmittable (#337 surface scope)', () => {
+  // A statement carrying exactly the given product purls.
+  const stmt = (...purls: string[]) => ({
+    vulnerability: { name: 'CVE-2026-1234' },
+    status: 'not_affected',
+    products: purls.map((purl) => ({ '@id': purl })),
+  });
+
+  it('is exactly {npm, pypi} — the ecosystems the OSV job actually scans', () => {
+    // Coupled to the `osv-scanner` job in .github/workflows/security.yml:
+    // `--lockfile=package-lock.json` (npm) + the three
+    // .github/scanner-requirements/**/requirements.txt files (pypi). Adding a
+    // lockfile in a new ecosystem there without adding its purl type here makes
+    // a legitimate acceptance stop suppressing — the gate reds, never quietens.
+    expect([...OSV_SCANNED_PURL_TYPES].sort()).toEqual(['npm', 'pypi']);
+  });
+
+  it('accepts an npm-scoped statement', () => {
+    expect(osvEmittable(stmt('pkg:npm/some-package@1.0.0'))).toBe(true);
+  });
+
+  it('accepts a pypi-scoped statement', () => {
+    expect(osvEmittable(stmt('pkg:pypi/ecdsa@0.19.2'))).toBe(true);
+  });
+
+  it('accepts a statement whose several purls are ALL in scope', () => {
+    expect(osvEmittable(stmt('pkg:npm/a', 'pkg:pypi/b'))).toBe(true);
+  });
+
+  it('REJECTS every surface OSV does not scan here', () => {
+    // The image/OS surfaces (deb is the real case — the MiniStack emulator
+    // records) plus the container/binary types that a future record might name.
+    for (const purl of [
+      'pkg:deb/debian/node-brace-expansion@2.0.1',
+      'pkg:rpm/redhat/openssl@3.0.7',
+      'pkg:apk/alpine/busybox@1.36.1',
+      'pkg:oci/ministack@sha256%3Aabc',
+      'pkg:generic/openssl@3.0.7',
+      'pkg:golang/github.com/x/y@v1.2.3',
+    ]) {
+      expect(osvEmittable(stmt(purl))).toBe(false);
+    }
+  });
+
+  it('REJECTS a statement mixing an in-scope purl with an out-of-scope one', () => {
+    // `every`, not `some`: one unscanned surface disqualifies the whole
+    // statement, because the emitted row would apply to BOTH.
+    expect(osvEmittable(stmt('pkg:npm/a', 'pkg:deb/debian/a'))).toBe(false);
+    expect(osvEmittable(stmt('pkg:deb/debian/a', 'pkg:npm/a'))).toBe(false);
+  });
+
+  it('REJECTS a statement that proves no surface at all (fail-closed)', () => {
+    // No products, an empty products array, an unparseable purl, or a purl
+    // nested where the ledger does not read it: none proves the surface is in
+    // scope, so none is emitted. Not emitting can only make OSV louder.
+    expect(osvEmittable({})).toBe(false);
+    expect(osvEmittable({ products: [] })).toBe(false);
+    expect(osvEmittable(stmt('not-a-purl'))).toBe(false);
+    expect(osvEmittable(stmt(''))).toBe(false);
+    expect(
+      osvEmittable({
+        products: [{ subcomponents: [{ '@id': 'pkg:npm/a' }] }],
+      }),
+    ).toBe(false);
+  });
+
+  it('reads the purl from identifiers.purl as well as @id', () => {
+    // Both spellings are legal OpenVEX and this repo's records set both; the
+    // ledger's shared `statementPurls` is the single reader for grype + OSV.
+    expect(
+      osvEmittable({
+        products: [{ identifiers: { purl: 'pkg:npm/some-package@1.0.0' } }],
+      }),
+    ).toBe(true);
+  });
+});
+
 describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
-  it('maps each suppressing record to an {id, reason} row, sorted by path', () => {
+  it('maps each IN-SCOPE suppressing record to an {id, reason} row, sorted by path', () => {
     const rows = ignoredVulns([AFFECTED_MCP, NA_IMAGE, NA_FS]);
-    expect(rows.map((r) => r.id)).toEqual(['CVE-2026-11822', 'CVE-2024-23342']);
+    // NA_IMAGE is deb-scoped (#337) and NOT emitted; AFFECTED_MCP is `affected`
+    // (#188) and NOT emitted. Only the pypi record survives.
+    expect(rows.map((r) => r.id)).toEqual(['CVE-2024-23342']);
     expect(rows[0].reason).toContain('not_affected');
     expect(rows[0].ignoreUntil).toBeUndefined();
+  });
+
+  it('#337: DOES NOT emit a row for an image-scoped (pkg:deb) record', () => {
+    // The whole bug: an ignore row keyed on the id ALONE cannot suppress the
+    // emulator-image finding it was written for (OSV never scans the image
+    // here) — it can only silence the same CVE on the repo TREE. This is the
+    // OSV half of #337, and it fails on the pre-fix generator, which emitted
+    // every suppressing record regardless of surface.
+    expect(ignoredVulns([NA_IMAGE])).toEqual([]);
+    // …while the SAME record still reaches trivy, which scopes by purl itself.
+    expect(renderTrivyYaml([NA_IMAGE])).toContain(
+      '    - .vex/CVE-2026-11822.openvex.json',
+    );
+  });
+
+  it('#337: emits the row when the SAME CVE is accepted on an in-scope surface', () => {
+    // Proves the filter keys on the SURFACE, not on the id or the record name:
+    // an identical CVE on a pypi product IS emitted.
+    const npmScoped: VexFile = {
+      path: '.vex/npm-CVE-2026-11822.openvex.json',
+      doc: {
+        statements: [
+          {
+            vulnerability: { name: 'CVE-2026-11822' },
+            status: 'not_affected',
+            products: NPM_PRODUCTS,
+          },
+        ],
+      },
+    };
+    expect(ignoredVulns([npmScoped]).map((r) => r.id)).toEqual([
+      'CVE-2026-11822',
+    ]);
   });
 
   it('sets ignoreUntil when a suppressing record has a dated revisit_by', () => {
@@ -232,7 +374,11 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
       doc: {
         revisit_by: 'revisit 2026-10-01',
         statements: [
-          { vulnerability: { name: 'CVE-2026-9999' }, status: 'not_affected' },
+          {
+            vulnerability: { name: 'CVE-2026-9999' },
+            status: 'not_affected',
+            products: NPM_PRODUCTS,
+          },
         ],
       },
     };
@@ -246,7 +392,13 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
       {
         path: '.vex/s.json',
         doc: {
-          statements: [{ vulnerability: 'CVE-2026-5', status: 'not_affected' }],
+          statements: [
+            {
+              vulnerability: 'CVE-2026-5',
+              status: 'not_affected',
+              products: NPM_PRODUCTS,
+            },
+          ],
         },
       },
     ]);
@@ -265,8 +417,13 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
             {
               vulnerability: null as unknown as string,
               status: 'not_affected',
+              products: NPM_PRODUCTS,
             },
-            { vulnerability: { name: 'CVE-2026-6' }, status: 'not_affected' },
+            {
+              vulnerability: { name: 'CVE-2026-6' },
+              status: 'not_affected',
+              products: NPM_PRODUCTS,
+            },
           ],
         },
       },
@@ -284,7 +441,11 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
         doc: {
           revisit_by: 'wait-for-image-rebuild',
           statements: [
-            { vulnerability: { name: 'CVE-2026-7' }, status: 'not_affected' },
+            {
+              vulnerability: { name: 'CVE-2026-7' },
+              status: 'not_affected',
+              products: NPM_PRODUCTS,
+            },
           ],
         },
       },
@@ -301,7 +462,11 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
         path: '.vex/x.json',
         doc: {
           statements: [
-            { vulnerability: { name: 'GHSA-only' }, status: 'not_affected' },
+            {
+              vulnerability: { name: 'GHSA-only' },
+              status: 'not_affected',
+              products: NPM_PRODUCTS,
+            },
           ],
         },
       },
@@ -316,8 +481,16 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
         doc: {
           statements: [
             null as unknown as { status: string },
-            { vulnerability: { name: 'CVE-2026-8' }, status: 'affected' },
-            { vulnerability: { name: 'CVE-2026-9' }, status: 'not_affected' },
+            {
+              vulnerability: { name: 'CVE-2026-8' },
+              status: 'affected',
+              products: NPM_PRODUCTS,
+            },
+            {
+              vulnerability: { name: 'CVE-2026-9' },
+              status: 'not_affected',
+              products: NPM_PRODUCTS,
+            },
           ],
         },
       },
@@ -352,15 +525,25 @@ describe('renderTrivyYaml', () => {
 });
 
 describe('renderOsvToml', () => {
-  it('emits the header + an [[IgnoredVulns]] block per suppressing record', () => {
+  it('emits the header + an [[IgnoredVulns]] block per IN-SCOPE suppressing record', () => {
     const toml = renderOsvToml([AFFECTED_MCP, NA_IMAGE, NA_FS]);
     expect(toml).toContain('# GENERATED FILE');
     expect(toml).toContain('[[IgnoredVulns]]');
-    expect(toml).toContain('id = "CVE-2026-11822"');
     expect(toml).toContain('id = "CVE-2024-23342"');
-    // affected mcp CVE is NOT ignored.
+    // affected mcp CVE is NOT ignored (#188)…
     expect(toml).not.toContain('CVE-2026-52869');
+    // …and neither is the image-scoped deb record (#337).
+    expect(toml).not.toContain('CVE-2026-11822');
     expect(toml.endsWith('\n')).toBe(true);
+  });
+
+  it('documents the #337 surface scoping in the generated banner', () => {
+    // The banner is the only place a human reading osv-scanner.toml learns WHY
+    // an accepted image CVE has no row here — pin it so a future edit to the
+    // header cannot silently drop the explanation.
+    const toml = renderOsvToml([NA_FS]);
+    expect(toml).toContain('ALSO omitted (#337)');
+    expect(toml).toContain('# Emitted purl types: npm, pypi.');
   });
 
   it('escapes reason strings (quotes/newlines) safely via the TOML serializer', () => {
@@ -373,6 +556,7 @@ describe('renderOsvToml', () => {
             status: 'not_affected',
             justification: 'j',
             impact_statement: 'has "quotes" and\nnewline',
+            products: NPM_PRODUCTS,
           },
         ],
       },
@@ -404,6 +588,7 @@ const GOLDEN_FILE: VexFile = {
         vulnerability: { name: 'CVE-2026-0001' },
         status: 'fixed',
         justification: 'j',
+        products: NPM_PRODUCTS,
       },
     ],
   },
@@ -420,10 +605,19 @@ const GOLDEN_HEADER_TRIVY = `# GENERATED FILE — do NOT edit by hand.
 # the mcp CVEs, #226/#227) are omitted so they stay visible. See
 # .vex/README.md — the single authoring surface.`;
 
-const GOLDEN_HEADER_OSV = GOLDEN_HEADER_TRIVY.replace(
+// The OSV banner is the trivy one plus the #337 surface-scoping note — spelled
+// out literally (not derived from OSV_SCANNED_PURL_TYPES) so the golden pins the
+// rendered text independently of the constant that feeds it.
+const GOLDEN_HEADER_OSV = `${GOLDEN_HEADER_TRIVY.replace(
   "Trivy's",
   "OSV-Scanner's",
-);
+)}
+#
+# ALSO omitted (#337): a record whose product purl names a surface OSV does
+# not scan here (e.g. the pkg:deb/... MiniStack IMAGE records). OSV has no
+# package field on an ignore entry, so such a row could never suppress the
+# finding it was written for — only a same-CVE finding on the repo TREE.
+# Emitted purl types: npm, pypi.`;
 
 describe('golden output (byte-exact — pins every literal)', () => {
   it('renderTrivyYaml matches the golden file exactly', () => {
@@ -467,6 +661,7 @@ reason = "VEX fixed (j)"
             vulnerability: { name: 'CVE-2026-0002' },
             status: 'fixed',
             justification: 'j',
+            products: NPM_PRODUCTS,
           },
         ],
       },

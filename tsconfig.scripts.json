@@ -33,7 +33,8 @@
     "test/unit/vex-dialects.test.ts",
     "test/unit/npm-audit-gate.test.ts",
     "test/unit/npm-audit-to-sarif.test.ts",
-    "test/unit/vex-revisit-gate.test.ts"
+    "test/unit/vex-revisit-gate.test.ts",
+    "test/unit/grype-fs-gate.test.ts"
   ],
   "exclude": ["node_modules", "cdk.out"]
 }

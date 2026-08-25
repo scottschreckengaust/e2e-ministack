@@ -53,6 +53,13 @@ export default tseslint.config(
             // excluded from the emitting tsconfig.json and lint here.
             '.github/scripts/vex-revisit-gate.ts',
             'test/unit/vex-revisit-gate.test.ts',
+            // #337: grype-fs-gate.ts was self-contained (NO imports) until the
+            // purl-scoped coverage decision moved it onto the shared ledger — it
+            // now imports ./vex-ledger.ts with an explicit `.ts` extension, so it
+            // + its sole-importer unit test joined the emitting tsconfig.json's
+            // exclude list and lint here instead.
+            '.github/scripts/grype-fs-gate.ts',
+            'test/unit/grype-fs-gate.test.ts',
           ],
           // typescript-eslint caps the inferred default program at 8 matched
           // files by default; the fuzz-regression `.ts` targets (one per logic
@@ -60,10 +67,11 @@ export default tseslint.config(
           // 9th). These are tiny corpus-replay specs, so the perf cost of a
           // slightly larger default program is negligible — raise the cap rather
           // than move them into an emitting tsconfig (which would resurrect the
-          // `.js`-shadows-`.ts` problem #165 avoids). Raised again at #336 (the
-          // 13 fuzz targets + 8 named entries = 21 matched files); keep a little
-          // headroom so the next logic module doesn't have to touch this line.
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 24,
+          // `.js`-shadows-`.ts` problem #165 avoids). Raised again at #336, and
+          // at #337 (the 13 fuzz targets + 10 named entries = 23 matched files);
+          // keep a little headroom so the next logic module doesn't have to touch
+          // this line.
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 26,
         },
         tsconfigRootDir: import.meta.dirname,
       },

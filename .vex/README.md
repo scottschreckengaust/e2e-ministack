@@ -43,15 +43,15 @@ Each surface has its own feed channel, and **no two are the same** — this is t
 most common authoring mistake, because a record can be perfectly valid and still
 be inert on the surface you meant it for.
 
-| surface                     | how it receives the ledger                                                        | gate                                                      |
-| --------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| grype **image** (#84)       | `GRYPE_VEX_DOCUMENTS` env, glob `.vex/CVE-*`                                      | hard-fail @ high+, VEX-gated                              |
-| grype **filesystem** (#226) | `GRYPE_VEX_DOCUMENTS` env, broad glob `.vex/*`                                    | hard-fail @ **all** severities, JSON-derived (#284)       |
-| trivy **image** (#84)       | **generated** `trivy.yaml` `vulnerability.vex`                                    | hard-fail @ high+, VEX-gated                              |
-| trivy **filesystem**        | **generated** `trivy.yaml` `vulnerability.vex`                                    | report-only                                               |
-| OSV-Scanner (#251)          | **generated** `osv-scanner.toml` `[[IgnoredVulns]]`                               | hard-fail                                                 |
-| `npm audit` (#295)          | broad glob `.vex/*` for the verdict; **scoped** `.vex/npm-*` for SARIF visibility | hard-fail, JSON-derived                                   |
-| GitHub Security tab (#181)  | `vex-to-sarif-suppressions` + `advanced-security/dismiss-alerts`                  | dismisses covered alerts; re-opens if a record is dropped |
+| surface                     | how it receives the ledger                                                            | gate                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| grype **image** (#84)       | `GRYPE_VEX_DOCUMENTS` env, glob `.vex/CVE-*`                                          | hard-fail @ high+, VEX-gated                              |
+| grype **filesystem** (#226) | `GRYPE_VEX_DOCUMENTS` env, broad glob `.vex/*`                                        | hard-fail @ **all** severities, JSON-derived (#284)       |
+| trivy **image** (#84)       | **generated** `trivy.yaml` `vulnerability.vex`                                        | hard-fail @ high+, VEX-gated                              |
+| trivy **filesystem**        | **generated** `trivy.yaml` `vulnerability.vex`                                        | report-only                                               |
+| OSV-Scanner (#251)          | **generated** `osv-scanner.toml` `[[IgnoredVulns]]`, **npm/pypi records only** (#337) | hard-fail (npm surface; the pip scan is report-only)      |
+| `npm audit` (#295)          | broad glob `.vex/*` for the verdict; **scoped** `.vex/npm-*` for SARIF visibility     | hard-fail, JSON-derived                                   |
+| GitHub Security tab (#181)  | `vex-to-sarif-suppressions` + `advanced-security/dismiss-alerts`                      | dismisses covered alerts; re-opens if a record is dropped |
 
 Two consequences worth internalizing:
 
@@ -63,6 +63,13 @@ Two consequences worth internalizing:
   `TRIVY_VEX` env**, so `trivy.yaml` (auto-discovered from the CWD) is the only
   channel that actually loads records into trivy. See
   `docs/SECURITY-TOOLING.md` § MiniStack image scan.
+- **`osv-scanner.toml` is discovered next to the SCANNED file, not at the repo
+  root** (verified against the pinned osv-scanner 2.5.1: the npm run logs
+  `Loaded filter from: <root>/osv-scanner.toml`, the pip run logs no filter at
+  all, because `.github/scanner-requirements/<tool>/` holds no config). So the
+  generated ignore list currently reaches only the **npm** lockfile scan; a
+  `pkg:pypi/…` row is emitted but inert until the pip scan is given an explicit
+  `--config`. Inert means _visible_, so this is a precision gap, not a hole.
 
 ### Why the FS gate is JSON-derived for BOTH statuses (#284)
 
@@ -259,13 +266,20 @@ npm-audit injection is scoped to `.vex/npm-*` precisely so a deb record's
 `not_affected` can NEVER suppress (hide) an npm `affected` finding — it stays a
 visible open alert, per #188.
 
-> **Caveat — the verdict matchers are id-only, and that leaks across surfaces.**
-> The grype FS gate and the generated OSV dialect match a record to a finding by
-> **identifier alone, never by purl**. So an image-scoped `CVE-*` record will
-> suppress a _same-CVE_ finding on the repo tree (npm/pip), on a different
-> product, silently. Trivy FS is purl-precise and still reports it, which is how
-> the divergence becomes visible. Until this is fixed, treat a `CVE-*` record as
-> potentially broader than its purl claims.
+**The verdict matchers are purl-scoped too (#337).** The filename prefix is not
+the only scope: a record covers a finding only when its **own product purl**
+matches the one the scanner reported it on. The grype FS gate compares the
+record's `products[].@id` against the finding's `artifact.purl`
+(`vex-ledger.ts` → `isCovered`), and the OSV dialect is only **emitted** for a
+record whose product purl is a type OSV scans here (`npm`/`pypi` — OSV's
+`[[IgnoredVulns]]` has no package field, so emission is the only lever). So an
+image-scoped `CVE-*` record no longer suppresses a _same-CVE_ finding on the repo
+tree's npm/pip copy — that needs its own record, on its own purl. Both directions
+fail closed: an unparseable/missing product purl makes the record inert (the gate
+reds and you fix the record), and an unparseable finding purl leaves the finding
+uncovered (it surfaces). `npm audit` is the one deliberate exception — it reports
+no purl and no CVE at all, only a GHSA URL, so its gate stays id-only and is
+scoped by the `.vex/npm-*` filename instead (see `npm-audit-gate.ts`).
 
 **Product-purl shape (non-obvious).** List the **direct product purl** for the
 component the scanner catalogs — NOT a parent-subcomponent form. A filesystem
@@ -293,6 +307,13 @@ qualifiers for the same package (grype `?arch=amd64&distro=debian-13`, trivy
 [go-vex](https://github.com/openvex/go-vex) only matches when the statement's
 qualifiers equal the scanned component's. A base purl matches BOTH scanners
 across arch / distro-minor differences.
+
+The in-repo matcher (`vex-ledger.ts` → `purlMatches`, used by the grype FS gate
+and the OSV emission filter) follows the same convention and is deliberately
+**qualifier-insensitive**: the record's purl is the PATTERN, so qualifiers it
+omits are ignored, and an empty version is a wildcard — but every qualifier it
+DOES name must match, and type/namespace/name must be equal. Keeping the record
+qualifier-less therefore works for go-vex and for the in-repo gates alike.
 
 For debian packages carrying an **epoch**, grype keeps it in the version
 (`name@1:2.41-5`) while trivy strips it to a qualifier and uses the epoch-less
