@@ -37,6 +37,18 @@
 //   - Flags: the `vulnerable_code_not_in_execute_path` (never-run tools) class,
 //     and un-CVE'd `TEMP-…`/GHSA pseudo-ids that a CVE-keyed record can't match.
 
+// The `revisit_by` EXPIRY decision is imported, never re-derived (#342): the
+// shared ledger core is what the dated-expiry gate uses, and a report that
+// disagreed with the gate about whether an acceptance has lapsed is worse than
+// no report. Explicit `.ts` specifier because Node 24 type-strips this module at
+// runtime for the `.mjs` shims (an extensionless specifier does not resolve
+// there) — which is why this file's unit tests are excluded from the emitting
+// `tsconfig.json` and type-checked by `tsconfig.scripts.json` instead.
+import {
+  revisitDate,
+  isRevisitOverdue as ledgerRevisitOverdue,
+} from './vex-ledger.ts';
+
 /** A committed OpenVEX record's essentials (one statement per record here). */
 export interface VexRecord {
   /** CVE id from statements[].vulnerability.name. */
@@ -285,16 +297,27 @@ export function isoDay(value: string | null): string {
 }
 
 /**
- * True iff `revisitBy` is a calendar day on/before `today`'s calendar day.
- * Both operands become a `YYYYMMDD` integer (NaN when not a date). The single
- * `due <= now` is false whenever EITHER side is NaN — so a missing/event
- * revisit_by, or a malformed today, all read as "not overdue".
+ * True iff `revisitBy` names a calendar day on/before `today`'s calendar day.
+ * `today` is a report-supplied ISO day (or timestamp); a malformed one reads as
+ * "not overdue", as does a missing or event-token `revisitBy`.
+ *
+ * The verdict itself is DELEGATED to `vex-ledger.ts` — the same decision the
+ * dated-expiry gate makes — rather than derived from `isoDayNumber` above
+ * (#342). That local derivation was subtly wrong for the only dated form the
+ * ledger actually authors: `isoDayNumber` is ANCHORED (`/^…/`, correct for the
+ * Alerts API timestamps it was written for), so `revisit 2026-11-24` — the
+ * documented dated vocabulary of `.vex/README.md`, which the #336 revisit_by
+ * gate REQUIRES — yielded NaN and could never be overdue. The gate expired such
+ * a record while this report still called it `Accepted`: the same field, two
+ * readers, opposite verdicts. One reader now.
  */
 export function isRevisitOverdue(
   revisitBy: string | null | undefined,
   today: string,
 ): boolean {
-  return isoDayNumber(revisitBy) <= isoDayNumber(today);
+  const now = revisitDate(today);
+  if (now === undefined) return false;
+  return ledgerRevisitOverdue(revisitBy, now);
 }
 
 /**

@@ -60,6 +60,19 @@ export default tseslint.config(
             // exclude list and lint here instead.
             '.github/scripts/grype-fs-gate.ts',
             'test/unit/grype-fs-gate.test.ts',
+            // #342: same again for vex-report.ts, which now imports
+            // ./vex-ledger.ts with an explicit `.ts` extension (the overdue
+            // verdict is delegated to the ledger core instead of re-derived).
+            // alerts-findings.ts joins it because it imports vex-report.ts, so
+            // the `.ts`-specifier graph reaches it transitively. NOTE these two
+            // MODULES were previously covered incidentally — the project service
+            // reached them through their unit tests, which were still inside the
+            // emitting tsconfig.json. Excluding the tests (TS5097) drops that
+            // path, so module + test must both be named here.
+            '.github/scripts/vex-report.ts',
+            '.github/scripts/alerts-findings.ts',
+            'test/unit/vex-report.test.ts',
+            'test/unit/alerts-findings.test.ts',
           ],
           // typescript-eslint caps the inferred default program at 8 matched
           // files by default; the fuzz-regression `.ts` targets (one per logic
@@ -68,10 +81,10 @@ export default tseslint.config(
           // slightly larger default program is negligible — raise the cap rather
           // than move them into an emitting tsconfig (which would resurrect the
           // `.js`-shadows-`.ts` problem #165 avoids). Raised again at #336, and
-          // at #337 (the 13 fuzz targets + 10 named entries = 23 matched files);
-          // keep a little headroom so the next logic module doesn't have to touch
-          // this line.
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 26,
+          // at #337 (the 13 fuzz targets + 10 named entries = 23 matched files),
+          // and at #342 (14 named entries = 27); keep a little headroom so the
+          // next logic module doesn't have to touch this line.
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 30,
         },
         tsconfigRootDir: import.meta.dirname,
       },

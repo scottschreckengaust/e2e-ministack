@@ -11,7 +11,10 @@
 // Usage:
 //   node vex-report.mjs <vexDir> <findings.json> [today] [gateFloor] [out.md] [resolvedSince] [--scan-cves <cves.json>]
 //
-//   vexDir        directory of `.vex/CVE-*.openvex.json` records (the source of truth)
+//   vexDir        directory of `.vex/*.openvex.json` records (the source of truth).
+//                 EVERY record is read, whatever its filename prefix: a prefix
+//                 (`ecdsa-`, `pytest-`, `npm-`, bare `CVE-`) is a SCANNER-SURFACE
+//                 claim, never a discovery filter (#342).
 //   findings.json a JSON array of {id, scanner, severity, pkg, state, fixedAt} —
 //                 the Code-Scanning alerts normalized by `alerts-findings.mjs`
 //                 (tool-agnostic; `state`/`fixedAt` carry the second-ledger signal)
@@ -38,8 +41,8 @@
 //
 // The transform never throws; malformed inputs degrade to empty sets.
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { buildReport, renderMarkdown } from './vex-report.ts';
+import { ledgerRecords, vexRecordPaths } from './vex-ledger.ts';
 
 // Pull out the optional `--scan-cves <file>` pair (a JSON array of the CVE ids
 // the CURRENT image scan reports, produced by `sarif-cve-ids.mjs`), leaving the
@@ -73,36 +76,33 @@ if (!vexDir || !findingsFile) {
   process.exit(2);
 }
 
-// Read each `.vex/CVE-*.openvex.json` into the {cve,status,justification,revisitBy}
-// shape the logic module expects (one statement per record, as the repo authors them).
+// Read every `.vex/*.openvex.json` record into the
+// {cve,status,justification,revisitBy} shape the logic module expects.
+//
+// DISCOVERY and NORMALIZATION both live in the tested core (`vex-ledger.ts`,
+// #342): this shim keeps only the two syscalls + the JSON.parse, per the #165
+// shim contract. That is deliberate, not cosmetic — this file previously carried
+// its OWN `startsWith('CVE-')` filter while the sibling `vex-dialects.mjs`
+// filtered on the suffix alone, so one directory had two discovery rules and the
+// surface-prefixed records (`ecdsa-…`, `pytest-…`) were invisible HERE only. A
+// filter no coverage/mutation gate can see is a filter that drifts; single-
+// sourcing it makes the two shims agree by construction.
 function loadVexRecords(dir) {
   let entries;
   try {
-    entries = readdirSync(dir).filter(
-      (f) => f.startsWith('CVE-') && f.endsWith('.openvex.json'),
-    );
+    entries = readdirSync(dir);
   } catch {
     return [];
   }
-  const out = [];
-  for (const f of entries) {
+  const docs = [];
+  for (const file of vexRecordPaths(entries, dir)) {
     try {
-      const doc = JSON.parse(readFileSync(join(dir, f), 'utf8'));
-      const st = (doc.statements && doc.statements[0]) || {};
-      const vuln = st.vulnerability;
-      const cve = typeof vuln === 'object' && vuln ? vuln.name : vuln;
-      out.push({
-        cve,
-        status: st.status,
-        justification: st.justification,
-        // `revisit_by` may live at the document or statement level.
-        revisitBy: doc.revisit_by ?? st.revisit_by,
-      });
+      docs.push(JSON.parse(readFileSync(file, 'utf8')));
     } catch {
       // A malformed record is skipped, not fatal — the report must still render.
     }
   }
-  return out;
+  return ledgerRecords(docs);
 }
 
 const vexRecords = loadVexRecords(vexDir);

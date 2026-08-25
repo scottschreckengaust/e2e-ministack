@@ -15,6 +15,11 @@ import {
   type ScannerFinding,
   type UnifiedStatus,
 } from '../../.github/scripts/vex-report';
+import {
+  ledgerRecords,
+  vexRecordPaths,
+  isRevisitOverdue as ledgerIsRevisitOverdue,
+} from '../../.github/scripts/vex-ledger';
 
 // Unit tests for .github/scripts/vex-report.ts (#189): reconcile committed
 // `.vex/` records against scanner findings into a review-friendly report.
@@ -202,6 +207,41 @@ describe('isRevisitOverdue', () => {
       isRevisitOverdue('2026-07-14T23:59:59Z', '2026-07-14T00:00:00Z'),
     ).toBe(true);
   });
+  it('understands the DOCUMENTED dated form `revisit <ISO-date>` (#342)', () => {
+    // The only dated vocabulary `.vex/README.md` allows — and the one the #336
+    // revisit_by gate REQUIRES — puts the date after a keyword. Deriving this
+    // from the ANCHORED `isoDayNumber` made every such record unexpirable here
+    // while the ledger core expired it: same field, two readers, opposite
+    // verdicts. Every case below was `false` before the fix.
+    expect(isRevisitOverdue('revisit 2026-07-01', '2026-07-14')).toBe(true);
+    expect(isRevisitOverdue('revisit 2026-07-14', '2026-07-14')).toBe(true);
+    expect(isRevisitOverdue('revisit 2026-12-01', '2026-07-14')).toBe(false);
+    // The other three forms are event tokens — no date, never overdue.
+    expect(
+      isRevisitOverdue(
+        'waiting-on-upstream-issue https://github.com/o/r/security/advisories/GHSA-x',
+        '2026-07-14',
+      ),
+    ).toBe(false);
+    expect(isRevisitOverdue('waiting-for-fix CVE-2026-1', '2026-07-14')).toBe(
+      false,
+    );
+  });
+  it('agrees with the ledger core it delegates to (one expiry decision)', () => {
+    const today = '2026-07-14';
+    const now = new Date(`${today}T00:00:00.000Z`);
+    for (const value of [
+      'revisit 2026-07-01',
+      'revisit 2026-12-01',
+      'wait-for-image-rebuild',
+      '2026-07-14',
+      '2026-13-45',
+    ]) {
+      expect(isRevisitOverdue(value, today)).toBe(
+        ledgerIsRevisitOverdue(value, now),
+      );
+    }
+  });
 });
 
 describe('suggestJustification', () => {
@@ -246,9 +286,22 @@ describe('mutation-hardening — exact values, ordering, regex edges', () => {
     }
   });
 
-  it('isRevisitOverdue regex requires a full YYYY-MM-DD prefix (kills length/anchor mutants)', () => {
+  it('isRevisitOverdue reads a full YYYY-MM-DD anywhere in the cadence string (kills length/guard mutants)', () => {
+    // #342 changed this contract DELIBERATELY. It used to assert
+    // `isRevisitOverdue('x2026-07-14', '2026-07-14') === false` ("not anchored
+    // at start") — which encoded the bug: the ONLY dated `revisit_by` form the
+    // ledger authors is `revisit <ISO-date>` (.vex/README.md, enforced by the
+    // #336 gate), whose date is NEVER at index 0. The anchored read made every
+    // real dated record permanently un-expirable here while the gate expired it.
+    // The verdict now delegates to vex-ledger's unanchored search, so a date
+    // ANYWHERE counts — but a partial date still doesn't, and a malformed
+    // `today` still reads as "not overdue".
+    expect(isRevisitOverdue('revisit 2026-07-14', '2026-07-14')).toBe(true); // due today
+    expect(isRevisitOverdue('revisit 2026-07-15', '2026-07-14')).toBe(false); // window still open
     expect(isRevisitOverdue('2026-07-1', '2026-07-14')).toBe(false); // day not 2 digits
-    expect(isRevisitOverdue('x2026-07-14', '2026-07-14')).toBe(false); // not anchored at start
+    expect(isRevisitOverdue('wait-for-image-rebuild', '2026-07-14')).toBe(
+      false,
+    ); // event token
     expect(isRevisitOverdue('2026-07-14', '2026-07-1')).toBe(false); // today malformed
   });
 
@@ -2119,5 +2172,111 @@ describe('buildReport — gate severity join (#208)', () => {
       .split('\n')
       .filter((l) => l.includes('CVE-2026-4') && l.startsWith('|'));
     for (const row of ledgerRows) expect(row).not.toContain('/ gate');
+  });
+});
+
+// -- the `.vex/` ledger → report pathway, end to end (#342) --
+//
+// The bug this locks out: record DISCOVERY lived in the ungated `.mjs` shim,
+// which filtered `startsWith('CVE-') && endsWith('.openvex.json')`. That dropped
+// exactly the surface-PREFIXED records (`ecdsa-…`, `pytest-…`) — the only ones in
+// the ledger carrying a DATED `revisit_by` — so the fully-built `Revisit overdue`
+// pathway below could never fire from the real ledger. Discovery + the doc→record
+// projection now come from `vex-ledger.ts`, where the coverage (#124) and
+// mutation (#122) gates see them; this test walks that whole path.
+describe('the .vex/ ledger → report pathway (#342)', () => {
+  // A SYNTHETIC ledger, never the committed records: an agent may not add,
+  // delete or re-date a `.vex/` record (#322), and the two real prefixed records
+  // are deliberately NOT overdue today (one waits on an upstream advisory, the
+  // other is dated 2026-11-24). Keys are filenames as `readdirSync` returns them.
+  const LEDGER_DIR = '.vex';
+  const RECORDS: Record<string, unknown> = {
+    'README.md': null,
+    'CVE-2005-2541.openvex.json': {
+      revisit_by: 'wait-for-image-rebuild',
+      statements: [
+        {
+          vulnerability: { name: 'CVE-2005-2541' },
+          status: 'not_affected',
+          justification: NOT_AFFECTED,
+        },
+      ],
+    },
+    'prefixed-CVE-2026-99999.openvex.json': {
+      revisit_by: 'revisit 2026-01-01',
+      statements: [
+        {
+          vulnerability: { name: 'CVE-2026-99999' },
+          status: 'not_affected',
+          justification: NOT_AFFECTED,
+        },
+      ],
+    },
+  };
+  const TODAY = '2026-08-25';
+  const byPath = new Map(
+    Object.entries(RECORDS).map(([name, doc]) => [
+      `${LEDGER_DIR}/${name}`,
+      doc,
+    ]),
+  );
+
+  /** What `vex-report.mjs` now does, minus its two syscalls. */
+  function loadLedger(): VexRecord[] {
+    return ledgerRecords(
+      vexRecordPaths(Object.keys(RECORDS), LEDGER_DIR).map((p) =>
+        byPath.get(p),
+      ),
+    );
+  }
+
+  it('loads the surface-prefixed record too (the 46-of-48 bug)', () => {
+    expect(loadLedger().map((r) => r.cve)).toEqual([
+      'CVE-2005-2541',
+      'CVE-2026-99999',
+    ]);
+  });
+
+  it('yields exactly one `Revisit overdue` row, for the overdue prefixed record', () => {
+    const rows = buildReport(
+      loadLedger(),
+      [
+        finding('CVE-2005-2541', 'grype', 'HIGH'),
+        finding('CVE-2026-99999', 'grype', 'HIGH'),
+      ],
+      'HIGH',
+      TODAY,
+      TODAY,
+    );
+    const overdue = rows.filter((r) => r.status === 'Revisit overdue');
+    expect(overdue).toHaveLength(1);
+    expect(overdue[0].item).toBe('CVE-2026-99999');
+    expect(overdue[0].revisitBy).toBe('revisit 2026-01-01');
+    expect(overdue[0].revisitOverdue).toBe(true);
+    expect(overdue[0].actionNeeded).toBe(true);
+    // The event-token record waits on an event, not a clock — never overdue.
+    expect(rows.find((r) => r.item === 'CVE-2005-2541')?.status).toBe(
+      'Accepted',
+    );
+  });
+
+  it('renders the overdue record as an actionable row (not just in the legend)', () => {
+    const md = renderMarkdown(
+      buildReport(
+        loadLedger(),
+        [finding('CVE-2026-99999', 'grype', 'HIGH')],
+        'HIGH',
+        TODAY,
+        TODAY,
+      ),
+    );
+    // Scope to table ROWS naming the CVE: `Revisit overdue` also appears in the
+    // static legend, so an unscoped `toContain` would pass with no row at all.
+    const rows = md
+      .split('\n')
+      .filter((l) => l.startsWith('|') && l.includes('CVE-2026-99999'));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((l) => l.includes('Revisit overdue'))).toBe(true);
+    expect(rows.some((l) => l.includes('revisit 2026-01-01'))).toBe(true);
   });
 });

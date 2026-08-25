@@ -1,3 +1,5 @@
+import { readdirSync } from 'node:fs';
+import * as path from 'node:path';
 import {
   asArray,
   asRecord,
@@ -13,6 +15,11 @@ import {
   statementPurls,
   recordAcceptances,
   isCovered,
+  isVexRecordName,
+  vexRecordPaths,
+  statementName,
+  recordRevisitBy,
+  ledgerRecords,
 } from '../../.github/scripts/vex-ledger';
 
 // Unit tests for .github/scripts/vex-ledger.ts (issue #295): the SHARED VEX
@@ -801,5 +808,240 @@ describe('activeRecordIds', () => {
       0,
     );
     expect(activeRecordIds([null, 42], today).size).toBe(0);
+  });
+});
+
+// -- LEDGER DISCOVERY + RECORD PROJECTION (#342) --
+//
+// The drift these tests lock out: discovery of `.vex/` records was
+// re-implemented in each `.mjs` shim, and the two copies disagreed.
+// `vex-report.mjs` filtered `startsWith('CVE-') && endsWith('.openvex.json')`
+// while `vex-dialects.mjs` filtered the suffix alone — so over ONE directory the
+// report silently read 46 of the 48 committed records, dropping exactly the
+// surface-prefixed ones (`ecdsa-…`, `pytest-…`). Those two are the only records
+// carrying a DATED `revisit_by`, so the report's whole `Revisit overdue`
+// pathway was unreachable. A prefix is a SCOPE claim (which scanner surface the
+// record argues about — see `purlMatches` above); it is never a discovery
+// filter. These live here, not in the shims, because per #165 the shims are
+// invisible to the coverage (#124) and mutation (#122) gates.
+
+describe('isVexRecordName', () => {
+  it('accepts a record whatever its surface prefix', () => {
+    expect(isVexRecordName('CVE-2026-13149.openvex.json')).toBe(true);
+    expect(isVexRecordName('ecdsa-CVE-2024-23342.openvex.json')).toBe(true);
+    expect(isVexRecordName('pytest-CVE-2025-71176.openvex.json')).toBe(true);
+    expect(isVexRecordName('npm-GHSA-6v5v-wf23-fmfq.openvex.json')).toBe(true);
+  });
+  it('rejects a filename that is not a record', () => {
+    expect(isVexRecordName('README.md')).toBe(false);
+    expect(isVexRecordName('CVE-2026-13149.json')).toBe(false);
+    expect(isVexRecordName('CVE-2026-13149.openvex.json.bak')).toBe(false);
+    expect(isVexRecordName('openvex.json')).toBe(false);
+  });
+  it('is total on non-strings', () => {
+    expect(isVexRecordName(undefined)).toBe(false);
+    expect(isVexRecordName(null)).toBe(false);
+    expect(isVexRecordName(42)).toBe(false);
+  });
+});
+
+describe('vexRecordPaths', () => {
+  it('returns every record as a dir-joined, sorted path — prefix-agnostic', () => {
+    expect(
+      vexRecordPaths(
+        [
+          'pytest-CVE-2025-71176.openvex.json',
+          'CVE-2005-2541.openvex.json',
+          'README.md',
+        ],
+        '.vex',
+      ),
+    ).toEqual([
+      '.vex/CVE-2005-2541.openvex.json',
+      '.vex/pytest-CVE-2025-71176.openvex.json',
+    ]);
+  });
+  it('is total on a non-array listing and on non-string entries', () => {
+    expect(vexRecordPaths(undefined as unknown as unknown[], '.vex')).toEqual(
+      [],
+    );
+    expect(vexRecordPaths([null, 42, {}], '.vex')).toEqual([]);
+  });
+  it('reads EVERY committed record in the real `.vex/` ledger (#342)', () => {
+    // The acceptance criterion for #342: the loaded count equals the on-disk
+    // count. Both sides are derived from the same listing (never a transcribed
+    // number), so this stays true as the ledger grows — but it fails the instant
+    // a prefix filter is reintroduced, because the ledger carries
+    // surface-prefixed records today.
+    const dir = path.resolve(__dirname, '../../.vex');
+    const listing = readdirSync(dir);
+    const onDisk = listing.filter((name) => /\.openvex\.json$/.test(name));
+    expect(onDisk.length).toBeGreaterThan(0);
+
+    const found = vexRecordPaths(listing, dir);
+    expect(found).toHaveLength(onDisk.length);
+    for (const name of onDisk.filter((n) => !n.startsWith('CVE-'))) {
+      expect(found).toContain(`${dir}/${name}`);
+    }
+  });
+});
+
+describe('statementName', () => {
+  it('reads the object form this repo authors, normalized', () => {
+    expect(statementName({ vulnerability: { name: ' cve-2026-13149 ' } })).toBe(
+      'CVE-2026-13149',
+    );
+  });
+  it('also reads the bare-string form the OpenVEX spec allows', () => {
+    expect(statementName({ vulnerability: 'CVE-2005-2541' })).toBe(
+      'CVE-2005-2541',
+    );
+  });
+  it('names the vulnerability only — never an alias', () => {
+    expect(
+      statementName({
+        vulnerability: { name: 'CVE-1', aliases: ['GHSA-aaaa-bbbb-cccc'] },
+      }),
+    ).toBe('CVE-1');
+  });
+  it('is total: a missing/unusable vulnerability or a non-record yields null', () => {
+    expect(statementName({})).toBeNull();
+    expect(statementName({ vulnerability: {} })).toBeNull();
+    expect(statementName({ vulnerability: { name: 42 } })).toBeNull();
+    expect(statementName({ vulnerability: ['CVE-1'] })).toBeNull();
+    expect(statementName(null)).toBeNull();
+    expect(statementName('nope')).toBeNull();
+  });
+});
+
+describe('recordRevisitBy', () => {
+  it('prefers the DOCUMENT level — where every record in this ledger sets it', () => {
+    expect(
+      recordRevisitBy(
+        { revisit_by: 'revisit 2026-11-24' },
+        { revisit_by: '2000-01-01' },
+      ),
+    ).toBe('revisit 2026-11-24');
+  });
+  it('falls back to the statement level when the document omits the key', () => {
+    expect(recordRevisitBy({}, { revisit_by: 'wait-for-image-rebuild' })).toBe(
+      'wait-for-image-rebuild',
+    );
+    expect(
+      recordRevisitBy(null, { revisit_by: 'wait-for-image-rebuild' }),
+    ).toBe('wait-for-image-rebuild');
+  });
+  it('lets an explicit document-level `null` WIN over a statement value', () => {
+    // The bug `??` had: it treats an explicit document-level `null` as ABSENT
+    // and silently inherits a stale statement-level date.
+    expect(
+      recordRevisitBy({ revisit_by: null }, { revisit_by: '2000-01-01' }),
+    ).toBeUndefined();
+  });
+  it('is total: a non-string cadence at either level reads as absent', () => {
+    expect(recordRevisitBy({ revisit_by: 42 }, {})).toBeUndefined();
+    expect(
+      recordRevisitBy({}, { revisit_by: { on: '2000-01-01' } }),
+    ).toBeUndefined();
+    expect(recordRevisitBy({}, {})).toBeUndefined();
+    expect(recordRevisitBy(null, null)).toBeUndefined();
+  });
+});
+
+describe('ledgerRecords', () => {
+  it('projects one record per statement, carrying the ledger fields through', () => {
+    expect(
+      ledgerRecords([
+        {
+          revisit_by: 'wait-for-image-rebuild',
+          statements: [
+            {
+              vulnerability: { name: 'CVE-2005-2541' },
+              status: 'not_affected',
+              justification:
+                'vulnerable_code_cannot_be_controlled_by_adversary',
+            },
+          ],
+        },
+      ]),
+    ).toEqual([
+      {
+        cve: 'CVE-2005-2541',
+        status: 'not_affected',
+        justification: 'vulnerable_code_cannot_be_controlled_by_adversary',
+        revisitBy: 'wait-for-image-rebuild',
+      },
+    ]);
+  });
+  it('reads EVERY statement, not just statements[0]', () => {
+    // The shim this replaced read `statements[0]` only, so a multi-statement
+    // record had its 2nd..nth acceptances invisible in the report while still
+    // suppressing scanner findings.
+    expect(
+      ledgerRecords([
+        {
+          statements: [
+            { vulnerability: { name: 'CVE-1' }, status: 'not_affected' },
+            { vulnerability: { name: 'CVE-2' }, status: 'affected' },
+          ],
+        },
+      ]).map((r) => `${r.cve}:${r.status}`),
+    ).toEqual(['CVE-1:not_affected', 'CVE-2:affected']);
+  });
+  it('resolves revisit_by per statement via recordRevisitBy', () => {
+    expect(
+      ledgerRecords([
+        {
+          statements: [
+            {
+              vulnerability: { name: 'CVE-1' },
+              status: 'affected',
+              revisit_by: 'revisit 2026-11-24',
+            },
+          ],
+        },
+      ])[0]?.revisitBy,
+    ).toBe('revisit 2026-11-24');
+  });
+  it('reports a missing status as authored (never silently normalized)', () => {
+    expect(
+      ledgerRecords([{ statements: [{ vulnerability: 'CVE-1' }] }]),
+    ).toEqual([
+      {
+        cve: 'CVE-1',
+        status: 'undefined',
+        justification: undefined,
+        revisitBy: undefined,
+      },
+    ]);
+  });
+  it('drops a non-string justification rather than passing it through', () => {
+    expect(
+      ledgerRecords([
+        {
+          statements: [
+            { vulnerability: { name: 'CVE-1' }, status: 'x', justification: 7 },
+          ],
+        },
+      ])[0]?.justification,
+    ).toBeUndefined();
+  });
+  it('skips a statement with no usable vulnerability id, keeping its siblings', () => {
+    expect(
+      ledgerRecords([
+        {
+          statements: [
+            { status: 'not_affected' },
+            'nope',
+            null,
+            { vulnerability: { name: 'CVE-KEPT' }, status: 'affected' },
+          ],
+        },
+      ]).map((r) => r.cve),
+    ).toEqual(['CVE-KEPT']);
+  });
+  it('is total on malformed input (non-array, null docs, bad statements)', () => {
+    expect(ledgerRecords(undefined as unknown as unknown[])).toEqual([]);
+    expect(ledgerRecords([null, 42, { statements: 'nope' }])).toEqual([]);
   });
 });
