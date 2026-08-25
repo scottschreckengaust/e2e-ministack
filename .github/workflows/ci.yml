@@ -30,6 +30,7 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       shell: ${{ steps.filter.outputs.shell }}
       pin: ${{ steps.filter.outputs.pin }}
+      node-pin: ${{ steps.filter.outputs.node-pin }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -56,6 +57,13 @@ jobs:
               - 'AGENTS.md'
               - 'README.md'
               - 'services/_registry/ministack-pin.json'
+            # Files that carry a Node version pin, or any workflow/composite that
+            # could reintroduce a raw `node-version:` literal (#329).
+            node-pin:
+              - '.github/scripts/check-node-pin-drift.sh'
+              - '.github/actions/**'
+              - '.github/workflows/**'
+              - 'mise.toml'
             code:
               - 'bin/**'
               - 'lib/**'
@@ -230,11 +238,12 @@ jobs:
           # Content-pin the octocov binary itself (the action's default is
           # `version: latest`, a floating download) — same tarball + SHA-256
           # verify posture as the shellcheck/actionlint/OSV pins. The checksum
-          # is of octocov_v0.75.8_linux_amd64.tar.gz from the release's
+          # is of octocov_v0.75.12_linux_amd64.tar.gz from the release's
           # checksums-linux.txt; the action's gh-setup verifies it before
-          # install and fails on mismatch.
-          version: v0.75.8
-          checksum: 6c8451a3c1e535e47e60e681e69c35676d09bc9260d01ea904565c6d05138eee
+          # install and fails on mismatch — so `version:` and `checksum:` MUST
+          # be bumped together or the job hard-fails at install time.
+          version: v0.75.12
+          checksum: 258d6b348c81213b5c47b024a582b101b9dfc21ae19aaca9aea1e4b947274462
       # cdk-nag (AwsSolutions) runs inside synth; fails on any finding.
       - name: CDK synth (cdk-nag security gate)
         run: npm run synth
@@ -577,3 +586,26 @@ jobs:
           persist-credentials: false
       - name: Assert all MiniStack image digests are identical
         run: .github/scripts/check-ministack-digest-drift.sh
+
+  # Guard against Node version-pin drift (#329). The Node pin has two genuinely
+  # independent sources — `mise.toml` (local toolchain) and the `node-version`
+  # input default in `.github/actions/setup/action.yml` (CI) — because neither
+  # side can read the other. They must agree or the #185 local↔CI parity contract
+  # breaks silently. Previously that agreement was only ASSERTED in a comment,
+  # and the comment was false (a third literal had been duplicated into
+  # security.yml claiming to be "single-sourced"). This fail-closed check makes
+  # the claim enforceable: it compares the two sources AND rejects any
+  # reintroduced raw `node-version:` literal in a workflow or composite.
+  # Dependency-free (git/grep/sed), so it adds no new tool.
+  node-pin-drift:
+    name: Node pin drift guard
+    needs: changes
+    if: needs.changes.outputs.node-pin == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Assert the Node pin agrees across every pin site
+        run: .github/scripts/check-node-pin-drift.sh

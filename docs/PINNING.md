@@ -10,7 +10,7 @@ supply-chain safety. This file is the authoritative inventory.
 | GitHub Actions (all `uses:`)                           | `.github/workflows/*.yml`                           | commit SHA (`# vX` comment)                                                                              |
 | npm dependencies (transitive)                          | `package-lock.json` + `npm ci`                      | exact, lockfile-resolved                                                                                 |
 | `aws-cdk`, `aws-cdk-lib`                               | `package.json`                                      | exact (`2.1138.0`, `2.266.0`)                                                                            |
-| Node.js                                                | `mise.toml`, workflow `node-version`                | exact patch (`24.17.0`)                                                                                  |
+| Node.js                                                | `mise.toml` + `.github/actions/setup` default       | exact patch (`24.19.0`); two-site couple **enforced** by a drift guard (see below)                       |
 | Local CI-parity scanners (#185)                        | `mise.toml` `[tools]`                               | exact, **mirrors** the `security.yml`/`ci.yml` engine pins (see below)                                   |
 | npm (via Corepack)                                     | `package.json` (`packageManager`)                   | exact (`npm@11.13.0`)                                                                                    |
 | MiniStack image                                        | `ci.yml`                                            | digest (`@sha256:636c4ef5…`)                                                                             |
@@ -20,7 +20,7 @@ supply-chain safety. This file is the authoritative inventory.
 | CodeQL analyzer bundle                                 | `security.yml` (`tools:`)                           | `codeql-bundle-v2.25.6`                                                                                  |
 | Semgrep                                                | `security.yml`                                      | `==1.174.0`                                                                                              |
 | cfn-lint / checkov                                     | `security.yml`                                      | `==1.52.0` / `==3.3.13`                                                                                  |
-| OSV-Scanner                                            | `security.yml`                                      | `v2.4.0` **+ SHA-256 verify**                                                                            |
+| OSV-Scanner                                            | `security.yml`                                      | `v2.5.1` **+ SHA-256 verify**                                                                            |
 | Grype (`anchore/scan-action`)                          | `security.yml`                                      | action SHA + engine `grype-version:`; vuln **DB floats** (#183)                                          |
 | Trivy (`trivy-action`)                                 | `security.yml`                                      | action SHA + engine `version:`; vuln **DB floats**, cached (#183)                                        |
 | actionlint                                             | `security.yml`, pre-commit                          | `v1.7.12` (install script self-verifies)                                                                 |
@@ -66,9 +66,9 @@ leading-`v` strip**:
 
 | `mise.toml`             | Mirrors                                                             |
 | ----------------------- | ------------------------------------------------------------------- |
-| `grype = "0.114.0"`     | `security.yml` `grype-version: v0.114.0` (`anchore/scan-action`)    |
-| `trivy = "0.70.0"`      | `security.yml` `version: v0.70.0` (`aquasecurity/trivy-action`)     |
-| `osv-scanner = "2.4.0"` | `security.yml` OSV-Scanner download pin `v2.4.0`                    |
+| `grype = "0.117.0"`     | `security.yml` `grype-version: v0.117.0` (`anchore/scan-action`)    |
+| `trivy = "0.74.0"`      | `security.yml` `version: v0.74.0` (`aquasecurity/trivy-action`)     |
+| `osv-scanner = "2.5.1"` | `security.yml` OSV-Scanner download pin `v2.5.1`                    |
 | `shellcheck = "0.11.0"` | `ci.yml` `SHELLCHECK_VERSION: v0.11.0` (and pre-commit `v0.11.0.1`) |
 
 > **⚠️ This is a SECOND site each version lives (a #78 pin-sync target).** It
@@ -205,6 +205,33 @@ mise run update                       # umbrella: runs every update:* task
   workflow. This is the ergonomics surface of the #78 pin-sync updater;
   `update:node` / `update:actions` / `update:scanners` compose into `update`
   the same way as they land.
+
+### Node pin drift guard (#329) — enforcing a two-site couple
+
+The Node pin cannot be reduced to one literal: `mise.toml` drives the **local**
+toolchain and `.github/actions/setup/action.yml`'s `node-version` input default
+drives **CI**, and neither side can read the other (a GitHub Actions composite
+has no TOML reader, and `mise` does not parse workflow YAML). So the pin lives in
+exactly two places by necessity.
+
+What is _not_ acceptable is leaving that couple to a comment. It previously was,
+and the comment was wrong: a **third** literal had been duplicated into
+`security.yml`'s `vex-report` job under a note claiming it was "single-sourced"
+from `mise.toml`, while that job also pinned `actions/setup-node` at a SHA a full
+major behind the composite's. Both defects are now structurally impossible:
+
+- `vex-report` goes through `./.github/actions/setup` like every other job, so
+  there is exactly **one** `actions/setup-node` SHA and **one** CI Node literal.
+- `.github/scripts/check-node-pin-drift.sh` is a fail-closed gate (the
+  `Node pin drift guard` job in `ci.yml`, path-gated on any workflow / composite /
+  `mise.toml` change, and part of `npm run verify:all`) that fails when the two
+  sources disagree **or** when any workflow or composite reintroduces a raw
+  `node-version:` literal. It is dependency-free (git/grep/sed) and is a _drift_
+  gate, not a currency gate — proving the sites agree, not that the pin is newest
+  (currency is #99).
+
+If a job ever genuinely needs a different Node, add an input to the composite
+rather than a second literal — that keeps the guard meaningful.
 
 ### Drift audit (2026-06, issue #83)
 
