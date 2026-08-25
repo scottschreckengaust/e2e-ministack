@@ -940,9 +940,9 @@ describe('recordRevisitBy', () => {
   });
   it('is total: a non-string cadence at either level reads as absent', () => {
     expect(recordRevisitBy({ revisit_by: 42 }, {})).toBeUndefined();
-    expect(recordRevisitBy({}, { revisit_by: { on: '2000-01-01' } })).toBe(
-      undefined,
-    );
+    expect(
+      recordRevisitBy({}, { revisit_by: { on: '2000-01-01' } }),
+    ).toBeUndefined();
     expect(recordRevisitBy({}, {})).toBeUndefined();
     expect(recordRevisitBy(null, null)).toBeUndefined();
   });
