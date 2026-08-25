@@ -21,11 +21,12 @@
     // `.ts` targets (describe/it/expect) that this project also type-checks.
     "types": ["node", "jest"]
   },
-  // Also type-check the unit test that imports the `.ts`-cross-importing module
-  // (test/unit/vex-dialects.test.ts): it is EXCLUDED from the emitting
-  // tsconfig.json (below) so tsc never follows its import and emits a shadowing
-  // `.js`, so this noEmit project is where it gets type-checked. Scoped to that
-  // one file — the rest of test/** stays on the emitting build's graph.
+  // Also type-check the unit tests that import a `.ts`-cross-importing module
+  // (starting with test/unit/vex-dialects.test.ts): each is EXCLUDED from the
+  // emitting tsconfig.json (see its `exclude`) so tsc never follows the import
+  // and emits a shadowing `.js`, so this noEmit project is where they get
+  // type-checked. Listed file-by-file — the rest of test/** stays on the
+  // emitting build's graph.
   "include": [
     ".github/scripts/**/*.ts",
     "scripts/**/*.ts",
@@ -34,7 +35,9 @@
     "test/unit/npm-audit-gate.test.ts",
     "test/unit/npm-audit-to-sarif.test.ts",
     "test/unit/vex-revisit-gate.test.ts",
-    "test/unit/grype-fs-gate.test.ts"
+    "test/unit/grype-fs-gate.test.ts",
+    "test/unit/vex-report.test.ts",
+    "test/unit/alerts-findings.test.ts"
   ],
   "exclude": ["node_modules", "cdk.out"]
 }

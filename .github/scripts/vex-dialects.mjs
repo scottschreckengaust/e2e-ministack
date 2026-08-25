@@ -21,22 +21,26 @@
 // canonical ledger. Bad args exit 2.
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { renderTrivyYaml, renderOsvToml } from './vex-dialects.ts';
+import { vexRecordPaths } from './vex-ledger.ts';
 
 const VEX_DIR = '.vex';
 const TRIVY_PATH = 'trivy.yaml';
 const OSV_PATH = 'osv-scanner.toml';
 
 // Load every `.vex/*.openvex.json` record as { path, doc }. The path is the
-// repo-relative form trivy.yaml lists; sorting here is cosmetic (the generator
+// repo-relative form trivy.yaml lists; the ordering is cosmetic (the generator
 // re-sorts), but keeps the read order stable.
+//
+// Discovery is `vexRecordPaths` from the tested core (#342) — this shim's own
+// filter was CORRECT, but it was one of two independent filters over one
+// directory (the report shim's also matched `startsWith('CVE-')` and so missed
+// the surface-prefixed records). Both now call the same gated helper, so the
+// pair cannot drift apart again.
 function loadVexFiles() {
-  return readdirSync(VEX_DIR)
-    .filter((name) => name.endsWith('.openvex.json'))
-    .sort()
-    .map((name) => {
-      const path = `${VEX_DIR}/${name}`;
-      return { path, doc: JSON.parse(readFileSync(path, 'utf8')) };
-    });
+  return vexRecordPaths(readdirSync(VEX_DIR), VEX_DIR).map((path) => ({
+    path,
+    doc: JSON.parse(readFileSync(path, 'utf8')),
+  }));
 }
 
 // Read a committed file, or '' if it does not exist yet (first `check` before a

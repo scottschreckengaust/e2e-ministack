@@ -44,10 +44,11 @@
     // next to each. Exclude them from the emitting build too — they are loaded
     // only by jest (ts-jest) — and type-check them via tsconfig.scripts.json.
     "fuzz/**/*.ts",
-    // Same reason (#251/#295/#337): these unit tests import a `.github/scripts`
-    // logic module that does a runtime VALUE cross-import with an explicit `.ts`
-    // extension (vex-dialects → vex-to-sarif-suppressions; npm-audit-gate &
-    // npm-audit-to-sarif & grype-fs-gate → vex-ledger). An EMITTING project
+    // Same reason (#251/#295/#337/#342): these unit tests import a
+    // `.github/scripts` logic module that does a runtime VALUE cross-import with
+    // an explicit `.ts` extension (vex-dialects → vex-to-sarif-suppressions;
+    // npm-audit-gate & npm-audit-to-sarif & grype-fs-gate & vex-report →
+    // vex-ledger; alerts-findings → vex-report → vex-ledger). An EMITTING project
     // rejects a `.ts` import (TS5097) and can't set `allowImportingTsExtensions`,
     // so following it here would both fail and emit a shadowing `.js`. Exclude
     // them from the emitting build; they are type-checked by
@@ -57,6 +58,8 @@
     "test/unit/npm-audit-gate.test.ts",
     "test/unit/npm-audit-to-sarif.test.ts",
     "test/unit/vex-revisit-gate.test.ts",
-    "test/unit/grype-fs-gate.test.ts"
+    "test/unit/grype-fs-gate.test.ts",
+    "test/unit/vex-report.test.ts",
+    "test/unit/alerts-findings.test.ts"
   ]
 }

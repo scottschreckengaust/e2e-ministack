@@ -467,3 +467,176 @@ export function activeRecordIds(
   }
   return ids;
 }
+
+// -- LEDGER DISCOVERY + RECORD PROJECTION: the ONE way from a `.vex/` directory
+//    listing to per-statement records (#342) --
+//
+// WHY this is here and not in each shim: the `.mjs` CLI shims are the one layer
+// NO gate can see — per #165 they hold argv/read/write plumbing only, and on
+// that premise they are outside the coverage (#124) and mutation (#122) gates.
+// DECISIONS had leaked in anyway and then drifted: `vex-report.mjs` discovered
+// records with `startsWith('CVE-') && endsWith('.openvex.json')` while
+// `vex-dialects.mjs` used the suffix alone, so over ONE directory the report
+// read 46 of the 48 committed records. The two it dropped were exactly the
+// surface-prefixed ones (`ecdsa-…`, `pytest-…`) — the only records carrying a
+// DATED `revisit_by` — so the report's whole `Revisit overdue` pathway was
+// unreachable. Single-sourcing discovery here makes that divergence impossible
+// by construction, rather than relying on two filters staying aligned.
+//
+// The SYSCALLS stay in the shims (`readdirSync`/`readFileSync`): this module is
+// a pure-transform core (jest imports it in-process, and the grype-FS gate runs
+// it on a bare checkout with no `npm ci`). What moves is every DECISION — which
+// entries are records, which id a statement is known by, where `revisit_by` is
+// read from, and how many statements a document contributes.
+
+/** The filename suffix every `.vex/` record carries. */
+export const VEX_RECORD_SUFFIX = '.openvex.json';
+
+/**
+ * Whether a directory entry names a `.vex/` record. The suffix is the WHOLE
+ * rule. A leading `<surface>-` prefix (`ecdsa-`, `pytest-`, `npm-`) says which
+ * scanner surface the record argues about (`.vex/README.md`) — that is a SCOPE
+ * claim, decided by `purlMatches` above against the finding's purl, and it must
+ * never narrow DISCOVERY: a record the reader cannot see is a record nobody can
+ * reconcile. Non-strings yield false (totality).
+ */
+export function isVexRecordName(name: unknown): name is string {
+  return typeof name === 'string' && name.endsWith(VEX_RECORD_SUFFIX);
+}
+
+/**
+ * Every `.vex/` record in a directory listing, as `dir`-joined paths, sorted.
+ * `entries` is a raw `readdirSync(dir)` result — listing the directory is all
+ * the shim decides. Joined with a literal `/` rather than `path.join` because
+ * the generated dialect files (`trivy.yaml`, `osv-scanner.toml`) EMBED these
+ * paths and are committed, so they must be POSIX-form on every host; sorted so
+ * those generated artifacts are byte-stable whatever order the filesystem
+ * reports. A non-array listing yields an empty list; never throws.
+ */
+export function vexRecordPaths(
+  entries: readonly unknown[],
+  dir: string,
+): string[] {
+  const paths: string[] = [];
+  for (const entry of asArray(entries)) {
+    if (isVexRecordName(entry)) paths.push(`${dir}/${entry}`);
+  }
+  return paths.sort();
+}
+
+/**
+ * The PRIMARY id one OpenVEX statement is known by — its `vulnerability.name`,
+ * normalized — accepting BOTH shapes the spec allows: the object form
+ * (`{"name": "CVE-…"}`, what this repo authors) and the bare-string form
+ * (`"CVE-…"`). Aliases are deliberately NOT included: this identifies the ONE
+ * record, where `statementIds` enumerates everything it may MATCH. Null when
+ * the statement names nothing usable.
+ *
+ * DELIBERATELY MORE TOLERANT than `statementIds`, which reads the object form
+ * only — the two have opposite fail-directions and must not be merged.
+ * `statementIds` feeds the SUPPRESSION matcher, where an unreadable shape must
+ * leave the record INERT (fail-closed: it cannot quiet a gate). This feeds the
+ * report's VISIBILITY projection, where an unreadable shape must still be SHOWN
+ * (fail-open: dropping it would hide a committed acceptance from review).
+ * Widening `statementIds` to the bare-string form would instead make a record
+ * that is inert today start suppressing findings — the one direction #335 C2
+ * forbids.
+ */
+export function statementName(statement: unknown): string | null {
+  const stmt = asRecord(statement);
+  if (stmt === null) return null;
+  const vuln = stmt.vulnerability;
+  const asObject = asRecord(vuln);
+  return normId(asObject === null ? vuln : asObject.name);
+}
+
+/**
+ * The `revisit_by` governing ONE statement: the DOCUMENT-level value whenever
+ * the document carries the key at all, else the statement-level one. Every
+ * record in this ledger sets it at the document level (#340 backfilled all of
+ * them), so this precedence is live logic, not a hypothesis.
+ *
+ * `!== undefined` — NOT `??` — is the load-bearing detail: `??` treats an
+ * explicit document-level `null` as ABSENT and falls through to the statement,
+ * so a record that deliberately BLANKS the document cadence would silently
+ * inherit a stale statement-level date, and a dated-expiry mechanism that reads
+ * the wrong date is worse than none. A non-string result (null, a number, a
+ * nested object) yields undefined — "no readable cadence" — which every
+ * consumer treats as not-overdue. Never throws.
+ */
+export function recordRevisitBy(
+  doc: unknown,
+  statement: unknown,
+): string | undefined {
+  const docLevel = asRecord(doc) ?? {};
+  const stmtLevel = asRecord(statement) ?? {};
+  const raw =
+    docLevel.revisit_by !== undefined
+      ? docLevel.revisit_by
+      : stmtLevel.revisit_by;
+  return typeof raw === 'string' ? raw : undefined;
+}
+
+/**
+ * One `.vex/` statement's essentials, as the reconciliation report consumes
+ * them. Structurally the `VexRecord` of `vex-report.ts` — kept as its own type
+ * so this module stays dependency-free (the report imports nothing from here at
+ * runtime), with the call site's assignment the compile-time drift check.
+ */
+export interface LedgerRecord {
+  /** The vulnerability id the statement names (`statementName`). */
+  cve: string;
+  /** The authored status: not_affected | affected | fixed | under_investigation. */
+  status: string;
+  /** The `not_affected` justification enum, when the statement carries one. */
+  justification?: string;
+  /** The governing `revisit_by` — a dated form or an event token (#340). */
+  revisitBy?: string;
+}
+
+/**
+ * Parsed `.vex/` documents projected to per-STATEMENT records.
+ *
+ * EVERY statement is read, not just `statements[0]`: OpenVEX allows a document
+ * to carry many, and the shim this replaced read only the first — so a
+ * multi-statement record would have had its 2nd..nth acceptances invisible in
+ * the report while still suppressing scanner findings, which is precisely the
+ * asymmetry (suppressed but unreviewable) the ledger exists to prevent.
+ *
+ * A statement whose vulnerability id is unusable is skipped — it can be neither
+ * keyed nor displayed — and its siblings are kept. Everything else passes
+ * through as AUTHORED (an unset status reads as `'undefined'`, exactly what the
+ * report renders as `Investigating`) so the report shows what the ledger SAYS
+ * rather than a normalized guess. Malformed input yields an empty list; never
+ * throws.
+ */
+export function ledgerRecords(docs: readonly unknown[]): LedgerRecord[] {
+  const records: LedgerRecord[] = [];
+  for (const rawDoc of asArray(docs)) {
+    const doc = asRecord(rawDoc);
+    if (doc === null) continue;
+    for (const rawStmt of asArray(doc.statements)) {
+      const stmt = asRecord(rawStmt);
+      if (stmt === null) continue;
+      // Unpack the statement's own fields FIRST, then require a usable id. The
+      // order matters: `statementName` is total (it answers `null` for a
+      // non-record), so checking it first would make the `stmt === null` guard
+      // above merely redundant rather than load-bearing — an equivalent mutant
+      // Stryker can't kill. Destructuring a non-record statement throws here
+      // instead, which is what the guard is for (mirrors `doc.statements` doing
+      // the same job for the doc-level guard).
+      const { status, justification } = stmt;
+      const revisitBy = recordRevisitBy(doc, stmt);
+      const cve = statementName(stmt);
+      if (cve === null) continue;
+      records.push({
+        cve,
+        status: String(status),
+        justification:
+          typeof justification === 'string' ? justification : undefined,
+        revisitBy,
+      });
+    }
+  }
+  return records;
+}
