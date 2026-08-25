@@ -204,12 +204,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Install OSV-Scanner
-        # Pinned to v2.4.0 AND verified by SHA-256 so a re-tagged/tampered
-        # release is rejected (content pin, not just a tag pin).
+        # Pinned to v2.5.1 AND verified by SHA-256 so a re-tagged/tampered
+        # release is rejected (content pin, not just a tag pin). The checksum is
+        # the `osv-scanner_linux_amd64` line of that release's
+        # `osv-scanner_SHA256SUMS`; bump both together, and keep the version in
+        # lockstep with `mise.toml`'s `osv-scanner` (#328).
         run: |
           curl -sSfL -o osv-scanner \
-            https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
-          echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
+            https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64
+          echo "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
       # npm surface — HARD-FAIL (unchanged). OSV-Scanner v2 form:
       # `scan source --lockfile=…` (the bare `scan --lockfile=` is deprecated).
@@ -621,7 +624,7 @@ jobs:
           # Pin the grype ENGINE (#183): the action SHA alone leaves grype
           # floating to "latest at runtime", so local↔CI (and run↔run) diverge.
           # The vuln DB still floats by design (fresh CVEs). Bump deliberately.
-          grype-version: v0.114.0
+          grype-version: v0.117.0
           path: '.'
           fail-build: false # gate is derived from the JSON below, not fail-build
           severity-cutoff: negligible # strictest floor (#284); the TS gate is authoritative
@@ -660,7 +663,7 @@ jobs:
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
-          grype-version: v0.114.0
+          grype-version: v0.117.0
           path: '.'
           fail-build: false # visibility only; gate is derived from the JSON above
           severity-cutoff: negligible # strictest floor (#284) — surface every severity
@@ -764,7 +767,7 @@ jobs:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
           # Pin the grype ENGINE (#183) — action SHA alone floats grype to latest.
-          grype-version: v0.114.0
+          grype-version: v0.117.0
           sbom: image.sbom.json
           fail-build: false # gate is derived from the JSON below, not fail-build
           severity-cutoff: high
@@ -806,7 +809,7 @@ jobs:
         continue-on-error: true # visibility path only; never fails the job
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          grype-version: v0.114.0
+          grype-version: v0.117.0
           sbom: image.sbom.json
           fail-build: false # do not gate on this scan
           severity-cutoff: high
@@ -832,7 +835,7 @@ jobs:
         continue-on-error: true # report-only; must not fail the gate job
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          grype-version: v0.114.0
+          grype-version: v0.117.0
           sbom: image.sbom.json
           fail-build: false
           severity-cutoff: high
@@ -947,12 +950,14 @@ jobs:
         continue-on-error: true # report-only: never fail the job on this step
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          # Pin the trivy ENGINE (#183) — matches trivy-action v0.36.0's own
-          # default (v0.70.0), made explicit so local↔CI (and run↔run) don't
-          # drift when the action later bumps its bundled default. The vuln DB
-          # still floats by design. This is the step that INSTALLS trivy; the
+          # Pin the trivy ENGINE (#183) explicitly so local↔CI (and run↔run)
+          # don't drift. NB this now deliberately OVERRIDES trivy-action v0.36.0's
+          # bundled default (v0.70.0) to reach current trivy (#328) — the explicit
+          # pin is what makes that possible without waiting on an action release.
+          # Must stay in lockstep with `mise.toml`'s `trivy`. The vuln DB still
+          # floats by design. This is the step that INSTALLS trivy; the
           # report-table step below reuses it via skip-setup-trivy.
-          version: v0.70.0
+          version: v0.74.0
           scan-type: fs
           scan-ref: '.'
           format: sarif
@@ -1053,10 +1058,11 @@ jobs:
         continue-on-error: true # keep failure OFF the step so the report always derives + uploads; enforced below
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          # Pin the trivy ENGINE (#183) — explicit == the action's own v0.70.0
-          # default; DB still floats. This step INSTALLS trivy; the convert steps
-          # below reuse the binary (skip-setup-trivy) + cached result.
-          version: v0.70.0
+          # Pin the trivy ENGINE (#183) — deliberately AHEAD of the action's own
+          # bundled v0.70.0 default (#328); must match `mise.toml`'s `trivy` and
+          # the trivy-fs job. DB still floats. This step INSTALLS trivy; the
+          # convert steps below reuse the binary (skip-setup-trivy) + cached result.
+          version: v0.74.0
           scan-type: image
           image-ref: 'ministackorg/ministack:full@sha256:8674b54b185972791135a04bb06d6507df0027c88bf9c530b2173c0955e9a686'
           format: json
@@ -1160,9 +1166,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      # Was a direct `actions/setup-node` pin plus an inline Node-version literal
+      # whose comment CLAIMED the pin was single-sourced from mise.toml — it was
+      # not, and the SHA had drifted a full major from the composite's
+      # (#327/#329). Routed through the composite instead: one setup-node SHA and
+      # one CI Node literal repo-wide, both now enforced by
+      # `.github/scripts/check-node-pin-drift.sh`. The checkout above satisfies the
+      # composite's "must check out first" requirement.
+      - uses: ./.github/actions/setup
         with:
-          node-version: '24.17.0' # matches the mise.toml pin (single-sourced there)
+          npm-ci: 'false' # report scripts use Node built-ins + the .ts logic only; no deps
       # Pull the CURRENT-run image-scan SARIFs (produced by the ministack-image /
       # trivy-image jobs this run `needs:`) so we can cross-check the Alerts API
       # against the CURRENT scan (#210) — NO re-scan. Non-fatal if absent (e.g. a

@@ -303,6 +303,9 @@ run_gate "VEX revisit_by gate" vex_revisit_gate
 # —— security.yml: MiniStack image-digest drift guard (ci.yml) ——
 run_gate "MiniStack digest drift guard" .github/scripts/check-ministack-digest-drift.sh
 
+# —— ci.yml: Node version-pin drift guard (#329) ——
+run_gate "Node pin drift guard" .github/scripts/check-node-pin-drift.sh
+
 # —— security.yml: actionlint (workflow correctness) ——
 actionlint_gate() {
   have actionlint || { note_skip "actionlint" "actionlint not on PATH (pre-commit installs it, or brew/go install)"; return 0; }

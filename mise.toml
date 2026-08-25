@@ -1,5 +1,10 @@
 [tools]
-node = "24.17.0"
+# ⚠️ VERSION-SYNC: this is the LOCAL toolchain pin. CI's Node literal lives ONCE
+# in `.github/actions/setup/action.yml` (`node-version` input default) — CI can't
+# read mise.toml, so the two are genuinely independent sources and MUST agree.
+# That is ENFORCED, not asserted: `.github/scripts/check-node-pin-drift.sh` is a
+# fail-closed CI gate that reds on divergence (#329). Bump both in one commit.
+node = "24.19.0"
 
 # ── Local CI-parity scanners (#185) ─────────────────────────────────────────
 # So a fully-sandboxed agent can run the reproducible security gates locally at
@@ -18,9 +23,9 @@ node = "24.17.0"
 # here too (and vice-versa). The vuln DB still floats by design (#183), so local
 # and CI can still diverge on a fresh-CVE window — see docs/SECURITY-TOOLING.md
 # § "Local CI parity for an agent sandbox".
-grype = "0.114.0"       # == security.yml `grype-version: v0.114.0` (anchore/scan-action)
-trivy = "0.70.0"        # == security.yml `version: v0.70.0` (aquasecurity/trivy-action)
-osv-scanner = "2.4.0"   # == security.yml OSV-Scanner download pin `v2.4.0`
+grype = "0.117.0"       # == security.yml `grype-version: v0.117.0` (anchore/scan-action)
+trivy = "0.74.0"        # == security.yml `version: v0.74.0` (aquasecurity/trivy-action)
+osv-scanner = "2.5.1"   # == security.yml OSV-Scanner download pin `v2.5.1`
 shellcheck = "0.11.0"   # == ci.yml `SHELLCHECK_VERSION: v0.11.0` (and pre-commit shellcheck-py v0.11.0.1)
 
 # Pin-sync tasks (#152, the ergonomics surface of the #78 pin-sync updater).
