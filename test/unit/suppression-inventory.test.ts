@@ -3,6 +3,7 @@ import {
   isDocPath,
   isSelfPath,
   isVexRecord,
+  isTestPath,
   isBacktickQuoted,
   isCommentLine,
   classifyHit,
@@ -80,6 +81,51 @@ describe('suppression-inventory — path/line predicates', () => {
     expect(isVexRecord('.vex/ecdsa-CVE-2024-23342.openvex.json')).toBe(true);
     expect(isVexRecord('.vex/README.md')).toBe(false);
     expect(isVexRecord('trivy.yaml')).toBe(false);
+  });
+
+  it('isTestPath: the test/ tree or a *.test.* / *.spec.* filename', () => {
+    expect(isTestPath('test/unit/vex-dialects.test.ts')).toBe(true);
+    expect(isTestPath('test/setup.fast-check.ts')).toBe(true);
+    // specs that live OUTSIDE test/ are caught by the filename signal
+    expect(isTestPath('services/lambda/invoke.test.ts')).toBe(true);
+    expect(isTestPath('fuzz/handler.regression.test.js')).toBe(true);
+    // the real config SURFACES must never be test paths
+    expect(isTestPath('osv-scanner.toml')).toBe(false);
+    expect(isTestPath('trivy.yaml')).toBe(false);
+    expect(isTestPath('.github/workflows/ci.yml')).toBe(false);
+    expect(isTestPath('.gitleaks.toml')).toBe(false);
+    expect(isTestPath('lib/ministack-stack.ts')).toBe(false);
+    // a `test` substring elsewhere in the path is not a test tree
+    expect(isTestPath('lib/latest/thing.ts')).toBe(false);
+    expect(isTestPath('src/protest.ts')).toBe(false);
+  });
+
+  it.each([
+    'a.test.ts',
+    'a.test.js',
+    'a.test.mjs',
+    'a.test.cjs',
+    'a.test.tsx',
+    'a.test.jsx',
+    'a.spec.ts',
+    'a.spec.js',
+    'a.spec.mjs',
+    'a.spec.cjs',
+    'a.spec.tsx',
+    'a.spec.jsx',
+  ])('isTestPath: recognizes the spec filename %s', (p) => {
+    expect(isTestPath(p)).toBe(true);
+  });
+
+  it.each([
+    'a.test.toml', // not a JS/TS extension
+    'a.tests.ts', // not the `.test.` segment
+    'a.specs.ts',
+    'atest.ts', // no dot before `test`
+    'a.test.ts.bak', // spec segment not at end of path
+    'a.ts',
+  ])('isTestPath: does NOT recognize %s', (p) => {
+    expect(isTestPath(p)).toBe(false);
   });
 
   it('isCommentLine: recognizes #, //, /*, *, <!-- leaders', () => {
@@ -175,7 +221,108 @@ describe('suppression-inventory — classifyHit (all buckets)', () => {
     expect(c.reason).toMatch(/comment/);
   });
 
-  it('6: active registered config directive → registered', () => {
+  it('6: config directive in a test spec → wiring (spec is not a config surface)', () => {
+    // The false positive this rule exists for: test/unit/vex-dialects.test.ts
+    // asserts on the FORMAT of the generated osv-scanner.toml ignore block, so
+    // the literal must appear in the spec. A spec is not a config surface.
+    const c = classifyHit({
+      path: 'test/unit/vex-dialects.test.ts',
+      text: "    expect(toml).toContain('[[IgnoredVulns]]');",
+      token: tok({
+        id: 'osv-ignored-vulns',
+        pattern: '\\[\\[IgnoredVulns\\]\\]',
+        kind: 'config',
+      }),
+      re: /\[\[IgnoredVulns\]\]/,
+    });
+    expect(c.bucket).toBe('wiring');
+    expect(c.reason).toMatch(/test spec/);
+  });
+
+  it('6: a BARE config token in a spec fixture (no quotes at all) → wiring', () => {
+    // A continuation line inside a multi-line template-literal golden fixture:
+    // no backticks/quotes on the line, so only the SURFACE argument covers it.
+    const c = classifyHit({
+      path: 'test/unit/vex-dialects.test.ts',
+      text: '[[IgnoredVulns]]',
+      token: tok({
+        id: 'osv-ignored-vulns',
+        pattern: '\\[\\[IgnoredVulns\\]\\]',
+        kind: 'config',
+      }),
+      re: /\[\[IgnoredVulns\]\]/,
+    });
+    expect(c.bucket).toBe('wiring');
+    expect(c.reason).toMatch(/test spec/);
+  });
+
+  it('6 is NOT "path is a test ⇒ exempt": a REAL comment-kind suppression directive in a test file stays raw', () => {
+    // THE SAFETY TEST for rule 6. The test-spec exemption is scoped to
+    // `config`-kind tokens; a `comment`-kind token IS the suppression wherever
+    // it lives, so every inline directive in the catalog must still be flagged
+    // inside test/**. If this ever goes green as `wiring`, rule 6 has become a
+    // hole in the detector.
+    const inlineDirectives: Array<[string, string, string, RegExp]> = [
+      [
+        'eslint-disable',
+        'eslint-disable',
+        '  // eslint-disable-next-line no-console',
+        /eslint-disable/,
+      ],
+      ['semgrep-nosemgrep', 'nosemgrep', '  // nosemgrep', /nosemgrep/],
+      [
+        'istanbul-ignore',
+        'istanbul\\s+ignore',
+        '  /* istanbul ignore next */',
+        /istanbul\s+ignore/,
+      ],
+      [
+        'stryker-disable',
+        'Stryker\\s+(disable|restore)',
+        '  // Stryker disable next-line all',
+        /Stryker\s+(disable|restore)/,
+      ],
+      [
+        'ts-expect-error',
+        '@ts-expect-error',
+        '  // @ts-expect-error probing a bad call',
+        /@ts-expect-error/,
+      ],
+      [
+        'checkov-inline-skip',
+        'checkov:skip=',
+        '  # checkov:skip=CKV_AWS_18',
+        /checkov:skip=/,
+      ],
+    ];
+    for (const [id, pattern, text, re] of inlineDirectives) {
+      const c = classifyHit({
+        path: 'test/unit/some.test.ts',
+        text,
+        token: tok({ id, pattern, kind: 'comment' }),
+        re,
+      });
+      expect({ id, bucket: c.bucket }).toEqual({ id, bucket: 'raw' });
+    }
+  });
+
+  it('6 does not exempt a config directive on a REAL config surface', () => {
+    // The live, generated osv-scanner.toml block stays raw — the gate must not
+    // get quieter anywhere outside a spec file.
+    const c = classifyHit({
+      path: 'osv-scanner.toml',
+      text: '[[IgnoredVulns]]',
+      token: tok({
+        id: 'osv-ignored-vulns',
+        pattern: '\\[\\[IgnoredVulns\\]\\]',
+        kind: 'config',
+      }),
+      re: /\[\[IgnoredVulns\]\]/,
+    });
+    expect(c.bucket).toBe('raw');
+  });
+
+  it('7: active registered config directive → registered', () => {
     const c = classifyHit({
       path: '.github/workflows/security.yml',
       text: "allow-dependencies-licenses: 'pkg:...'",
@@ -191,7 +338,7 @@ describe('suppression-inventory — classifyHit (all buckets)', () => {
     expect(c.reason).toMatch(/migrate → #167/);
   });
 
-  it('7: active VEX feed directive → wiring', () => {
+  it('8: active VEX feed directive → wiring', () => {
     const c = classifyHit({
       path: '.github/workflows/security.yml',
       text: 'GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}',
@@ -207,7 +354,7 @@ describe('suppression-inventory — classifyHit (all buckets)', () => {
     expect(c.reason).toMatch(/VEX feed/);
   });
 
-  it('8: bare in-code suppression → raw', () => {
+  it('9: bare in-code suppression → raw', () => {
     const c = classifyHit({
       path: '.github/workflows/security.yml',
       text: '# shellcheck disable=SC2086',

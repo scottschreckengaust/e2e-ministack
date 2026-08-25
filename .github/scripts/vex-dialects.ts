@@ -24,6 +24,16 @@
 // grype/trivy/OSV/Code-Scanning alike). We import the EXACT `SUPPRESSING_STATUSES`
 // set from `vex-to-sarif-suppressions.ts` rather than re-deriving it, so the
 // dialects can never disagree with the SARIF injector on which statuses suppress.
+//
+// SECOND INVARIANT — SURFACE SCOPE (#337): a record suppresses only on the
+// product it argues about. Trivy enforces that itself (it reads the OpenVEX
+// document and matches the product purl), but OSV's `[[IgnoredVulns]]` keys on
+// the vulnerability id ALONE, so the ONLY lever is what we emit: a statement is
+// written into `osv-scanner.toml` only when its own product purl is a type OSV
+// scans here (see `OSV_SCANNED_PURL_TYPES`). Without that filter an image-scoped
+// `pkg:deb/...` record silently suppressed the same CVE on the repo tree's
+// npm/pip packages — over-suppression, the one direction this repo's posture
+// forbids (#335 C2).
 
 import { stringify as tomlStringify } from 'smol-toml';
 // EXPLICIT `.ts` extension (NOT `.js`, NOT extensionless): this is the repo's
@@ -43,6 +53,11 @@ import {
   SUPPRESSING_STATUSES,
   extractCve,
 } from './vex-to-sarif-suppressions.ts';
+// Same explicit-`.ts` rule as above (#337): the surface a record argues about is
+// read with the SHARED purl reader from the ledger core, so the OSV emission
+// filter and the grype-FS coverage decision can never disagree about which
+// product a `.vex/` statement covers.
+import { statementPurls } from './vex-ledger.ts';
 
 // Re-export the shared predicate so this module is the single import surface for
 // the dialect generator AND so a test can assert both modules agree on the set.
@@ -54,6 +69,12 @@ export interface VexStatement {
   status?: string;
   justification?: string;
   impact_statement?: string;
+  /**
+   * The product(s) the statement argues about — its SURFACE (#337). Typed
+   * `unknown` because it is only ever handed to the ledger's total
+   * `statementPurls` reader, which validates the shape itself.
+   */
+  products?: unknown;
 }
 
 /** The subset of an OpenVEX document this generator reads. */
@@ -156,11 +177,63 @@ function vulnerabilityName(v: VexStatement['vulnerability']): unknown {
 }
 
 /**
+ * The purl types OSV-Scanner can actually report on THIS repo's OSV scan surface
+ * — `osv-scanner scan source --lockfile=package-lock.json` (npm) plus the three
+ * `.github/scanner-requirements/**` pip files (pypi). See the `osv-scanner` job
+ * in `.github/workflows/security.yml`.
+ *
+ * WHY AN ALLOW-LIST AT ALL (#337): OSV's ignore entry is `{id, ignoreUntil,
+ * reason}` and its matcher keys on the id ALONE (`ShouldIgnore(vulnID)` in
+ * osv-scanner v2.5.1) — the dialect has NO package/ecosystem field, and
+ * `[[PackageOverrides]]`'s `vulnerability.ignore` is an all-vulns-for-a-package
+ * blanket, not a per-CVE scope. So a row for an IMAGE-scoped `pkg:deb/...`
+ * record could never suppress the emulator finding it was written for (OSV never
+ * scans the image here) — it could ONLY ever silence a same-CVE finding on the
+ * repo TREE, which is exactly the over-suppression #337 closes. Emission is
+ * therefore the only lever, and it is fail-closed: a statement is emitted only
+ * when it affirmatively proves its surface is in scope.
+ *
+ * The coupling to the workflow is deliberate and its failure mode is LOUD: add a
+ * lockfile in a new ecosystem to the OSV job without adding its purl type here
+ * and a legitimate acceptance simply stops suppressing, so the gate reds and a
+ * human reconciles — never the reverse.
+ *
+ * RESIDUAL, disclosed not hidden: this is as tight as OSV's dialect can express.
+ * An emitted row is still id-keyed WITHIN the OSV scan, so a `pkg:pypi/...`
+ * acceptance could in principle silence the same CVE on an npm package. That is
+ * a strictly narrower leak than the one #337 closes (an IMAGE record silencing
+ * the whole tree), and the only tighter lever is per-directory `osv-scanner.toml`
+ * files — OSV discovers its config NEXT TO the scanned lockfile, not at the repo
+ * root — which is its own reviewable change, not a silent tweak here.
+ */
+export const OSV_SCANNED_PURL_TYPES: ReadonlySet<string> = new Set([
+  'npm',
+  'pypi',
+]);
+
+/**
+ * True when a statement's surface is inside OSV's scan scope — i.e. it names at
+ * least one product purl and EVERY one of them is a type OSV can report here.
+ *
+ * Fail-closed in both directions: a statement with no (or no parseable) product
+ * purl proves nothing about its surface and is not emitted, and one mixed purl
+ * off the allow-list disqualifies the whole statement. Not emitting can only
+ * make the OSV gate louder, never quieter (#335 C2).
+ */
+export function osvEmittable(st: VexStatement): boolean {
+  const purls = statementPurls(st);
+  if (purls.length === 0) return false;
+  return purls.every((purl) => OSV_SCANNED_PURL_TYPES.has(purl.type));
+}
+
+/**
  * The `osv-scanner.toml` `[[IgnoredVulns]]` rows derived from `.vex/`: one row
- * per suppressing statement carrying a CVE id, with the reason and (when the
+ * per suppressing statement whose SURFACE is in OSV's scan scope (see
+ * `osvEmittable`) and which carries a CVE id, with the reason and (when the
  * record's `revisit_by` embeds a date) an `ignoreUntil`. Records are processed
- * in path order (deterministic); a non-suppressing statement, or one whose
- * vulnerability name has no CVE token, is skipped (OSV keys on the CVE id).
+ * in path order (deterministic); a non-suppressing statement, one arguing about
+ * a surface OSV never scans, or one whose vulnerability name has no CVE token,
+ * is skipped (OSV keys on the CVE id).
  */
 export function ignoredVulns(files: readonly VexFile[]): IgnoredVuln[] {
   const rows: IgnoredVuln[] = [];
@@ -172,6 +245,7 @@ export function ignoredVulns(files: readonly VexFile[]): IgnoredVuln[] {
     for (const st of rec.doc.statements as VexStatement[]) {
       if (!st) continue;
       if (!SUPPRESSING_STATUSES.has(String(st.status))) continue;
+      if (!osvEmittable(st)) continue;
       const id = extractCve(vulnerabilityName(st.vulnerability));
       if (!id) continue;
       const row: IgnoredVuln = { id, reason: reasonFor(st) };
@@ -230,16 +304,25 @@ export function renderTrivyYaml(files: readonly VexFile[]): string {
 }
 
 /**
- * Render the full `osv-scanner.toml`: the generated banner plus an
- * `[[IgnoredVulns]]` block per suppressing CVE. Reason/date escaping is
- * delegated to the vetted `smol-toml` serializer (BSD-3-Clause) so arbitrary
- * impact-statement prose (quotes, newlines, unicode) can never corrupt the
- * file. When there are no suppressing records the banner alone is emitted (a
+ * Render the full `osv-scanner.toml`: the generated banner (plus the #337
+ * surface-scoping note, which is OSV-specific — trivy scopes by product purl
+ * natively) and an `[[IgnoredVulns]]` block per emitted CVE. Reason/date
+ * escaping is delegated to the vetted `smol-toml` serializer (BSD-3-Clause) so
+ * arbitrary impact-statement prose (quotes, newlines, unicode) can never corrupt
+ * the file. When there are no suppressing records the banner alone is emitted (a
  * valid empty config). Deterministic; ends with a newline.
  */
 export function renderOsvToml(files: readonly VexFile[]): string {
   const rows = ignoredVulns(files);
-  const header = generatedHeader('#', 'OSV-Scanner', '.vex/*.openvex.json');
+  const header = [
+    generatedHeader('#', 'OSV-Scanner', '.vex/*.openvex.json'),
+    '#',
+    '# ALSO omitted (#337): a record whose product purl names a surface OSV does',
+    '# not scan here (e.g. the pkg:deb/... MiniStack IMAGE records). OSV has no',
+    '# package field on an ignore entry, so such a row could never suppress the',
+    '# finding it was written for — only a same-CVE finding on the repo TREE.',
+    `# Emitted purl types: ${[...OSV_SCANNED_PURL_TYPES].join(', ')}.`,
+  ].join('\n');
   // smol-toml terminates its last line with a single `\n` and adds no extra
   // blank line, so its output is already a well-formed POSIX text block ending
   // in exactly one newline — use it verbatim (no trailing-newline fix-up that

@@ -25,8 +25,10 @@
 //                  never to delete. Flagging them as violations would create
 //                  pressure to delete legitimately-accepted-risk records.
 //   - wiring      — the token appears in tooling config that POINTS AT the
-//                  registered records (the VEX feed config), or in documentation
-//                  that DEFINES/discusses the rule. Not a suppression → ignore.
+//                  registered records (the VEX feed config), in documentation
+//                  that DEFINES/discusses the rule, or on a surface no tool
+//                  reads as configuration (a comment; a test spec asserting on a
+//                  suppression file's FORMAT). Not a suppression → ignore.
 //
 // REPORT-ONLY: this inventory never hard-fails CI (it mirrors trivy-fs /
 // sonarqube's report-first posture). The documented ratchet to hard-fail on the
@@ -346,6 +348,20 @@ export function isSelfPath(path: string): boolean {
   return path.includes('suppression-inventory');
 }
 
+// A test spec: this repo's dedicated `test/` tree, or any file whose NAME
+// declares it a spec (`*.test.*` / `*.spec.*` — the convention jest's
+// `testMatch` and every other runner keys on, which also catches the specs that
+// live outside `test/`, e.g. `services/**/*.test.ts`, `fuzz/*.test.js`). Two
+// structural path signals, deliberately mirroring `isDocPath` — a property of
+// the FILE, not a heuristic over the line's contents.
+//
+// Used only to decide that a `config`-kind directive found here is INERT: no
+// tool reads a spec file as its configuration (see classifyHit rule 6). This is
+// never "path is a test ⇒ exempt" — see the kind-scoping note on that rule.
+export function isTestPath(path: string): boolean {
+  return path.startsWith('test/') || /\.(test|spec)\.[cm]?[jt]sx?$/.test(path);
+}
+
 // A `.vex/` OpenVEX record: a per-CVE, reason-bearing, revisit-tracked risk
 // acceptance (the honest model #167 generalizes). Registered, never raw.
 export function isVexRecord(path: string): boolean {
@@ -442,21 +458,46 @@ export function classifyHit({
       reason: 'directive named in a comment (discussion), not active',
     };
   }
-  // 6. Reason-bearing, revisit-tracked config exceptions (the ACTIVE directive).
+  // 6. A `config` directive appearing in a TEST SPEC is inert — the same
+  //    "named ≠ active" idea as rule 5, in a third syntax. The config SURFACES
+  //    are `osv-scanner.toml`, `trivy.yaml`, `.gitleaks.toml`, the workflows…;
+  //    NO tool reads a jest spec as its configuration. So a spec that asserts ON
+  //    a suppression file's FORMAT — `expect(toml).toContain('[[IgnoredVulns]]')`
+  //    for the generated OSV ignore block, its `describe`/`it` titles, or a
+  //    golden fixture holding the literal — is exercising the emitter, not
+  //    suppressing anything.
+  //    Deliberately a SURFACE argument rather than a quoting heuristic: it is
+  //    the honest claim, and it also covers a BARE token on a continuation line
+  //    inside a multi-line template-literal fixture, which no "is it quoted"
+  //    check could see.
+  //    Scoped to `token.kind === 'config'` for exactly rule 5's reason, and that
+  //    scoping IS the safety property: a `comment`-kind token IS the suppression
+  //    wherever it lives, so a real `// eslint-disable-next-line`, `# nosemgrep`
+  //    or `istanbul ignore` inside a test file stays `raw` BY CONSTRUCTION —
+  //    this rule structurally cannot reach it. The predicate is NOT "path is a
+  //    test ⇒ exempt"; that would be silencing, not precision.
+  if (token.kind === 'config' && isTestPath(path)) {
+    return {
+      bucket: 'wiring',
+      reason:
+        'config directive in a test spec (asserted-on format), not a config surface',
+    };
+  }
+  // 7. Reason-bearing, revisit-tracked config exceptions (the ACTIVE directive).
   if (token.registered) {
     return {
       bucket: 'registered',
       reason: `${token.note} (reason-bearing) — migrate → #167`,
     };
   }
-  // 7. VEX/feed wiring that points at the registered records.
+  // 8. VEX/feed wiring that points at the registered records.
   if (token.vexFeed) {
     return {
       bucket: 'wiring',
       reason: 'VEX feed config — points at .vex/ records, not a suppression',
     };
   }
-  // 8. Everything else — an unregistered in-code suppression: the #202 target.
+  // 9. Everything else — an unregistered in-code suppression: the #202 target.
   return {
     bucket: 'raw',
     reason: 'unregistered in-code suppression — the #202 target',

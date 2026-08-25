@@ -1,12 +1,13 @@
 import {
-  vexAcceptedIds,
   matchVulnIds,
+  matchPurl,
   hasSeverity,
   uncoveredVulns,
   normId,
   asArray,
   asRecord,
 } from '../../.github/scripts/grype-fs-gate';
+import { recordAcceptances } from '../../.github/scripts/vex-ledger';
 
 // Unit tests for .github/scripts/grype-fs-gate.ts (issue #284): derive the Grype
 // FILESYSTEM scan's gate from its JSON, VEX-aware for BOTH statuses. Imported
@@ -16,12 +17,20 @@ import {
 // GOVERNANCE-RELEVANT: this decides whether the required Grype FS check reds.
 // The crux is that grype keeps `affected` VEX records in `matches[]` (only
 // `not_affected`/`fixed` move to `ignoredMatches[]`), so the JSON gate must
-// EXCLUDE the `.vex/`-accepted id set — an `affected` record is an explicit,
+// EXCLUDE the `.vex/`-accepted findings — an `affected` record is an explicit,
 // reviewed acceptance just as a `not_affected` one is (#188 status-honesty).
 // GHSA↔CVE aliasing is the make-or-break detail: grype may report the GHSA as
 // the primary `vulnerability.id` with the CVE in `relatedVulnerabilities` (or
 // vice versa), while the `.vex/` records name the CVE and alias the GHSA — the
 // gate must map either direction onto the accepted set.
+//
+// AND coverage is SURFACE-SCOPED (#337): an id match alone is not coverage. Each
+// acceptance also names the product purl it argues about, and the gate compares
+// it against the match's `artifact.purl`, so an image-scoped `pkg:deb/...` record
+// can no longer suppress a same-CVE finding on the repo tree's `pkg:npm/...`
+// copy. That was over-suppression — the one direction this repo's posture forbids
+// (#335 C2). The purl parser/matcher itself is tested in vex-ledger.test.ts (its
+// home); the cases here are the GATE's half of the contract.
 //
 // The gate floor is grype's STRICTEST rung (#284, "drop it the most strict"):
 // EVERY severity counts, so `hasSeverity` (not a High/Critical membership test)
@@ -64,83 +73,11 @@ describe('normId', () => {
   });
 });
 
-describe('vexAcceptedIds', () => {
-  // A minimal OpenVEX doc: one statement, one vulnerability (name + aliases).
-  function vexDoc(
-    name: string,
-    aliases: string[],
-    status = 'affected',
-  ): unknown {
-    return {
-      '@context': 'https://openvex.dev/ns/v0.2.0',
-      statements: [
-        {
-          vulnerability: { name, aliases },
-          products: [{ '@id': 'pkg:pypi/mcp@1.23.3' }],
-          status,
-        },
-      ],
-    };
-  }
-
-  it('collects the name AND aliases of every statement, upper-cased', () => {
-    const ids = vexAcceptedIds([
-      vexDoc('CVE-2026-52869', ['GHSA-jpw9-pfvf-9f58']),
-    ]);
-    expect(ids.has('CVE-2026-52869')).toBe(true);
-    expect(ids.has('GHSA-JPW9-PFVF-9F58')).toBe(true);
-  });
-
-  it('accepts BOTH affected and not_affected records (both are reviewed acceptances)', () => {
-    const affected = vexAcceptedIds([
-      vexDoc('CVE-2026-52869', ['GHSA-jpw9-pfvf-9f58'], 'affected'),
-    ]);
-    const notAffected = vexAcceptedIds([
-      vexDoc('CVE-2024-23342', ['GHSA-wj6h-64fc-37mp'], 'not_affected'),
-    ]);
-    expect(affected.has('CVE-2026-52869')).toBe(true);
-    expect(notAffected.has('CVE-2024-23342')).toBe(true);
-  });
-
-  it('unions ids across multiple docs', () => {
-    const ids = vexAcceptedIds([
-      vexDoc('CVE-2026-52869', ['GHSA-jpw9-pfvf-9f58']),
-      vexDoc('CVE-2026-52870', ['GHSA-hvrp-rf83-w775']),
-    ]);
-    expect([...ids].sort()).toEqual([
-      'CVE-2026-52869',
-      'CVE-2026-52870',
-      'GHSA-HVRP-RF83-W775',
-      'GHSA-JPW9-PFVF-9F58',
-    ]);
-  });
-
-  it('tolerates missing/garbage aliases and a missing name', () => {
-    const ids = vexAcceptedIds([
-      { statements: [{ vulnerability: { name: 'CVE-2026-1' } }] }, // no aliases
-      // aliases array with a null + non-string element (both skipped) alongside
-      // a real one — exercises the alias-null branch of the loop.
-      {
-        statements: [{ vulnerability: { aliases: [null, 42, 'GHSA-aaaa'] } }],
-      }, // no name
-      { statements: [{ vulnerability: { name: 42, aliases: 'nope' } }] }, // junk
-    ]);
-    expect(ids.has('CVE-2026-1')).toBe(true);
-    expect(ids.has('GHSA-AAAA')).toBe(true);
-    expect(ids.size).toBe(2);
-  });
-
-  it('is total on malformed input (no docs, non-object doc/statement/vuln)', () => {
-    expect(vexAcceptedIds([]).size).toBe(0);
-    expect(vexAcceptedIds([null, 3, 'x']).size).toBe(0);
-    expect(vexAcceptedIds([{ statements: 'nope' }]).size).toBe(0);
-    expect(vexAcceptedIds([{ statements: [null, 5] }]).size).toBe(0);
-    expect(
-      vexAcceptedIds([{ statements: [{ vulnerability: null }] }]).size,
-    ).toBe(0);
-    expect(vexAcceptedIds('not-an-array' as unknown as unknown[]).size).toBe(0);
-  });
-});
+// NB the acceptance BUILDER (`recordAcceptances`) and the purl parser/matcher it
+// relies on live in `vex-ledger.ts` and are tested there — one home for the "what
+// does a `.vex/` record cover" question, shared by this gate and the npm-audit
+// gate (#295/#337). What belongs here is the GATE's half: reading the finding's
+// own surface out of grype's JSON, and the coverage decision that combines them.
 
 describe('matchVulnIds', () => {
   it('collects the primary id AND every relatedVulnerabilities id, upper-cased', () => {
@@ -193,98 +130,95 @@ describe('hasSeverity (strictest floor — every severity counts)', () => {
 });
 
 describe('uncoveredVulns (the gate decision — strictest floor)', () => {
-  // Grype JSON shape: matches[] with vulnerability.{id,severity} + related[].
+  // Grype JSON shape: matches[] with vulnerability.{id,severity}, related[], and
+  // the `artifact` the finding was reported ON — whose purl is the SURFACE a
+  // `.vex/` record has to argue about to cover it (#337).
   function grypeJson(...matches: unknown[]): unknown {
     return { matches };
   }
-  // The 3 mcp records' accepted id set (both the CVE names and GHSA aliases).
-  const mcpAccepted = vexAcceptedIds([
-    {
+  // The pypi package the 3 real `.vex/mcp-CVE-*.openvex.json` records argue
+  // about. Every mcp fixture below is a finding on THAT surface, so the coverage
+  // assertions exercise the identifier and the purl halves together.
+  const MCP_PURL = 'pkg:pypi/mcp@1.23.3';
+  function onMcp(
+    vulnerability: unknown,
+    relatedVulnerabilities?: unknown[],
+  ): unknown {
+    return {
+      vulnerability,
+      ...(relatedVulnerabilities === undefined
+        ? {}
+        : { relatedVulnerabilities }),
+      artifact: { name: 'mcp', version: '1.23.3', purl: MCP_PURL },
+    };
+  }
+  // A single-statement OpenVEX doc naming one CVE + its GHSA alias, scoped to the
+  // mcp pypi product (the real records carry exactly this shape).
+  function mcpDoc(name: string, alias: string, status = 'affected'): unknown {
+    return {
+      '@context': 'https://openvex.dev/ns/v0.2.0',
       statements: [
         {
-          vulnerability: {
-            name: 'CVE-2026-52869',
-            aliases: ['GHSA-jpw9-pfvf-9f58'],
-          },
-          status: 'affected',
+          vulnerability: { name, aliases: [alias] },
+          products: [{ '@id': MCP_PURL, identifiers: { purl: MCP_PURL } }],
+          status,
         },
       ],
-    },
-    {
-      statements: [
-        {
-          vulnerability: {
-            name: 'CVE-2026-52870',
-            aliases: ['GHSA-hvrp-rf83-w775'],
-          },
-          status: 'affected',
-        },
-      ],
-    },
-    {
-      statements: [
-        {
-          vulnerability: {
-            name: 'CVE-2026-59950',
-            aliases: ['GHSA-vj7q-gjh5-988w'],
-          },
-          status: 'affected',
-        },
-      ],
-    },
+    };
+  }
+  // The 3 mcp records as the gate sees them: for each, the accepted id set (CVE
+  // name + GHSA alias) AND the product purl it argues about.
+  const mcpAccepted = recordAcceptances([
+    mcpDoc('CVE-2026-52869', 'GHSA-jpw9-pfvf-9f58'),
+    mcpDoc('CVE-2026-52870', 'GHSA-hvrp-rf83-w775'),
+    mcpDoc('CVE-2026-59950', 'GHSA-vj7q-gjh5-988w'),
   ]);
 
   it('PASSES with the 3 mcp GHSAs present (reported by GHSA id, CVE in related) — VEX-accepted', () => {
     // Exactly the #284 scenario: grype rates the GHSA high, carries the CVE as
     // a related vulnerability, and the .vex/ records are `affected`.
     const doc = grypeJson(
-      {
-        vulnerability: { id: 'GHSA-jpw9-pfvf-9f58', severity: 'High' },
-        relatedVulnerabilities: [{ id: 'CVE-2026-52869' }],
-      },
-      {
-        vulnerability: { id: 'GHSA-hvrp-rf83-w775', severity: 'High' },
-        relatedVulnerabilities: [{ id: 'CVE-2026-52870' }],
-      },
-      {
-        vulnerability: { id: 'GHSA-vj7q-gjh5-988w', severity: 'High' },
-        relatedVulnerabilities: [{ id: 'CVE-2026-59950' }],
-      },
+      onMcp({ id: 'GHSA-jpw9-pfvf-9f58', severity: 'High' }, [
+        { id: 'CVE-2026-52869' },
+      ]),
+      onMcp({ id: 'GHSA-hvrp-rf83-w775', severity: 'High' }, [
+        { id: 'CVE-2026-52870' },
+      ]),
+      onMcp({ id: 'GHSA-vj7q-gjh5-988w', severity: 'High' }, [
+        { id: 'CVE-2026-59950' },
+      ]),
     );
     expect(uncoveredVulns(doc, mcpAccepted)).toEqual([]);
   });
 
   it('accepts a match whether grype reports the CVE OR the GHSA as primary (aliasing both ways)', () => {
     // CVE primary, no related (grype names the CVE).
-    const cvePrimary = grypeJson({
-      vulnerability: { id: 'CVE-2026-52869', severity: 'High' },
-    });
+    const cvePrimary = grypeJson(
+      onMcp({ id: 'CVE-2026-52869', severity: 'High' }),
+    );
     // GHSA primary, no related (grype names only the GHSA).
-    const ghsaPrimary = grypeJson({
-      vulnerability: { id: 'GHSA-hvrp-rf83-w775', severity: 'Critical' },
-    });
+    const ghsaPrimary = grypeJson(
+      onMcp({ id: 'GHSA-hvrp-rf83-w775', severity: 'Critical' }),
+    );
     expect(uncoveredVulns(cvePrimary, mcpAccepted)).toEqual([]);
     expect(uncoveredVulns(ghsaPrimary, mcpAccepted)).toEqual([]);
   });
 
   it('FAILS on a genuinely NEW uncovered CVE (no .vex/ record)', () => {
-    const doc = grypeJson({
-      vulnerability: { id: 'CVE-2099-99999', severity: 'High' },
-    });
+    const doc = grypeJson(onMcp({ id: 'CVE-2099-99999', severity: 'High' }));
     expect(uncoveredVulns(doc, mcpAccepted)).toEqual(['CVE-2099-99999']);
   });
 
   it('reports ONLY the uncovered ids when accepted and uncovered are mixed', () => {
     const doc = grypeJson(
       // accepted (affected mcp)
-      {
-        vulnerability: { id: 'GHSA-jpw9-pfvf-9f58', severity: 'High' },
-        relatedVulnerabilities: [{ id: 'CVE-2026-52869' }],
-      },
+      onMcp({ id: 'GHSA-jpw9-pfvf-9f58', severity: 'High' }, [
+        { id: 'CVE-2026-52869' },
+      ]),
       // uncovered new critical
-      { vulnerability: { id: 'CVE-2099-11111', severity: 'Critical' } },
+      onMcp({ id: 'CVE-2099-11111', severity: 'Critical' }),
       // uncovered new high
-      { vulnerability: { id: 'CVE-2099-22222', severity: 'High' } },
+      onMcp({ id: 'CVE-2099-22222', severity: 'High' }),
     );
     expect(uncoveredVulns(doc, mcpAccepted)).toEqual([
       'CVE-2099-11111',
@@ -297,9 +231,9 @@ describe('uncoveredVulns (the gate decision — strictest floor)', () => {
     // must fail once the floor is dropped to the strictest rung. Low/Negligible
     // likewise — nothing is below the floor anymore.
     const doc = grypeJson(
-      { vulnerability: { id: 'CVE-2099-33333', severity: 'Medium' } },
-      { vulnerability: { id: 'CVE-2099-44444', severity: 'Low' } },
-      { vulnerability: { id: 'CVE-2099-55555', severity: 'Negligible' } },
+      onMcp({ id: 'CVE-2099-33333', severity: 'Medium' }),
+      onMcp({ id: 'CVE-2099-44444', severity: 'Low' }),
+      onMcp({ id: 'CVE-2099-55555', severity: 'Negligible' }),
     );
     expect(uncoveredVulns(doc, mcpAccepted)).toEqual([
       'CVE-2099-33333',
@@ -309,18 +243,20 @@ describe('uncoveredVulns (the gate decision — strictest floor)', () => {
   });
 
   it('a VEX-covered low-severity finding still PASSES (coverage, not severity, decides)', () => {
-    const accepted = new Set(['CVE-2099-66666']);
-    const doc = grypeJson({
-      vulnerability: { id: 'CVE-2099-66666', severity: 'Negligible' },
-    });
+    const accepted = recordAcceptances([
+      mcpDoc('CVE-2099-66666', 'GHSA-aaaa-bbbb-cccc', 'not_affected'),
+    ]);
+    const doc = grypeJson(
+      onMcp({ id: 'CVE-2099-66666', severity: 'Negligible' }),
+    );
     expect(uncoveredVulns(doc, accepted)).toEqual([]);
   });
 
   it('de-duplicates and sorts the uncovered id list deterministically', () => {
     const doc = grypeJson(
-      { vulnerability: { id: 'CVE-2099-22222', severity: 'High' } },
-      { vulnerability: { id: 'CVE-2099-11111', severity: 'High' } },
-      { vulnerability: { id: 'CVE-2099-22222', severity: 'Critical' } }, // dup id
+      onMcp({ id: 'CVE-2099-22222', severity: 'High' }),
+      onMcp({ id: 'CVE-2099-11111', severity: 'High' }),
+      onMcp({ id: 'CVE-2099-22222', severity: 'Critical' }), // dup id
     );
     expect(uncoveredVulns(doc, mcpAccepted)).toEqual([
       'CVE-2099-11111',
@@ -341,10 +277,126 @@ describe('uncoveredVulns (the gate decision — strictest floor)', () => {
     expect(uncoveredVulns({}, mcpAccepted)).toEqual([]);
   });
 
-  it('with an EMPTY accepted set, every match is uncovered (fail-closed)', () => {
-    const doc = grypeJson({
+  it('with NO acceptances, every match is uncovered (fail-closed)', () => {
+    const doc = grypeJson(onMcp({ id: 'CVE-2026-52869', severity: 'High' }));
+    expect(uncoveredVulns(doc, [])).toEqual(['CVE-2026-52869']);
+  });
+
+  it('a finding with NO parseable purl is never covered, even on a matching id (#337 fail-closed)', () => {
+    // Without a purl the finding's surface is unprovable, so no record can be
+    // shown to argue about it. The honest verdict is to SURFACE it: a record must
+    // never cover a finding whose surface we cannot establish. (Grype always
+    // emits a purl for a real package match, so this is the degenerate case.)
+    const noArtifact = grypeJson({
       vulnerability: { id: 'CVE-2026-52869', severity: 'High' },
     });
-    expect(uncoveredVulns(doc, new Set())).toEqual(['CVE-2026-52869']);
+    const noPurl = grypeJson({
+      vulnerability: { id: 'CVE-2026-52869', severity: 'High' },
+      artifact: { name: 'mcp', version: '1.23.3' },
+    });
+    const junkPurl = grypeJson({
+      vulnerability: { id: 'CVE-2026-52869', severity: 'High' },
+      artifact: { name: 'mcp', purl: 'mcp@1.23.3' }, // not a purl at all
+    });
+    expect(uncoveredVulns(noArtifact, mcpAccepted)).toEqual(['CVE-2026-52869']);
+    expect(uncoveredVulns(noPurl, mcpAccepted)).toEqual(['CVE-2026-52869']);
+    expect(uncoveredVulns(junkPurl, mcpAccepted)).toEqual(['CVE-2026-52869']);
+  });
+
+  it('a same-CVE finding on a DIFFERENT pypi package is not covered (name is compared, not just type)', () => {
+    // The mcp records argue about `pkg:pypi/mcp`. A same-CVE finding on another
+    // pypi distribution is a different surface and must stay visible.
+    const other = grypeJson({
+      vulnerability: { id: 'CVE-2026-52869', severity: 'High' },
+      artifact: { name: 'ecdsa', purl: 'pkg:pypi/ecdsa@0.19.2' },
+    });
+    expect(uncoveredVulns(other, mcpAccepted)).toEqual(['CVE-2026-52869']);
+  });
+
+  it('an image-scoped pkg:deb record does NOT cover a pkg:npm finding on the same CVE (#337)', () => {
+    // THE OVER-SUPPRESSION REGRESSION. `.vex/CVE-2026-13149.openvex.json` is an
+    // image-scoped acceptance: its reachability argument is made ONLY for the
+    // Debian `node-brace-expansion` package inside the pinned MiniStack image.
+    // The repo TREE carries a separate, independently-installed
+    // `pkg:npm/brace-expansion` copy whose reachability that record never
+    // argues. Matching on the identifier alone let the image record silently
+    // suppress the npm finding here — over-suppression, the one direction this
+    // repo's posture forbids (#335 C2). The gate must compare the record's own
+    // product purl against the finding's `artifact.purl`.
+    const imageScoped = recordAcceptances([
+      {
+        statements: [
+          {
+            vulnerability: {
+              name: 'CVE-2026-13149',
+              aliases: ['GHSA-v6h2-p8h4-qcjw'],
+            },
+            products: [
+              {
+                '@id': 'pkg:deb/debian/node-brace-expansion@2.0.1%2B~1.1.0-2',
+                identifiers: {
+                  purl: 'pkg:deb/debian/node-brace-expansion@2.0.1%2B~1.1.0-2',
+                },
+              },
+            ],
+            status: 'not_affected',
+          },
+        ],
+      },
+    ]);
+    const npmFinding = grypeJson({
+      vulnerability: { id: 'CVE-2026-13149', severity: 'High' },
+      artifact: {
+        name: 'brace-expansion',
+        purl: 'pkg:npm/brace-expansion@2.0.1',
+      },
+    });
+    expect(uncoveredVulns(npmFinding, imageScoped)).toEqual(['CVE-2026-13149']);
+    // …while the SAME record still covers the image finding it was written for
+    // (the fix scopes coverage, it does not remove it — nothing gets louder that
+    // was legitimately accepted, and nothing gets quieter, #335 C2).
+    const debFinding = grypeJson({
+      vulnerability: { id: 'CVE-2026-13149', severity: 'High' },
+      artifact: {
+        name: 'node-brace-expansion',
+        // Grype emits distro/arch/epoch qualifiers the record does not carry —
+        // the comparison is qualifier-INSENSITIVE (subset), per .vex/README.md.
+        purl: 'pkg:deb/debian/node-brace-expansion@2.0.1%2B~1.1.0-2?arch=all&distro=debian-13',
+      },
+    });
+    expect(uncoveredVulns(debFinding, imageScoped)).toEqual([]);
+  });
+});
+
+describe('matchPurl (the finding’s own surface)', () => {
+  it('parses the artifact purl grype reports for a match', () => {
+    expect(
+      matchPurl({
+        vulnerability: { id: 'CVE-2026-13149' },
+        artifact: {
+          name: 'brace-expansion',
+          purl: 'pkg:npm/brace-expansion@2.0.1',
+        },
+      }),
+    ).toEqual({
+      type: 'npm',
+      namespace: '',
+      name: 'brace-expansion',
+      version: '2.0.1',
+      qualifiers: new Map(),
+    });
+  });
+
+  it('returns null for a non-record match, a missing/garbage artifact, and an unparseable purl', () => {
+    expect(matchPurl(null)).toBeNull();
+    expect(matchPurl('nope')).toBeNull();
+    expect(matchPurl({})).toBeNull();
+    expect(matchPurl({ artifact: null })).toBeNull();
+    expect(matchPurl({ artifact: 'nope' })).toBeNull();
+    expect(matchPurl({ artifact: {} })).toBeNull();
+    expect(matchPurl({ artifact: { purl: 42 } })).toBeNull();
+    expect(
+      matchPurl({ artifact: { purl: 'brace-expansion@2.0.1' } }),
+    ).toBeNull();
   });
 });

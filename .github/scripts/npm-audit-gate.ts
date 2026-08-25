@@ -21,6 +21,28 @@
 // advisory with NO extractable GHSA is treated as UNCOVERED (fail-closed): we
 // cannot prove it is an accepted one.
 //
+// SURFACE MATCHING STAYS ID-ONLY — DO NOT "UNIFY" IT WITH grype (#337). The
+// grype FS gate and the generated OSV dialect are now scoped to the product PURL
+// a record argues about, so an image-scoped `pkg:deb/...` record can no longer
+// silence a same-CVE finding on the repo tree. This gate deliberately does NOT
+// follow, because it CANNOT: `npm audit --json` emits no purl, no ecosystem and
+// no version-qualified identifier — only a package name and a GHSA URL. Every
+// `.vex/` statement, by contrast, MUST name a product purl, so a purl compare
+// here would never match anything and the gate would FALSE-RED on every
+// legitimate acceptance — fail-closed noise, not added rigour.
+//
+// The residual is disclosed, not hidden: a base-image `CVE-*` record whose
+// aliases include an advisory's GHSA does still cover it here. Two things keep
+// that honest, and they are why this asymmetry is acceptable where grype's was
+// not. (1) Nothing is SUPPRESSED: per the TRANSPARENCY invariant below, a
+// covered advisory is still PRINTED in the CI log and the uploaded artifact —
+// npm audit's only visibility surface — whereas the grype/OSV leak removed the
+// finding from view entirely. (2) SARIF injection is scoped by the `.vex/npm-*`
+// FILENAME convention (.vex/README.md § "Adding a record"), so a deb record
+// never dismisses an npm alert. Narrowing the verdict itself would need a
+// package-name-scoped match — its own reviewable change, not a silent tweak
+// here.
+//
 // TRANSPARENCY (the maintainer-flagged invariant): an `affected` record makes
 // the advisory PASS the gate but it is NOT hidden — npm audit has no
 // Security-tab surface, so the CI log + the uploaded `npm-audit.json` artifact

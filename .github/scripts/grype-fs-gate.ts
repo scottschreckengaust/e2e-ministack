@@ -30,68 +30,47 @@
 // of its own primary id + related ids. A match is covered iff those two sets
 // intersect — mapping either aliasing direction onto the accepted set.
 //
+// SURFACE SCOPING (#337): an id match alone is NOT coverage. Every `.vex/`
+// record argues about ONE product, and matching by identifier alone let an
+// image-scoped record (e.g. the Debian `node-brace-expansion` inside the pinned
+// MiniStack image) silently suppress a same-CVE finding on a DIFFERENT surface —
+// the `pkg:npm/brace-expansion` copy in this repo's own tree. That is
+// over-suppression, the one direction this repo's posture forbids (#335 C2). So
+// the gate now compares the record's product purl against each match's
+// `artifact.purl` via the shared ledger's `isCovered`. A match whose purl is
+// missing or unparseable is NEVER covered (fail-closed): without a purl the
+// surface is unprovable, and the honest verdict is to surface the finding.
+//
 // LOGIC MODULE (jest-visible, gate-eligible): the pure transform lives here so
 // it flows through the repo's 100% coverage gate (#124), Stryker mutation
 // (#122), and the fuzz-regression tier. The runnable CLI is the thin
 // `grype-fs-gate.mjs` shim. TOTAL: malformed input yields an empty (pass)
 // result, never throws.
 
-// -- small total coercions (exported + unit-tested directly, mutation-tight,
-//    mirroring the identical helpers in gate-findings.ts / sarif-cve-ids.ts) --
+// EXPLICIT `.ts` extension: a runtime VALUE cross-import between two
+// `.github/scripts` siblings (as in vex-dialects.ts → vex-to-sarif-suppressions.ts
+// and npm-audit-gate.ts → vex-ledger.ts). The `.mjs` shim runs this under Node
+// 24's type-stripping loader, which resolves ONLY an explicit specifier naming an
+// existing file — a `.js` sibling does not exist on a clean checkout (it's a
+// gitignored tsc artifact) and an extensionless specifier fails. tsc accepts the
+// `.ts` under `allowImportingTsExtensions` (tsconfig.scripts.json, noEmit); the
+// emitting tsconfig.json excludes `.github/scripts/**/*.ts` AND this module's
+// test importers, so no shadowing `.js` is ever emitted.
+import {
+  asArray,
+  asRecord,
+  normId,
+  parsePurl,
+  isCovered,
+  type Purl,
+  type Acceptance,
+} from './vex-ledger.ts';
 
-/** The value if it's an array, else an empty array. */
-export function asArray(v: unknown): unknown[] {
-  return Array.isArray(v) ? v : [];
-}
-
-/** A plain object, or null. Arrays and primitives are NOT records. */
-export function asRecord(v: unknown): Record<string, unknown> | null {
-  if (typeof v !== 'object') return null;
-  if (Array.isArray(v)) return null;
-  return v as Record<string, unknown> | null;
-}
-
-/**
- * A vulnerability identifier normalized for set membership: upper-cased and
- * trimmed. Non-strings and empty/whitespace-only values yield null (totality) —
- * matching by an empty token would falsely equate unrelated blank ids. We do
- * NOT restrict to a CVE regex: grype's primary id and the `.vex/` aliases are
- * frequently GHSAs, and the whole point of #284 is to map GHSA↔CVE, so both id
- * shapes must survive normalization.
- */
-export function normId(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const t = value.trim().toUpperCase();
-  return t.length > 0 ? t : null;
-}
-
-/**
- * The set of vulnerability ids ACCEPTED by the `.vex/` records — the union of
- * every statement's `vulnerability.name` AND its `vulnerability.aliases[]`,
- * normalized. Includes BOTH `affected` and `not_affected` records: each is an
- * explicit, reviewed risk acceptance (#188), so both should keep the FS gate
- * green. Malformed docs/statements/vulns are skipped; never throws.
- */
-export function vexAcceptedIds(docs: readonly unknown[]): Set<string> {
-  const ids = new Set<string>();
-  for (const rawDoc of asArray(docs)) {
-    const doc = asRecord(rawDoc);
-    if (doc === null) continue;
-    for (const rawStmt of asArray(doc.statements)) {
-      const stmt = asRecord(rawStmt);
-      if (stmt === null) continue;
-      const vuln = asRecord(stmt.vulnerability);
-      if (vuln === null) continue;
-      const name = normId(vuln.name);
-      if (name !== null) ids.add(name);
-      for (const rawAlias of asArray(vuln.aliases)) {
-        const alias = normId(rawAlias);
-        if (alias !== null) ids.add(alias);
-      }
-    }
-  }
-  return ids;
-}
+// The total coercions this module used to carry its own copies of now come from
+// the shared ledger (the migration its header promised, #295) — re-exported here
+// so the unit/fuzz tiers keep asserting this module's contract directly and the
+// two surfaces can never drift apart on what a record id even is.
+export { asArray, asRecord, normId };
 
 /**
  * Every id a single grype `matches[]` entry is known by: its primary
@@ -142,14 +121,33 @@ export function hasSeverity(match: unknown): boolean {
 }
 
 /**
+ * The purl of the package a grype `matches[]` entry was found on — the SURFACE
+ * a `.vex/` record must argue about to cover it (#337). Grype builds this with
+ * packageurl-go, so it is already canonical: `pkg:npm/brace-expansion@2.0.1` for
+ * a lockfile entry, `pkg:pypi/ecdsa@0.19.2` for a pip requirement,
+ * `pkg:deb/debian/...` for an image package. Returns null when the match carries
+ * no artifact or no parseable purl, which callers must treat as NOT coverable.
+ */
+export function matchPurl(match: unknown): Purl | null {
+  const m = asRecord(match);
+  if (m === null) return null;
+  const artifact = asRecord(m.artifact);
+  if (artifact === null) return null;
+  return parsePurl(artifact.purl);
+}
+
+/**
  * The GATE DECISION: the sorted, de-duplicated list of vulnerability ids in a
  * grype JSON document (`grype -o json`), AT ANY SEVERITY (strictest floor,
  * #284), that are NOT covered by any `.vex/` record. An empty list means the
  * gate PASSES; a non-empty list means it FAILS (each id is a genuinely-new,
- * uncovered finding — VEX-accept it with a truthful record or fix it). A match
- * is COVERED iff any of its ids (primary + related) is in the accepted set, so
- * an `affected` mcp record (reported by its GHSA, CVE in related) is correctly
- * treated as accepted.
+ * uncovered finding — VEX-accept it with a truthful record or fix it).
+ *
+ * A match is COVERED iff some SINGLE acceptance both (a) shares one of the
+ * match's ids (primary or related, so an `affected` mcp record reported by its
+ * GHSA with the CVE in `relatedVulnerabilities` still counts) and (b) names a
+ * product purl that matches the match's `artifact.purl` (#337, so an
+ * image-scoped record cannot reach a repo-tree finding on the same CVE).
  *
  * The reported id for an uncovered match is its primary `vulnerability.id`
  * (falling back to the first related id, then `(unknown)`), so the workflow log
@@ -157,7 +155,7 @@ export function hasSeverity(match: unknown): boolean {
  */
 export function uncoveredVulns(
   grypeJson: unknown,
-  accepted: ReadonlySet<string>,
+  acceptances: readonly Acceptance[],
 ): string[] {
   const uncovered = new Set<string>();
   const doc = asRecord(grypeJson);
@@ -165,15 +163,7 @@ export function uncoveredVulns(
   for (const rawMatch of asArray(doc.matches)) {
     if (!hasSeverity(rawMatch)) continue;
     const ids = matchVulnIds(rawMatch);
-    // Covered iff ANY of the match's ids (primary or related) is accepted.
-    let covered = false;
-    for (const id of ids) {
-      if (accepted.has(id)) {
-        covered = true;
-        break;
-      }
-    }
-    if (covered) continue;
+    if (isCovered(acceptances, ids, matchPurl(rawMatch))) continue;
     // Report the primary id when known (the first inserted), else "(unknown)".
     const [first] = ids;
     uncovered.add(first ?? '(unknown)');
