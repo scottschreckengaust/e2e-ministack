@@ -10,6 +10,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.12.1](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.12.0...v0.12.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **vex:** move .vex/ record discovery into the tested core and drain the report shim ([#351](https://github.com/scottschreckengaust/e2e-ministack/issues/351)) ([d384296](https://github.com/scottschreckengaust/e2e-ministack/commit/d384296e57b1463fc949a340177844e9405eeb56)), closes [#342](https://github.com/scottschreckengaust/e2e-ministack/issues/342)
+* **vex:** scope grype-FS and OSV record matching to the record's own surface ([#346](https://github.com/scottschreckengaust/e2e-ministack/issues/346)) ([85acfe3](https://github.com/scottschreckengaust/e2e-ministack/commit/85acfe3ebe85f9a9ca15c140301771efb46836c7)), closes [#337](https://github.com/scottschreckengaust/e2e-ministack/issues/337)
+
 ## [0.12.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.11.0...v0.12.0) (2026-08-24)
 
 
