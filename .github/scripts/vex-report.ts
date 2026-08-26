@@ -55,7 +55,18 @@ export interface VexRecord {
   cve: string;
   status: string; // not_affected | affected | fixed | under_investigation
   justification?: string; // the not_affected enum, when present
-  /** custom revisit_by field (#188) — may be absent on legacy records. */
+  /**
+   * Custom `revisit_by` field (#188). MANDATORY on every committed record since
+   * #336 gated its presence — so the old "may be absent on legacy records" note
+   * here was false (#352): there are no unbacked legacy records left, and a
+   * record that lacked the field could not have been merged.
+   *
+   * Still OPTIONAL in this type, for a different and narrower reason: it is the
+   * output of `ledgerRecords`' TOTAL extractor, which yields `undefined` for a
+   * record it could not read (unparseable JSON, a non-string field). That is a
+   * statement about the reader's tolerance, not a licence for a new record to
+   * omit the field.
+   */
   revisitBy?: string;
 }
 
@@ -660,7 +671,10 @@ const LEGEND =
   '| Investigating | `under_investigation` record |\n\n' +
   "**severity** — GitHub's badge (NVD) severity. Shown as `badge / gate X` when " +
   "the scanner's distro/gate rating differs (e.g. NVD Critical vs Debian Negligible).\n\n" +
-  '**revisit_by** — an ISO date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`).\n\n' +
+  '**revisit_by** — how the acceptance ends, in one of three classes: a dated ' +
+  '`revisit <ISO-date>` (overdue-checkable), an event token (e.g. ' +
+  '`wait-for-image-rebuild`), or `standing-acceptance` + evidence (no end event ' +
+  'exists, so it is re-verified on a cadence instead).\n\n' +
   '</details>';
 
 // GitHub advisory-database search for a CVE. GitHub does NOT autolink a CVE id

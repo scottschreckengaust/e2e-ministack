@@ -1825,10 +1825,13 @@ jobs:
   # naming HOW the acceptance ends — but every CONSUMER treats the field as
   # optional, so the MUST was only a convention a reviewer had to catch, and most
   # records predated it. This job makes it a gate: a record with no `revisit_by`,
-  # or one whose value is outside the four sanctioned forms (including a
-  # date-shaped value that is not a real calendar day), fails CI. Safe to make
-  # hard per the Gate Atomicity Law (#335): the asserted set is `.vex/` itself,
-  # which only changes when a PR edits it, so this can never red on its own.
+  # or one whose value is outside the five sanctioned forms (including a
+  # date-shaped value that is not a real calendar day), fails CI. Since #352 it
+  # also rejects the class-C `standing-acceptance` form when the record carries no
+  # complete `evidence` object — the one class no future event re-examines, so its
+  # citation is the only thing keeping it honest. Safe to make hard per the Gate
+  # Atomicity Law (#335): the asserted set is `.vex/` itself, which only changes
+  # when a PR edits it, so this can never red on its own.
   vex-revisit:
     name: VEX revisit_by gate
     runs-on: ubuntu-latest
@@ -1860,6 +1863,71 @@ jobs:
           source vex-revisit.outcome
           echo "VEX revisit_by gate outcome=$outcome (fails on a missing or unsanctioned revisit_by, and on an empty ledger)"
           test "$outcome" = "success"
+
+  # ── .vex/ ↔ Debian security tracker join (REPORT-ONLY, #352) ────────────────
+  # Resolves what DEBIAN says about every `pkg:deb/debian/*` acceptance in the
+  # ledger — status / urgency / fixed_version / nodsa / scope for the pinned
+  # image's suite — and buckets each triple accordingly. That verdict is the
+  # evidence a class-C `standing-acceptance` record must cite (see
+  # `.vex/README.md` § "The three classes"), and the join also surfaces the
+  # opposite signal: a record still accepting a CVE Debian has since FIXED.
+  #
+  # NEVER A REQUIRED GATE, by construction (Gate Atomicity Law C1, #335): the
+  # joiner performs one HTTPS GET of security-tracker.debian.org's ~86 MB JSON
+  # dump. A required check that reds when a third-party host is slow or down is a
+  # condition this repo cannot unilaterally satisfy, which is precisely the class
+  # of gate #335 forbids. It is therefore ALSO restricted to schedule /
+  # workflow_dispatch so no PR path acquires that network dependency at all — the
+  # ledger changes far more slowly than a push cadence, and the weekly cron is the
+  # natural re-verification tempo for a standing acceptance.
+  #
+  # It edits NOTHING under `.vex/` (#322): the classification is reported for a
+  # human to act on in a separate, reviewable PR.
+  vex-debian-tracker:
+    name: VEX ↔ Debian tracker join (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [ministack-image, trivy-image]
+    # `always()` so the report still renders when an image gate failed (the
+    # fix-state cross-check below is optional input, not a prerequisite).
+    if: >-
+      always() && (github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # joiner uses Node built-ins + the .ts logic only; no deps
+      # Optional corroboration input: this run's image-scan JSON carries Grype's
+      # `fix.state` and Trivy's `Status` — fields NO gate reads today — so the
+      # report can flag where the scanners and Debian disagree about whether a fix
+      # exists. Non-fatal if absent: the rows then read `fix-state=no-scanner-data`.
+      - name: Download current image-scan JSON (optional corroboration)
+        id: dl-scans
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: scan-json
+          pattern: '{grype-ministack-image-sarif,trivy-image-reports}'
+          merge-multiple: true
+      - name: Join .vex/ against the Debian security tracker
+        run: |
+          set -euo pipefail
+          # The 86 MB payload is parsed in-process; the default heap is not enough.
+          NODE_OPTIONS=--max-old-space-size=4096 \
+            node .github/scripts/vex-debian-tracker.mjs vex-debian-tracker.txt \
+              scan-json/grype-ministack-image.json scan-json/trivy-image.json
+      - name: Upload Debian tracker join report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vex-debian-tracker-report
+          path: vex-debian-tracker.txt
+          if-no-files-found: warn
 
   zizmor:
     name: Zizmor (Actions audit)

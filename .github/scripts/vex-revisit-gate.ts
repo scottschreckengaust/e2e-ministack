@@ -1,5 +1,5 @@
 // Enforce the `.vex/` ledger's `revisit_by` MUST (issue #336): every OpenVEX
-// record has to name HOW its acceptance ends, in one of the four sanctioned
+// record has to name HOW its acceptance ends, in one of the five sanctioned
 // forms, or CI fails.
 //
 // WHY a gate and not more prose: `.vex/README.md` has said `MUST` since #188,
@@ -17,8 +17,15 @@
 //
 // WHAT is checked, per record:
 //   1. PRESENCE — a `revisit_by` exists (doc-level, or on every statement).
-//   2. VOCABULARY — the value's first word is one of the four sanctioned form
+//   2. VOCABULARY — the value's first word is one of the five sanctioned form
 //      tokens, and the argument that form requires is well-formed.
+//   3. EVIDENCE — `standing-acceptance` (#352) additionally carries a complete,
+//      well-formed `evidence` object. It is the ONE form that names no future
+//      event, so it is the one form that cannot be falsified by waiting; the
+//      evidence object is what makes it falsifiable instead (re-run the cited
+//      lookup and see whether the verdict still holds). A `standing-acceptance`
+//      without evidence is a bare "we decided not to care", which is exactly
+//      the blanket-ignore the ledger exists to forbid — so it FAILS.
 // Argument well-formedness is the part a reviewer reliably misses: `revisit
 // 2026-02-30` LOOKS like a date and even parses (see `isCalendarDate`), and
 // `waiting-on-upstream-issue soon` names no tracker at all.
@@ -47,16 +54,23 @@ import { asArray, asRecord, isCalendarDate } from './vex-ledger.ts';
 import { extractCve } from './vex-to-sarif-suppressions.ts';
 import { extractGhsa } from './npm-audit-gate.ts';
 
-/** The four sanctioned `revisit_by` forms (`.vex/README.md` § the MUST). */
+/**
+ * The five sanctioned `revisit_by` forms (`.vex/README.md` § the MUST), which
+ * fall into three CLASSES: `date` is time-boxed (class A), `image-rebuild` /
+ * `upstream-issue` / `advisory` are event-triggered (class B), and `standing`
+ * is a standing acceptance whose trigger is a periodic re-check rather than an
+ * event (class C, #352) — see `.vex/README.md` § "Three classes of acceptance".
+ */
 export type RevisitForm =
   | 'date'
   | 'image-rebuild'
   | 'upstream-issue'
-  | 'advisory';
+  | 'advisory'
+  | 'standing';
 
 /** Rendered in the failure report so the fix is obvious without opening docs. */
 const SANCTIONED_FORMS =
-  'revisit <ISO-date> | wait-for-image-rebuild | waiting-on-upstream-issue <https url> | waiting-for-fix <CVE|GHSA>';
+  'revisit <ISO-date> | wait-for-image-rebuild | waiting-on-upstream-issue <https url> | waiting-for-fix <CVE|GHSA> | standing-acceptance (requires evidence)';
 
 /**
  * An `https` absolute URL. `URL.canParse` + `new URL` are the vetted parser (no
@@ -92,8 +106,12 @@ function isAdvisoryId(value: string): boolean {
 export function revisitForm(value: unknown): RevisitForm | null {
   if (typeof value !== 'string') return null;
   const [token, arg] = value.trim().split(/\s+/);
-  // the only argument-free form
+  // The two argument-free forms. `standing-acceptance` takes no argument in the
+  // STRING because its argument is structured — the sibling `evidence` object,
+  // checked by `evidenceDefect` (a URL + a dated lookup + a verdict do not fit
+  // in one whitespace-delimited word).
   if (token === 'wait-for-image-rebuild') return 'image-rebuild';
+  if (token === 'standing-acceptance') return 'standing';
   if (arg === undefined) return null;
   if (token === 'revisit') return isCalendarDate(arg) ? 'date' : null;
   if (token === 'waiting-on-upstream-issue')
@@ -116,27 +134,115 @@ export function effectiveRevisitBy(
   return doc.revisit_by ?? asRecord(statement)?.revisit_by;
 }
 
+/**
+ * The `evidence` in force for one statement. Resolved EXACTLY like
+ * `effectiveRevisitBy` (doc-level wins, else the statement's own) so a record can
+ * declare `standing-acceptance` + `evidence` once at the document level and have
+ * it cover every statement, rather than repeating the citation per product.
+ */
+export function effectiveEvidence(
+  doc: Record<string, unknown>,
+  statement: unknown,
+): unknown {
+  return doc.evidence ?? asRecord(statement)?.evidence;
+}
+
+/**
+ * The `evidence` fields a `standing-acceptance` MUST carry, in report order.
+ *
+ * Every one of them answers a question a reader of the record would otherwise
+ * have to take on trust: WHO says so (`source`), WHERE to re-check it (`url`),
+ * WHAT was looked up (`source_package` — Debian keys on source packages, so this
+ * is NOT the purl's binary package name), against which release (`suite`), what
+ * the answer was (`verdict`), how far it reaches (`scope`), and WHEN it was last
+ * confirmed (`checked_at`, the field the periodic re-check in #354 reads).
+ */
+export const EVIDENCE_FIELDS = [
+  'source',
+  'url',
+  'source_package',
+  'suite',
+  'verdict',
+  'scope',
+  'checked_at',
+] as const;
+
+/** One member of `EVIDENCE_FIELDS`. */
+export type EvidenceField = (typeof EVIDENCE_FIELDS)[number];
+
+/**
+ * Per-field well-formedness. Two fields carry a machine-checkable shape — `url`
+ * must be a durable https citation (same rule as `waiting-on-upstream-issue`)
+ * and `checked_at` a real calendar date (so "when was this last confirmed" can be
+ * compared, not just read) — and the rest must be non-blank text. A whitespace
+ * string is treated as absent on purpose: `suite: " "` is not a citation.
+ */
+function evidenceFieldWellFormed(field: EvidenceField, value: string): boolean {
+  if (field === 'url') return isHttpsUrl(value);
+  if (field === 'checked_at') return isCalendarDate(value);
+  return value.trim() !== '';
+}
+
+/**
+ * The FIRST defect in a `standing-acceptance`'s evidence, or null when it is
+ * complete and well-formed. The string is a report line, not a type — one
+ * actionable defect per record keeps the failure output one line long.
+ *
+ * TOTAL: any non-object (including `undefined` for an absent field) is a defect,
+ * never a throw. Fails CLOSED — an unreadable evidence block is a missing one.
+ */
+export function evidenceDefect(evidence: unknown): string | null {
+  const record = asRecord(evidence);
+  if (record === null) return 'no evidence object';
+  for (const field of EVIDENCE_FIELDS) {
+    const value = record[field];
+    if (value === undefined) return `evidence.${field} absent`;
+    if (typeof value !== 'string')
+      return `evidence.${field} not a string (${typeof value})`;
+    if (!evidenceFieldWellFormed(field, value))
+      return `evidence.${field} malformed: ${value}`;
+  }
+  return null;
+}
+
 /** One `.vex/` file as the shim hands it over (`doc` is undefined if unreadable). */
 export interface LedgerEntry {
   path: string;
   doc: unknown;
 }
 
-/** Why a record fails: no field, a value outside the vocabulary, or unparseable. */
-export type ViolationReason = 'unreadable' | 'missing' | 'unsanctioned';
+/**
+ * Why a record fails: unparseable, no field, a value outside the vocabulary, or
+ * a `standing-acceptance` whose required `evidence` is missing/malformed.
+ */
+export type ViolationReason =
+  | 'unreadable'
+  | 'missing'
+  | 'unsanctioned'
+  | 'evidence';
 
-/** One failing record. `value` is the offending text ('' when there is none). */
+/**
+ * One failing record. `value` is the offending text ('' when there is none) — for
+ * an `evidence` violation it is the defect from `evidenceDefect`.
+ */
 export interface Violation {
   path: string;
   reason: ViolationReason;
   value: string;
 }
 
+/** The `revisit_by` + `evidence` pair in force for one statement. */
+interface InForce {
+  value: unknown;
+  evidence: unknown;
+}
+
 /**
  * The violation for one record, or null when it complies. A record complies iff
  * EVERY statement has a sanctioned `revisit_by` in force (doc-level covers them
- * all at once); a record with no statements must carry the doc-level field. Only
- * the first failing statement is reported — one record, one actionable line.
+ * all at once) — plus complete `evidence` where that form demands it; a record
+ * with no statements must carry the doc-level fields. Only the first failing
+ * statement is reported — one record, one actionable line.
  *
  * TOTAL by construction: anything that is not a JSON object (including the
  * `undefined` the shim yields for an unparseable file) is a violation, so a
@@ -146,12 +252,24 @@ export function recordViolation({ path, doc }: LedgerEntry): Violation | null {
   const record = asRecord(doc);
   if (record === null) return { path, reason: 'unreadable', value: '' };
   const statements = asArray(record.statements);
-  const inForce =
+  const inForce: InForce[] =
     statements.length === 0
-      ? [record.revisit_by]
-      : statements.map((statement) => effectiveRevisitBy(record, statement));
-  for (const value of inForce) {
-    if (revisitForm(value) !== null) continue;
+      ? [{ value: record.revisit_by, evidence: record.evidence }]
+      : statements.map((statement) => ({
+          value: effectiveRevisitBy(record, statement),
+          evidence: effectiveEvidence(record, statement),
+        }));
+  for (const { value, evidence } of inForce) {
+    const form = revisitForm(value);
+    // A standing acceptance is the only form whose validity depends on data
+    // OUTSIDE the `revisit_by` string, so it is checked here and not in
+    // `revisitForm` (which sees the string alone).
+    if (form === 'standing') {
+      const defect = evidenceDefect(evidence);
+      if (defect === null) continue;
+      return { path, reason: 'evidence', value: defect };
+    }
+    if (form !== null) continue;
     if (value === undefined || value === null)
       return { path, reason: 'missing', value: '' };
     return {
@@ -200,6 +318,7 @@ const REASON_TEXT: Record<ViolationReason, string> = {
   unreadable: 'unreadable record (not a JSON object)',
   missing: 'no revisit_by',
   unsanctioned: 'unsanctioned revisit_by',
+  evidence: 'standing-acceptance without complete evidence',
 };
 
 /**
@@ -209,7 +328,7 @@ const REASON_TEXT: Record<ViolationReason, string> = {
  */
 export function renderReport(result: GateResult): string {
   const lines = [
-    '.vex/ revisit_by gate (#336) — presence + vocabulary',
+    '.vex/ revisit_by gate (#336/#352) — presence + vocabulary + evidence',
     `records checked: ${result.checked}`,
     `violations: ${result.violations.length}`,
     '',
@@ -227,6 +346,13 @@ export function renderReport(result: GateResult): string {
       '(see .vex/README.md § "Every record MUST carry a reason and a timeline").',
       `sanctioned forms: ${SANCTIONED_FORMS}`,
     );
+    // Only spell the evidence contract out when a record actually tripped it —
+    // the common failure is a typo'd token, and an unconditional field list would
+    // bury it.
+    if (result.violations.some((violation) => violation.reason === 'evidence'))
+      lines.push(
+        `standing-acceptance evidence fields: ${EVIDENCE_FIELDS.join(', ')}`,
+      );
     for (const violation of result.violations) {
       const detail = violation.value === '' ? '' : ` ("${violation.value}")`;
       lines.push(

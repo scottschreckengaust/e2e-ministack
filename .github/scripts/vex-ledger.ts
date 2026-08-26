@@ -84,8 +84,12 @@ export function statementIds(statement: unknown): string[] {
 }
 
 // A calendar date embedded in a `revisit_by` string (the "revisit <ISO-date>"
-// vocabulary from .vex/README.md). The event-token vocabulary
-// (`wait-for-image-rebuild`, `waiting-on-upstream-issue <url>`) yields no match.
+// vocabulary from .vex/README.md). The other four forms take no date argument —
+// `wait-for-image-rebuild`, `waiting-on-upstream-issue <url>`,
+// `waiting-for-fix <CVE|GHSA>` and `standing-acceptance` (the closed set is
+// `RevisitForm` in vex-revisit-gate.ts) — so a record on one of those has no
+// expiry to check, which is precisely why `standing-acceptance` must instead
+// carry a dated `evidence.checked_at` (#352).
 const ISO_DATE_RE = /\d{4}-\d{2}-\d{2}/;
 
 /**

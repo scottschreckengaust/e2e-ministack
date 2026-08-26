@@ -35,6 +35,16 @@ import {
 // is the only lever, hence `osvEmittable`: the deb fixtures below MUST appear in
 // the trivy dialect and MUST NOT appear in the OSV one.
 
+// The THIRD reason every fixture below is shaped the way it is (#352): each
+// carries a `revisit_by`, because `VexDoc.revisit_by` is no longer optional.
+// #336 made the field's presence a hard CI gate, after which `revisit_by?:` was
+// simply a false type — no record in the ledger can lack it — and an optional
+// field invites callers to tolerate `undefined` that cannot occur. Dropping the
+// `?` surfaced every fixture that modelled a record the ledger would reject; each
+// now names a sanctioned form, so the fixture corpus is a truthful sample. Where
+// the form is DATED it changes behaviour (an OSV `ignoreUntil`), so the
+// no-ignoreUntil fixtures deliberately use event/standing forms.
+
 // The three surfaces the fixtures argue about. `@id` is the purl form
 // `.vex/README.md` mandates (qualifier-less, canonical); `statementPurls` reads
 // it (and `identifiers.purl`) — see vex-ledger.ts.
@@ -47,6 +57,7 @@ const PYPI_PRODUCTS = [{ '@id': 'pkg:pypi/ecdsa' }];
 const NA_IMAGE: VexFile = {
   path: '.vex/CVE-2026-11822.openvex.json',
   doc: {
+    revisit_by: 'wait-for-image-rebuild',
     statements: [
       {
         vulnerability: { name: 'CVE-2026-11822' },
@@ -63,6 +74,8 @@ const NA_IMAGE: VexFile = {
 const NA_FS: VexFile = {
   path: '.vex/ecdsa-CVE-2024-23342.openvex.json',
   doc: {
+    revisit_by:
+      'waiting-on-upstream-issue https://github.com/tlsfuzzer/python-ecdsa/security/advisories/GHSA-wj6h-64fc-37mp',
     statements: [
       {
         vulnerability: { name: 'CVE-2024-23342' },
@@ -95,6 +108,7 @@ const AFFECTED_MCP: VexFile = {
 const FIXED: VexFile = {
   path: '.vex/CVE-2026-0001.openvex.json',
   doc: {
+    revisit_by: 'waiting-for-fix CVE-2026-0001',
     statements: [
       {
         vulnerability: { name: 'CVE-2026-0001' },
@@ -131,6 +145,7 @@ describe('suppressingRecords', () => {
       {
         path: '.vex/a.json',
         doc: {
+          revisit_by: 'wait-for-image-rebuild',
           statements: [
             {
               vulnerability: { name: 'CVE-2026-2' },
@@ -141,7 +156,10 @@ describe('suppressingRecords', () => {
       },
       {
         path: '.vex/b.json',
-        doc: { statements: [{ vulnerability: { name: 'CVE-2026-3' } }] },
+        doc: {
+          revisit_by: 'wait-for-image-rebuild',
+          statements: [{ vulnerability: { name: 'CVE-2026-3' } }],
+        },
       },
     ]);
     expect(out).toEqual([]);
@@ -189,6 +207,7 @@ describe('suppressingRecords', () => {
     const dup: VexFile = {
       path: '.vex/CVE-2026-11822.openvex.json',
       doc: {
+        revisit_by: 'wait-for-image-rebuild',
         statements: [
           { vulnerability: { name: 'CVE-2026-11822' }, status: 'fixed' },
         ],
@@ -242,6 +261,11 @@ describe('ignoreUntilFrom', () => {
     expect(
       ignoreUntilFrom('waiting-on-upstream-issue https://x/y'),
     ).toBeUndefined();
+    expect(ignoreUntilFrom('waiting-for-fix CVE-2026-13149')).toBeUndefined();
+    // The class-C form (#352). `CVE-2026-13149` above is the neighbouring trap:
+    // its digits are NOT `YYYY-MM-DD`-shaped, so neither event form yields a
+    // spurious self-expiring ignore.
+    expect(ignoreUntilFrom('standing-acceptance')).toBeUndefined();
     expect(ignoreUntilFrom(undefined)).toBeUndefined();
     expect(ignoreUntilFrom(42 as unknown as string)).toBeUndefined();
     expect(ignoreUntilFrom('')).toBeUndefined();
@@ -354,6 +378,7 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
     const npmScoped: VexFile = {
       path: '.vex/npm-CVE-2026-11822.openvex.json',
       doc: {
+        revisit_by: 'wait-for-image-rebuild',
         statements: [
           {
             vulnerability: { name: 'CVE-2026-11822' },
@@ -392,6 +417,7 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
       {
         path: '.vex/s.json',
         doc: {
+          revisit_by: 'wait-for-image-rebuild',
           statements: [
             {
               vulnerability: 'CVE-2026-5',
@@ -413,6 +439,7 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
       {
         path: '.vex/nullvuln.json',
         doc: {
+          revisit_by: 'wait-for-image-rebuild',
           statements: [
             {
               vulnerability: null as unknown as string,
@@ -461,6 +488,7 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
       {
         path: '.vex/x.json',
         doc: {
+          revisit_by: 'wait-for-image-rebuild',
           statements: [
             {
               vulnerability: { name: 'GHSA-only' },
@@ -479,6 +507,7 @@ describe('ignoredVulns (OSV [[IgnoredVulns]] rows)', () => {
       {
         path: '.vex/mixed.json',
         doc: {
+          revisit_by: 'wait-for-image-rebuild',
           statements: [
             null as unknown as { status: string },
             {
@@ -550,6 +579,7 @@ describe('renderOsvToml', () => {
     const tricky: VexFile = {
       path: '.vex/CVE-2026-7777.openvex.json',
       doc: {
+        revisit_by: 'wait-for-image-rebuild',
         statements: [
           {
             vulnerability: { name: 'CVE-2026-7777' },
@@ -580,9 +610,16 @@ describe('renderOsvToml', () => {
 // banner/scan-policy literals (the #165 bar for these security modules is 0
 // surviving mutants — a corrupted generated file silently desyncs a scanner's
 // suppression set from the .vex/ ledger).
+//
+// Its `revisit_by` is the class-C `standing-acceptance` form (#352) on purpose:
+// a standing acceptance names no end event, so it must render with NO expiry in
+// either dialect. Because the goldens below pin the ENTIRE file byte-for-byte,
+// they are also the strongest available proof of that — an `ignoreUntil` line
+// leaking in from a future change to `ignoreUntilFrom` would fail them.
 const GOLDEN_FILE: VexFile = {
   path: '.vex/CVE-2026-0001.openvex.json',
   doc: {
+    revisit_by: 'standing-acceptance',
     statements: [
       {
         vulnerability: { name: 'CVE-2026-0001' },
@@ -673,5 +710,22 @@ reason = "VEX fixed (j)"
     expect(toml).toContain(
       'id = "CVE-2026-0002"\nreason = "VEX fixed (j)"\nignoreUntil = 2026-10-01T00:00:00.000Z',
     );
+  });
+
+  it('suppresses normally in BOTH dialects for a class-C standing-acceptance, with no expiry', () => {
+    // The behavioural claim the new #352 dialect form makes: `standing-acceptance`
+    // is a REVISIT trigger, not a suppression modifier. It must therefore behave
+    // in the dialects exactly like any other non-dated form — the record still
+    // reaches trivy's file list and OSV's ignore list, and OSV gets no
+    // self-expiring `ignoreUntil` (there is no end event to expire towards, so an
+    // invented date would either silently re-open the finding or lie about a
+    // review that was never scheduled).
+    expect(renderTrivyYaml([GOLDEN_FILE])).toContain(
+      '    - .vex/CVE-2026-0001.openvex.json',
+    );
+    const toml = renderOsvToml([GOLDEN_FILE]);
+    expect(toml).toContain('id = "CVE-2026-0001"');
+    expect(toml).not.toContain('ignoreUntil');
+    expect(ignoreUntilFrom(GOLDEN_FILE.doc.revisit_by)).toBeUndefined();
   });
 });

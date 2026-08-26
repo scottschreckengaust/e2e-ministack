@@ -73,6 +73,12 @@ export default tseslint.config(
             '.github/scripts/alerts-findings.ts',
             'test/unit/vex-report.test.ts',
             'test/unit/alerts-findings.test.ts',
+            // #352: vex-debian-tracker.ts imports ./vex-ledger.ts with an
+            // explicit `.ts` extension for the same reason (it reuses the
+            // ledger's purl parser + record discovery rather than re-deriving
+            // them), so module + sole-importer test lint here.
+            '.github/scripts/vex-debian-tracker.ts',
+            'test/unit/vex-debian-tracker.test.ts',
           ],
           // typescript-eslint caps the inferred default program at 8 matched
           // files by default; the fuzz-regression `.ts` targets (one per logic
@@ -82,9 +88,10 @@ export default tseslint.config(
           // than move them into an emitting tsconfig (which would resurrect the
           // `.js`-shadows-`.ts` problem #165 avoids). Raised again at #336, and
           // at #337 (the 13 fuzz targets + 10 named entries = 23 matched files),
-          // and at #342 (14 named entries = 27); keep a little headroom so the
-          // next logic module doesn't have to touch this line.
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 30,
+          // and at #342 (14 named entries = 27), and at #352 (16 named = 29);
+          // keep a little headroom so the next logic module doesn't have to
+          // touch this line.
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 34,
         },
         tsconfigRootDir: import.meta.dirname,
       },

@@ -79,8 +79,20 @@ export interface VexStatement {
 
 /** The subset of an OpenVEX document this generator reads. */
 export interface VexDoc {
-  /** Document-level custom field (#188) — a revisit trigger; may embed a date. */
-  revisit_by?: string;
+  /**
+   * Document-level custom field (#188) — a revisit trigger naming how the
+   * acceptance ends; may embed a date.
+   *
+   * REQUIRED, not optional (#352). It was `revisit_by?: string` from #188 until
+   * #336 made presence a hard CI gate (`vex-revisit-gate.ts`) — after which the
+   * `?` was simply false: no committed record can lack the field, and typing it
+   * optional invited exactly the "may be absent, so tolerate it" reflex the gate
+   * exists to kill. The runtime readers below stay total anyway (this is
+   * hand-authored JSON, so a type is a claim about the ledger, not a
+   * guarantee about a file on disk) — but a NEW tolerance of `undefined` should
+   * now have to argue with the compiler first.
+   */
+  revisit_by: string;
   statements?: VexStatement[];
 }
 
@@ -148,8 +160,11 @@ export function reasonFor(st: VexStatement): string {
 }
 
 // A calendar date embedded in a `revisit_by` string (the "revisit <ISO-date>"
-// vocabulary from .vex/README.md). The non-date vocabulary
-// (`wait-for-image-rebuild`, `waiting-on-upstream-issue <url>`) yields no match.
+// vocabulary from .vex/README.md). The other four forms take no date argument —
+// `wait-for-image-rebuild`, `waiting-on-upstream-issue <url>`,
+// `waiting-for-fix <CVE|GHSA>` and `standing-acceptance` (the closed set is
+// `RevisitForm` in vex-revisit-gate.ts, which is the gate on it) — so none of
+// them yields an `ignoreUntil` unless its free-text tail happens to carry a date.
 const ISO_DATE_RE = /\d{4}-\d{2}-\d{2}/;
 
 /**
