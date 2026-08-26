@@ -1735,7 +1735,7 @@ describe('summarize + renderMarkdown', () => {
       '',
       "**severity** — GitHub's badge (NVD) severity. Shown as `badge / gate X` when the scanner's distro/gate rating differs (e.g. NVD Critical vs Debian Negligible).",
       '',
-      '**revisit_by** — an ISO date (overdue-checkable) or an event token (e.g. `wait-for-image-rebuild`).',
+      '**revisit_by** — how the acceptance ends, in one of three classes: a dated `revisit <ISO-date>` (overdue-checkable), an event token (e.g. `wait-for-image-rebuild`), or `standing-acceptance` + evidence (no end event exists, so it is re-verified on a cadence instead).',
       '',
       '</details>',
     ].join('\n');

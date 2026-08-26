@@ -44,6 +44,7 @@ export default {
     '.github/scripts/grype-fs-gate.ts',
     '.github/scripts/vex-ledger.ts',
     '.github/scripts/vex-revisit-gate.ts',
+    '.github/scripts/vex-debian-tracker.ts',
     '.github/scripts/npm-audit-gate.ts',
     '.github/scripts/npm-audit-to-sarif.ts',
     '.github/scripts/license-verdict.ts',

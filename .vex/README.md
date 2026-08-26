@@ -175,12 +175,76 @@ same purpose.
 
 **Vocabulary — pick the form that matches how the acceptance actually ends:**
 
-| form                              | ends when                 | use for                                             |
-| --------------------------------- | ------------------------- | --------------------------------------------------- |
-| `revisit <ISO-date>`              | **the date passes**       | override/bundled-dep "waiting for the vendor"       |
-| `wait-for-image-rebuild`          | the pinned digest bumps   | base-image CVEs, re-verified by the reconcile below |
-| `waiting-on-upstream-issue <url>` | that issue resolves       | a tracked upstream defect                           |
-| `waiting-for-fix <advisory>`      | that advisory ships a fix | a known-fix-pending dependency                      |
+| form                              | class | ends when                       | use for                                             |
+| --------------------------------- | ----- | ------------------------------- | --------------------------------------------------- |
+| `revisit <ISO-date>`              | A     | **the date passes**             | override/bundled-dep "waiting for the vendor"       |
+| `wait-for-image-rebuild`          | B     | the pinned digest bumps         | base-image CVEs, re-verified by the reconcile below |
+| `waiting-on-upstream-issue <url>` | B     | that issue resolves             | a tracked upstream defect                           |
+| `waiting-for-fix <advisory>`      | B     | that advisory ships a fix       | a known-fix-pending dependency                      |
+| `standing-acceptance` + evidence  | C     | **never — nothing to wait for** | upstream calls it intended behaviour / not-a-bug    |
+
+### The three classes, and how to choose (#352)
+
+The `class` column is the actual decision. Pick it by answering ONE question
+about the record — _what event, if it happened, would let me delete this file?_
+
+- **Class A — dated (`revisit <ISO-date>`).** The end event is a **clock**: a
+  vendor release is expected, or you are deliberately time-boxing your own
+  patience. Use it whenever a date is honest, because it is the only class a
+  machine can nag you about.
+- **Class B — event-triggered (the three token forms).** A specific, nameable
+  event exists and **has not happened yet**: the digest bumps, an upstream issue
+  closes, an advisory ships a fix. The token names the event so a reviewer can
+  check whether it has fired.
+- **Class C — standing (`standing-acceptance`).** **No end event exists**, and no
+  date would be truthful. The canonical case: upstream and the distro both call
+  the behaviour intended, so there is no patch to await and no rebuild that could
+  ever clear the finding. A class-C acceptance is not weaker than the others — it
+  is a different, stronger claim, and it therefore has to carry its proof.
+
+**Do not borrow class B for a class-C record.** Before this form existed, a "no
+fix will ever exist" acceptance had to pick some token anyway, and
+`wait-for-image-rebuild` was the usual choice — producing a record whose prose
+said _no patched version to await_ while its trigger promised a rebuild would
+resolve it. That trigger cannot fire in any useful sense: the digest bumps, the
+finding is still there, and the reviewer learns nothing. That silent
+self-contradiction is exactly what class C replaces.
+
+**Class C REQUIRES an `evidence` object — the gate rejects it otherwise.** A
+standing acceptance is the one class no future event will ever re-examine, so the
+only thing keeping it honest is a citation a reviewer can re-check today. Put it
+next to `revisit_by` (document level, or on the statement for a per-statement
+claim); every field is required and machine-checked:
+
+```json
+"revisit_by": "standing-acceptance",
+"evidence": {
+  "source": "debian-security-tracker",
+  "url": "https://security-tracker.debian.org/tracker/CVE-YYYY-NNNN",
+  "source_package": "<Debian SOURCE package, not the binary one>",
+  "suite": "trixie",
+  "verdict": "unimportant",
+  "scope": "local",
+  "checked_at": "YYYY-MM-DD"
+}
+```
+
+`url` must be an `https` URL and `checked_at` a real calendar day; the rest must
+be non-empty strings. `checked_at` is what makes the class re-verifiable: it
+dates the claim without expiring the acceptance, so a periodic sweep can ask "is
+this still what upstream says?" instead of waiting for an event that will never
+come. Write the verdict in the SOURCE's own vocabulary (Debian's `unimportant`,
+`<no-dsa>`, …) rather than paraphrasing it — a paraphrase is not a citation.
+
+`.github/scripts/vex-debian-tracker.mjs` resolves that verdict straight from the
+Debian security tracker for `pkg:deb/debian/*` records, so the evidence can be
+copied from a machine-produced row instead of hand-assembled. It is
+**report-only and deliberately never a gate**: it fetches a large third-party
+file, and a required check that depends on an external service being up is a
+dependency this repo cannot unilaterally satisfy (the Gate Atomicity Law, #335).
+Note it joins on the purl **version**, never the package name — Debian keys on
+_source_ packages while purls carry _binary_ ones, so `source_package` in the
+evidence above is frequently NOT the name in the purl.
 
 **Only the dated form self-expires.** `vex-ledger.ts` drops a record from the
 active set once its embedded ISO date is on/before today, so the finding re-reds
@@ -188,13 +252,16 @@ automatically instead of rotting (`revisitDate` / `activeRecordIds`; the same
 date feeds `osv-scanner.toml`'s `ignoreUntil` via `vex-dialects.ts`). The
 event-token forms never expire **by design** — they wait on an event, not a
 clock, and their expiry mechanism is the reconcile procedure, not the calendar.
-So: if an acceptance is genuinely time-boxed, use the **dated** form, because it
-is the only one a machine can nag you about.
+Class C does not expire either, and for a stronger reason: there is no event to
+wait for, so its honesty mechanism is the dated `evidence.checked_at` citation
+plus a periodic re-verification sweep. So: if an acceptance is genuinely
+time-boxed, use the **dated** form, because it is the only one a machine can nag
+you about.
 
 **The `MUST` is a gate, not a convention (#336).** `.github/scripts/vex-revisit-gate.mjs`
 (hard-fail `vex-revisit` job in `security.yml`, and part of `npm run verify:all`)
 fails CI when a record carries no `revisit_by` at all, or one whose value is not
-one of the four forms above. It also checks each form's ARGUMENT, because the
+one of the five forms above. It also checks each form's ARGUMENT, because the
 plausible-looking-but-wrong value is the one review misses:
 
 - a dated form must name a **real calendar day** — `revisit 2026-02-30` is
@@ -203,13 +270,17 @@ plausible-looking-but-wrong value is the one review misses:
 - `waiting-on-upstream-issue` must be followed by an **`https` URL** — a durable
   citation, not a promise;
 - `waiting-for-fix` must be followed by a **CVE or GHSA id** (the two identifier
-  namespaces this ledger matches on), so the advisory it waits for is resolvable.
+  namespaces this ledger matches on), so the advisory it waits for is resolvable;
+- `standing-acceptance` takes no argument in the STRING — its argument is
+  structured. The gate requires the sibling **`evidence`** object described above
+  and rejects a bare `standing-acceptance`, so the one class that never expires
+  cannot be the cheapest one to write.
 
 The form token and its argument are the only machine-checked parts; anything
 after them is free text, so append the human reason if the record's
 `impact_statement` doesn't already carry it. A trigger nobody can verify is worse
 than a red gate — write the one that is TRUE for the record, and if none of the
-four fits, that is a signal the acceptance itself needs rethinking, not a new
+five fits, that is a signal the acceptance itself needs rethinking, not a new
 vocabulary word.
 
 ## Vendor-vs-tool severity honesty (#188)
