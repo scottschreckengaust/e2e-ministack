@@ -65,23 +65,23 @@ jobs:
           # --error sets a non-zero exit on findings; capture it so the report
           # still uploads, then enforce in a later step.
           set +e
-          # TEMPORARY, rule-scoped --exclude-rule for the buggy
-          # `detected-sonarqube-docs-api-key` (a PROVEN false positive: its regex
-          # `(?i)sonar.{0,50}…[0-9a-f]{40}` matches this repo's SHA-pinned
-          # SonarSource actions + the sonarqube image digest — public, required
-          # pins, NOT API keys; #163). We EXCLUDE the rule rather than `# nosemgrep`
-          # it inline because a suppressed finding still ships in the SARIF
-          # (`suppressions:[{inSource}]`) and GitHub Code Scanning surfaces it —
-          # reddening the "Semgrep OSS" check that ingests our uploaded SARIF.
-          # --exclude-rule drops the rule ENTIRELY (0 results), clearing both the
-          # gate and the Code Scanning alert. This is maintainer-approved and
-          # TEMPORARY: REMOVE this flag once the upstream fix
-          # (semgrep/semgrep-rules#3994) lands in r/all — tracked by #163
-          # (and folded into the vendored ruleset under #79). Scoped to this ONE
-          # rule, so every other secret/SAST rule still runs.
+          # NO rule exclusions and no inline suppressions: the whole
+          # `--config=auto` ruleset runs against the whole tree. The
+          # `detected-sonarqube-docs-api-key` false positive on this repo's
+          # SHA/digest pins that #162 had to work around is FIXED AT THE SOURCE —
+          # upstream semgrep/semgrep-rules#3994 (merged 2026-07-20, now served by
+          # the registry `--config=auto` reads) replaced the `.{0,50}` bridge with
+          # a class that cannot cross `:` or `@`, made an assignment (`[:=]`)
+          # mandatory and `\b`-anchored the match. So the required shape is now
+          # `sonar…[:=]<40-hex>`, which neither an `@<sha>` action pin nor the
+          # sonarqube image digest can produce (their separator is `@`, and the
+          # digest's `:` is followed by `community`, not 40 hex).
+          # Do NOT re-add a rule exclusion or `# nosemgrep` here
+          # (#163): a suppressed finding still ships in the SARIF
+          # (`suppressions:[{inSource}]`) and GitHub Code Scanning surfaces it,
+          # reddening the "Semgrep OSS" check that ingests our upload.
           semgrep scan --config=auto --error --sarif --output semgrep.sarif \
-            --exclude=node_modules --exclude=cdk.out \
-            --exclude-rule=generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+            --exclude=node_modules --exclude=cdk.out
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()
@@ -442,9 +442,11 @@ jobs:
           # license needs a new entry — the PR adding it flags it here.)
           # NOTE: a plain quoted scalar (not a `>-` block) so the purls parse as a
           # single clean comma-list (a block scalar would fold in stray text). The
-          # detected-sonarqube-docs-api-key secrets rule would match the SHA-bearing
-          # SonarSource purls, but it is globally --exclude-rule'd in the semgrep
-          # job (temporary; see #163) so no inline suppression is needed.
+          # detected-sonarqube-docs-api-key secrets rule does NOT match the
+          # SHA-bearing SonarSource purls below: the upstream-tightened regex needs
+          # a sonar-prefixed key name followed by an ASSIGNMENT (`sonar…[:=]<40-hex>`),
+          # and an `@<sha>` pin supplies no `:`/`=` separator — so no suppression is
+          # needed here, and the semgrep job carries no rule exclusion (#163).
           allow-dependencies-licenses: 'pkg:githubactions/SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e, pkg:githubactions/SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b, pkg:pypi/certifi, pkg:pypi/orjson, pkg:pypi/semgrep, pkg:pypi/tqdm, pkg:pypi/aiohappyeyeballs, pkg:pypi/typing-extensions'
           # allow-ghsas: the high-severity advisories in the SAME scanner-tooling
           # pip closures (#262). dependency-review is fail-on-severity:high, so a
@@ -1443,12 +1445,13 @@ jobs:
       security-events: write # upload SARIF to code scanning
     services:
       sonarqube:
-        # The detected-sonarqube-docs-api-key secrets rule matches "sonar…<40-hex>"
-        # — i.e. this image digest and the SHA-pinned SonarSource actions below,
-        # all PUBLIC REQUIRED pins, not API keys (a PROVEN false positive, #163).
-        # The rule is globally --exclude-rule'd in the semgrep job (temporary,
-        # until upstream semgrep/semgrep-rules#3994 lands), so no inline
-        # suppression is needed here.
+        # The detected-sonarqube-docs-api-key secrets rule USED to match this
+        # image digest and the SHA-pinned SonarSource actions below — all PUBLIC
+        # REQUIRED pins, not API keys (a PROVEN false positive, #163). Fixed at
+        # the source: the upstream-tightened regex requires an ASSIGNMENT
+        # (`sonar…[:=]<40-hex>`), and here the only `:` after `sonarqube` is
+        # followed by `community`, not 40 hex — so no suppression is needed here
+        # and the semgrep job carries no rule exclusion.
         image: sonarqube:community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
         ports:
           - 127.0.0.1:9000:9000

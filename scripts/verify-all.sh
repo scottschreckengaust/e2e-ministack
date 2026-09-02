@@ -243,19 +243,20 @@ iac_gate() {
 }
 if [[ -n "$PIP_READY" ]]; then run_gate "IaC (cfn-lint + checkov)" iac_gate; else note_skip "IaC (cfn-lint+checkov)" "python3/pip venv unavailable"; fi
 
-# —— security.yml: Semgrep SAST (same rule-exclude as CI) ——
+# —— security.yml: Semgrep SAST (byte-for-byte the same rule set as CI) ——
 semgrep_gate() {
   [[ -n "$PIP_READY" ]] || { note_skip "Semgrep" "pip venv unavailable"; return 0; }
   pip install --quiet --require-hashes -r .github/scanner-requirements/semgrep/requirements.txt >/dev/null 2>&1 \
     || { echo "semgrep install failed"; return 1; }
-  # `--exclude-rule` is the ONE parity-required suppression residual here: it
-  # MIRRORS security.yml's identical exclusion of the `detected-sonarqube-docs-api-key`
-  # rule — a documented, tracked FALSE POSITIVE on the SHA/digest pins (#163, until
-  # upstream semgrep/semgrep-rules#3994 lands). Removing it would BREAK #185 parity
-  # (local semgrep would red on the same FP CI suppresses), so it is kept, not dropped.
+  # NO rule exclusions — matching security.yml exactly, which is what #185 parity
+  # requires. The `detected-sonarqube-docs-api-key` false positive on the
+  # SHA/digest pins that both invocations used to exclude is fixed at the source
+  # (upstream semgrep/semgrep-rules#3994, now served by the registry that
+  # `--config=auto` reads), so there is nothing left to mirror (#163). If this
+  # gate ever reds on that rule, treat it as a real finding — do not re-add an
+  # exclusion here or in security.yml.
   semgrep scan --config=auto --error \
-    --exclude=node_modules --exclude=cdk.out \
-    --exclude-rule=generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+    --exclude=node_modules --exclude=cdk.out
 }
 if [[ -n "$PIP_READY" ]]; then run_gate "Semgrep SAST" semgrep_gate; else note_skip "Semgrep" "python3/pip venv unavailable"; fi
 

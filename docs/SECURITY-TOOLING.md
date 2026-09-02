@@ -404,26 +404,51 @@ SonarQube is a **single-vendor** SonarSource product. Two separable concerns:
   missing verdict. The gate held `PASSED` on three consecutive `main` runs
   before the flip. (The separate "Enforce SonarQube analysis ran" step still
   independently fails a non-real scan, so a server-down run can't pass either.)
-- **Semgrep false-positive (maintainer-approved, TEMPORARY rule exclude).** The
-  generic secrets rule `generic.secrets.security.detected-sonarqube-docs-api-key`
-  matches `sonar…<40-hex>`, which the pinned image **digest** and the two
-  commit-**SHA** action pins unavoidably are (SHA-pinning SonarSource's own
-  actions is required by the repo's pinning rules). These are public, required
-  pins — not API keys. Cleared with a single **`--exclude-rule`** on the semgrep
-  invocation, **not** inline `# nosemgrep`. Why `--exclude-rule` and not
-  `nosemgrep`: `# nosemgrep` marks the finding `suppressions:[{inSource}]` but
-  **leaves the result in the SARIF**, and GitHub Code Scanning still ingests and
-  surfaces it — reddening the `Semgrep OSS` check that consumes our uploaded
-  SARIF. `--exclude-rule` drops the rule entirely (0 results), clearing both the
-  gate and the Code Scanning alert. Scoped to this ONE rule, so every other
-  secret/SAST rule still runs on the whole tree (including `docs/`). This is a
-  genuinely-unfixable true-false-positive with the maintainer sign-off the
-  "Remediating a scanner finding" section requires, and it is **temporary**:
-  **remove the `--exclude-rule` once the upstream fix
-  ([semgrep/semgrep-rules#3994](https://github.com/semgrep/semgrep-rules/pull/3994))
-  lands in `r/all`** — tracked by #163, and folded into the vendored ruleset
-  under #79. Until a Semgrep pre-commit hook exists (#79), the exclude lives only
-  in CI; when that hook is added it must carry the same `--exclude-rule`.
+- **Semgrep false-positive — RESOLVED UPSTREAM; the rule exclude is GONE (#163).**
+  The generic secrets rule
+  `generic.secrets.security.detected-sonarqube-docs-api-key` used to carry a
+  structurally-loose `pattern-regex`:
+
+  ```text
+  (?i)sonar.{0,50}("|'|`)?[0-9a-f]{40}("|'|`)?
+  ```
+
+  Its `.{0,50}` bridged
+  unrelated tokens and so matched `sonar…<40-hex>` — which the pinned image
+  **digest** and the two commit-**SHA** action pins unavoidably are (SHA-pinning
+  SonarSource's own actions is required by the repo's pinning rules). Those are
+  public, required pins — not API keys. #162 cleared it with a single, explicitly
+  temporary **`--exclude-rule`** on the semgrep invocation, **not** inline
+  `# nosemgrep`, because `# nosemgrep` marks the finding
+  `suppressions:[{inSource}]` but **leaves the result in the SARIF**, which
+  GitHub Code Scanning still ingests and surfaces — reddening the `Semgrep OSS`
+  check that consumes our upload.
+
+  **That documented removal condition is now met, and the flag has been removed.**
+  [semgrep/semgrep-rules#3994](https://github.com/semgrep/semgrep-rules/pull/3994)
+  merged 2026-07-20 and the registry that `--config=auto` reads now serves the
+  tightened form:
+
+  ```text
+  (?i)sonar[a-z0-9_.-]{0,30}(token|key|login|password|pass|secret|auth)?\s*[:=]\s*(\\?["'`])?[0-9a-f]{40}\b
+  ```
+
+  The `.{0,50}` bridge is replaced by a character class that **cannot cross `:`
+  or `@`**, an assignment `[:=]` is now **mandatory**, and the match is
+  `\b`-anchored. So an `@<sha>` action pin (separator `@`, not `[:=]`) and
+  `sonarqube:community@sha256:…` (the only `:` after `sonarqube` is followed by
+  `community`, not 40 hex) no longer match, while a genuine
+  `sonar.login=<40-hex>` still does. Verified with the repo's **pinned** semgrep
+  (`1.174.0`, `.github/scanner-requirements/semgrep/requirements.txt`) running
+  `--config=auto` with **no** exclusion: **0 findings tree-wide** with the rule
+  confirmed present in the loaded ruleset, and **2/2 hits** on a throwaway
+  real-key-shaped file — i.e. the rule is _fixed_, not _missing_.
+
+  **This is now a fix-at-source precedent, not a standing suppression:** semgrep
+  runs the full ruleset with no rule exclusions. If this rule ever fires again,
+  treat it as a real finding — do not re-add `--exclude-rule` or a
+  `# nosemgrep`. (A Semgrep pre-commit hook, when #79 adds one, therefore needs
+  no exclusion flag either.)
 
 ### dependency-review `allow-dependencies-licenses` (#161)
 
