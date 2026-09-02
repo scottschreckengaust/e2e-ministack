@@ -115,11 +115,17 @@ leading-`v` strip**:
   `actions/cache` (rolling `github.run_id` key, mirroring the mutation/fuzz
   caches in `ci.yml`), so each run refreshes rather than re-downloads from cold.
   Note (#84): because the DB floats and the `ministack-image` / `trivy-image`
-  jobs are now **hard-fail** (VEX-gated), a newly-disclosed high+ CVE on the
+  jobs are **hard-fail** (VEX-gated), a newly-disclosed high+ CVE on the
   pinned image can turn CI red **without any repo change** — that is the intended
   signal, resolved by VEX-accepting it under `.vex/` (or bumping the digest once
   MiniStack ships a fix). The weekly `security.yml` cron surfaces such drift even
-  absent a push.
+  absent a push. **Since #334 that red lands on `main` and on the cron, not on
+  every open PR:** a DB-driven finding nobody's change caused is not attributable
+  to a pull request, so the six set-based vuln gates score only what a change adds
+  when they run on one (the finding is still printed, and the `vuln-gate-absolute`
+  job files it into the `review:vuln` burndown queue). The float still forces the
+  work — it just no longer blocks unrelated merges while the work is pending. See
+  [SECURITY-TOOLING.md](SECURITY-TOOLING.md) § Delta-vs-absolute vuln gates.
 - **ClamAV virus signature database** — the `clamav/clamav` image is pinned by
   digest, but its signature CVDs are refreshed by `freshclam` at container start
   (floating by design, same rationale as the Trivy/Grype vuln DBs above): pinning

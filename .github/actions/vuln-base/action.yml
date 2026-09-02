@@ -1,0 +1,139 @@
+name: Materialize the merge-base tree
+description: >-
+  Check out the MERGE BASE of HEAD and the base branch into a scratch directory
+  so a filesystem vuln scanner can score, in the SAME job and against the SAME
+  floating vuln DB, the tree the change is measured against (issue #334, option
+  4 — same-job merge-base delta, no stored baseline).
+
+  This action NEVER fails the calling job. Every failure path reports
+  `state=unavailable` plus a human `reason` and exits 0; the caller passes that
+  reason to `vuln-gate.mjs` as `VG_BASE_REASON`, which falls back to the
+  ABSOLUTE verdict and says so loudly. "I could not look" must never be spelled
+  the same way as "there was nothing there" (the #347 / #364 silencer shape).
+
+  NOTE this composite does NOT check out the repo (see .github/actions/setup for
+  the same constraint) and it needs history the merge base is reachable from, so
+  the calling job's `actions/checkout` MUST set `fetch-depth: 0`. A shallow
+  clone makes `git merge-base` fail, which degrades to `unavailable` — safe, but
+  it silently costs the delta lane, so the depth is not optional.
+
+inputs:
+  base-ref:
+    description: >-
+      The base BRANCH NAME, with no `refs/heads/` prefix — on a pull_request
+      `github.event.pull_request.base.ref`, otherwise the repository default
+      branch. UNTRUSTED (a PR author picks the base branch on a public repo), so
+      it is validated against a closed allow-list before it reaches git.
+    required: true
+  path:
+    description: >-
+      Scratch directory the base tree is materialized into. Must be a single
+      path segment so it can never escape the workspace.
+    required: false
+    default: .vuln-base
+
+outputs:
+  state:
+    description: '`ok` when the base tree is materialized at `path`, else `unavailable`.'
+    value: ${{ steps.base.outputs.state }}
+  reason:
+    description: 'Empty when `state` is `ok`; otherwise WHY the base side is unusable.'
+    value: ${{ steps.base.outputs.reason }}
+  commit:
+    description: 'The merge-base commit that was materialized (empty when unavailable).'
+    value: ${{ steps.base.outputs.commit }}
+
+runs:
+  using: composite
+  steps:
+    - id: base
+      shell: bash
+      env:
+        # Both values arrive as ENV, never as `${{ }}` inside the script body:
+        # `base-ref` is attacker-influencable, and an interpolated value would be
+        # pasted into the shell source before bash ever parses it.
+        BASE_REF: ${{ inputs.base-ref }}
+        OUT: ${{ inputs.path }}
+      # No `-e`: every failure is handled explicitly so the step can always
+      # report a reason and still exit 0.
+      run: |
+        set -uo pipefail
+
+        # The ONLY exit path other than success. Writes the fail-closed signal
+        # the caller turns into an absolute-lane verdict, and says so in the log.
+        unavailable() {
+          {
+            echo "state=unavailable"
+            echo "reason=$1"
+            echo "commit="
+          } >> "$GITHUB_OUTPUT"
+          echo "::warning title=vuln-base::$1 - the gate falls back to the ABSOLUTE verdict"
+          exit 0
+        }
+
+        # ── validate (allow-list, not sanitize) ───────────────────────────────
+        # A branch name is untrusted input on a public repo. Accept only the
+        # shape git itself would accept for a branch and nothing more; reject
+        # rather than rewrite, because a rewritten name is a DIFFERENT ref and
+        # scanning the wrong tree is a silent wrong answer.
+        if [ -z "$BASE_REF" ]; then
+          unavailable "no base ref was supplied"
+        fi
+        if ! [[ "$BASE_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]]; then
+          unavailable "the base ref is not an allow-listed branch name"
+        fi
+        case "$BASE_REF" in
+          *..* | */ | *//* | *.lock) unavailable "the base ref is not a well-formed branch name" ;;
+        esac
+        if ! [[ "$OUT" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+          unavailable "the scratch path is not an allow-listed single path segment"
+        fi
+
+        # ── resolve the merge base ────────────────────────────────────────────
+        # Fetch by explicit refspec (never a bare `git fetch`): on a
+        # pull_request checkout the base branch is not present as a remote ref,
+        # and on a push to a feature branch it may be stale. `persist-credentials:
+        # false` leaves this unauthenticated, which is fine for a public repo and
+        # degrades to `unavailable` (not to a wrong answer) if it ever is not.
+        if ! git fetch --no-tags --quiet origin \
+          "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"; then
+          echo "::notice title=vuln-base::could not fetch '$BASE_REF'; falling back to any copy already on disk"
+        fi
+        if ! git rev-parse --verify --quiet "refs/remotes/origin/$BASE_REF^{commit}" >/dev/null; then
+          unavailable "the base branch '$BASE_REF' could not be resolved"
+        fi
+
+        # merge-base, NOT the branch tip: the tip may carry findings this change
+        # never saw, and HEAD on a pull_request is already a merge commit whose
+        # first parent is that tip - `merge-base` is the one expression that is
+        # correct for the pull_request merge ref AND for a plain push to a
+        # feature branch, which both report under the same required context.
+        if ! base="$(git merge-base HEAD "refs/remotes/origin/$BASE_REF")"; then
+          unavailable "no merge base between HEAD and '$BASE_REF' (shallow clone? missing fetch-depth: 0)"
+        fi
+        if [ -z "$base" ]; then
+          unavailable "the merge base resolved to an empty commit id"
+        fi
+
+        # ── materialize ───────────────────────────────────────────────────────
+        # `git archive | tar -x` writes the base TREE without moving HEAD, so the
+        # head-side scan in the same job still sees the change under review.
+        rm -rf -- "$OUT"
+        if ! mkdir -p -- "$OUT"; then
+          unavailable "the scratch directory '$OUT' could not be created"
+        fi
+        if ! git archive --format=tar "$base" | tar -x -C "$OUT"; then
+          unavailable "the merge-base tree could not be extracted to '$OUT'"
+        fi
+        # An EMPTY directory here would be indistinguishable from a clean base to
+        # every scanner downstream, so it is a failure, not a zero.
+        if [ -z "$(ls -A -- "$OUT")" ]; then
+          unavailable "the materialized base tree at '$OUT' is empty"
+        fi
+
+        {
+          echo "state=ok"
+          echo "reason="
+          echo "commit=$base"
+        } >> "$GITHUB_OUTPUT"
+        echo "vuln-base: materialized merge base $base into $OUT/"

@@ -38,7 +38,8 @@
     "test/unit/grype-fs-gate.test.ts",
     "test/unit/vex-report.test.ts",
     "test/unit/alerts-findings.test.ts",
-    "test/unit/vex-debian-tracker.test.ts"
+    "test/unit/vex-debian-tracker.test.ts",
+    "test/unit/vuln-gate.test.ts"
   ],
   "exclude": ["node_modules", "cdk.out"]
 }

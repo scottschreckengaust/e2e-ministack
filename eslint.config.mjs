@@ -79,6 +79,14 @@ export default tseslint.config(
             // them), so module + sole-importer test lint here.
             '.github/scripts/vex-debian-tracker.ts',
             'test/unit/vex-debian-tracker.test.ts',
+            // #334: vuln-gate.ts is the widest cross-importer yet — it reuses
+            // vex-ledger.ts (purl-scoped acceptances + expiry), gate-findings.ts
+            // (the severity normalizer), grype-fs-gate.ts (id/purl extraction)
+            // and npm-audit-gate.ts (GHSA extraction) rather than re-deriving any
+            // of them, so the delta lane scores a finding EXACTLY as the shipped
+            // absolute gates do. Same `.ts`-extension consequence, same pair.
+            '.github/scripts/vuln-gate.ts',
+            'test/unit/vuln-gate.test.ts',
           ],
           // typescript-eslint caps the inferred default program at 8 matched
           // files by default; the fuzz-regression `.ts` targets (one per logic

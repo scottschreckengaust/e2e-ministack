@@ -48,6 +48,7 @@ export default {
     '.github/scripts/npm-audit-gate.ts',
     '.github/scripts/npm-audit-to-sarif.ts',
     '.github/scripts/license-verdict.ts',
+    '.github/scripts/vuln-gate.ts',
     'scripts/ministack-upstream.ts',
     'scripts/update-ministack.ts',
     'scripts/sync-mcp-config.ts',

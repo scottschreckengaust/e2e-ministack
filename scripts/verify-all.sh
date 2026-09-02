@@ -25,6 +25,25 @@
 # (#183) — a CVE disclosed after your last DB refresh can still red CI. So this
 # reduces round-trips to NEAR-zero, not exactly zero.
 #
+# SECOND HONEST RESIDUAL — the vuln gates run their ABSOLUTE lane here (#334).
+# Since #334 the six set-based vuln gates are DELTA-scoped on a pull_request (they
+# fail only on findings the PR ADDS) and ABSOLUTE on `main`/schedule. A local run
+# has no PR: there is no merge base to diff against, and `laneFor()` in
+# .github/scripts/vuln-gate.ts resolves anything that isn't a `pull_request` to the
+# absolute lane. So the five mirrors below (npm audit, OSV, grype FS, trivy FS,
+# grype image) deliberately assert the ABSOLUTE verdict — the same question CI asks
+# on `main`.
+#
+# That asymmetry is the SAFE direction and is why no delta layer is added here:
+# absolute ⊇ delta, so this script can never green something CI would red. It CAN
+# red something the PR gate would pass — a pre-existing uncovered finding that your
+# branch did not introduce. When that happens the finding is real and owed to the
+# `review:vuln` burndown queue, but it is NOT a merge blocker for your PR; confirm
+# via the PR's own `vuln-gate-<surface>.txt` artifact rather than re-running this.
+# Do NOT "fix" the gap by teaching this script to diff against a merge base: the
+# delta lane's correctness depends on both sides being scanned in the SAME job at
+# the SAME moment (identical floating DB), which a local pre-push run cannot model.
+#
 # TOOLS: the binary scanners (grype/trivy/osv-scanner/shellcheck) come from
 # `mise install` at the CI-pinned engine versions (mise.toml). The pip scanners
 # (cfn-lint/checkov/semgrep) install from the SAME hash-pinned closures CI uses
@@ -147,6 +166,16 @@ run_gate "cdk-nag synth gate" npm run --silent synth
 
 # —— ci.yml: mutation job ——
 run_gate "mutation (Stryker, 0 survivors)" npm run --silent test:mutation
+
+# ═══════════════════ VULN GATES — ABSOLUTE LANE LOCALLY (#334) ══════════════
+hr "vuln gates: ABSOLUTE lane (#334)"
+cat <<'EOF'
+  On a pull_request CI scores these five as a DELTA (only findings the PR adds).
+  A local run has no merge base, so they run ABSOLUTE — the `main`/schedule
+  question, and the STRICTER of the two. A red here that predates your branch is
+  a real `review:vuln` item but NOT a blocker for your PR. See the header comment
+  and docs/SECURITY-TOOLING.md § "Delta-vs-absolute vuln gates (#334)".
+EOF
 
 # —— security.yml: npm audit (VEX-aware, JSON-derived) ——
 npm_audit_gate() {
@@ -378,6 +407,9 @@ cat <<'EOF'
     effects, not gates (by design NOT localized; see #185 non-goals).
   · gitleaks / zizmor       — runnable locally (pre-commit covers gitleaks); the
     unit-tier + pre-commit already gate the fast subset.
+  · vuln-gate DELTA lane (#334) — needs a PR merge base with BOTH sides scanned in
+    one job (one floating DB); the ABSOLUTE lane ran above instead, which is the
+    stricter superset. vuln-gate.ts itself is fully covered by the unit tier.
 EOF
 
 # ═════════════════════════════════ SUMMARY ══════════════════════════════════

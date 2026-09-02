@@ -18,5 +18,14 @@
   // format (section spacing, bullet style) is the generator's, not ours, and is
   // regenerated each release — so it's excluded like other machine-owned files
   // (package-lock.json, jest snapshots). See .prettierignore.
-  "ignores": ["node_modules", ".remember", ".threat-composer", "CHANGELOG.md"],
+  // vuln-gate-burndown.md is the CI-rendered body of the sticky `review:vuln`
+  // issue (#334) — a generated artifact that never lands in a commit, same class
+  // as the other machine-owned files above.
+  "ignores": [
+    "node_modules",
+    ".remember",
+    ".threat-composer",
+    "CHANGELOG.md",
+    "vuln-gate-burndown.md",
+  ],
 }

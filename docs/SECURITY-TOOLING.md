@@ -18,24 +18,32 @@ gate follows the **produce → always-upload → enforce** pattern so its report
 artifact exists even when the job fails; SARIF-capable gates also upload to the
 Security tab.
 
-| Gate                  | Workflow     | Scope                                       | Failure policy        |
-| --------------------- | ------------ | ------------------------------------------- | --------------------- |
-| CodeQL (JS/TS)        | security.yml | SAST over source                            | hard-fail             |
-| Semgrep               | security.yml | SAST over source                            | hard-fail             |
-| npm audit             | security.yml | npm advisories (`--audit-level=high`)       | hard-fail             |
-| OSV-Scanner           | security.yml | lockfile advisories                         | hard-fail             |
-| Grype (FS)            | security.yml | filesystem vuln scan                        | hard-fail (VEX-gated) |
-| Grype (MiniStack img) | security.yml | third-party emulator image by digest        | hard-fail (VEX-gated) |
-| Trivy (FS)            | security.yml | filesystem vuln scan (2nd DB vs Grype)      | report-only           |
-| Trivy (MiniStack img) | security.yml | third-party emulator image by digest        | hard-fail (VEX-gated) |
-| **dependency-review** | security.yml | PR dep-diff: vulns + **license policy**     | hard-fail (PR)        |
-| **SBOM (Syft)**       | security.yml | CycloneDX SBOM of the tree                  | informational         |
-| ClamAV                | security.yml | working-tree virus/malware signature scan   | hard-fail             |
-| SonarQube             | security.yml | code quality + security (Community edition) | hard-fail (#170)      |
-| Gitleaks              | security.yml | secrets (full history)                      | hard-fail             |
-| checkov + cfn-lint    | security.yml | synthesized CloudFormation                  | hard-fail             |
-| Threat model          | security.yml | `threat-model.tc.json` parses/sections      | hard-fail             |
-| actionlint + zizmor   | security.yml | workflow correctness + security             | hard-fail             |
+| Gate                     | Workflow     | Scope                                       | Failure policy                     |
+| ------------------------ | ------------ | ------------------------------------------- | ---------------------------------- |
+| CodeQL (JS/TS)           | security.yml | SAST over source                            | hard-fail                          |
+| Semgrep                  | security.yml | SAST over source                            | hard-fail                          |
+| npm audit                | security.yml | npm advisories (`--audit-level=high`)       | hard-fail, **delta** on PRs (#334) |
+| OSV-Scanner              | security.yml | lockfile advisories                         | hard-fail, **delta** on PRs (#334) |
+| Grype (FS)               | security.yml | filesystem vuln scan                        | hard-fail (VEX), **delta** on PRs  |
+| Grype (MiniStack img)    | security.yml | third-party emulator image by digest        | hard-fail (VEX), **delta** on PRs  |
+| Trivy (FS)               | security.yml | filesystem vuln scan (2nd DB vs Grype)      | report-only                        |
+| Trivy (MiniStack img)    | security.yml | third-party emulator image by digest        | hard-fail (VEX), **delta** on PRs  |
+| **Vuln gate — absolute** | security.yml | whole uncovered set across all six surfaces | never gates; files `review:vuln`   |
+| **dependency-review**    | security.yml | PR dep-diff: vulns + **license policy**     | hard-fail (PR)                     |
+| **SBOM (Syft)**          | security.yml | CycloneDX SBOM of the tree                  | informational                      |
+| ClamAV                   | security.yml | working-tree virus/malware signature scan   | hard-fail                          |
+| SonarQube                | security.yml | code quality + security (Community edition) | hard-fail (#170)                   |
+| Gitleaks                 | security.yml | secrets (full history)                      | hard-fail                          |
+| checkov + cfn-lint       | security.yml | synthesized CloudFormation                  | hard-fail                          |
+| Threat model             | security.yml | `threat-model.tc.json` parses/sections      | hard-fail                          |
+| actionlint + zizmor      | security.yml | workflow correctness + security             | hard-fail                          |
+
+**"delta on PRs" is a scope, not a weakening.** Those five gates still hard-fail —
+they always run and always report — but on a `pull_request` (and on a push to a
+non-default branch) the verdict is scoped to what the change ADDS, while a push to
+`main` and the weekly cron score the whole set. See
+"[Delta-vs-absolute vuln gates](#delta-vs-absolute-vuln-gates-334)" below for the
+mechanism, the fail-closed paths, and why nothing gets quieter.
 
 ## Remediating a scanner finding — fix it properly, don't suppress it
 
@@ -250,6 +258,21 @@ review queue** — one issue per item, filed by a workflow and auto-closed by a
 poller. It is distinct from the classifying families (`area:*`, `priority:*`,
 `effort:*`, which _describe_ an issue); `review:` means "an open item in a
 burndown queue that CI owns."
+
+Current members:
+
+| label            | queue                                                      | filed by                      | resolved by                                         |
+| ---------------- | ---------------------------------------------------------- | ----------------------------- | --------------------------------------------------- |
+| `review:license` | one dependency whose license ClearlyDefined can't declare  | `security.yml` license triage | `license-review-poller.yml` (weekly)                |
+| `review:vuln`    | the ABSOLUTE uncovered-vulnerability set, all six surfaces | `vuln-gate-absolute` (#334)   | the same job — it edits/closes its own sticky issue |
+
+`review:vuln` is the family's one deliberate **sticky-single-issue** member rather
+than one-issue-per-item: its content is a whole-set snapshot re-derived from
+scratch on every scheduled run, so per-CVE issues would be opened and closed by
+the floating vuln DB rather than by anyone's work. The body is regenerated in
+place (matched by a `<!-- vuln-gate-absolute -->` marker, never by title text), so
+it is still idempotent and still race-free — the property the "no checklist" rule
+below exists to protect. It is NOT a dashboard index of other issues.
 
 **Burndown query — the whole point of the family.** The label _is_ the todo
 list; there is no separate tracking record:
@@ -793,6 +816,19 @@ with no repo change. That's the intended fresh-CVE signal, and it's the one thin
 not exactly zero. (`mise install` fetches current engines; run it before
 `verify:all` to minimize the window.)
 
+**Second honest residual — locally the vuln gates run their ABSOLUTE lane
+(#334).** On a `pull_request` CI scores the six set-based vuln gates as a
+**delta**; a local run has no PR, so `laneFor()` resolves to **absolute** and
+`verify:all` asserts the `main`/schedule question instead. That asymmetry is the
+safe direction — absolute ⊇ delta, so `verify:all` can never green something CI
+would red — but it _can_ red a pre-existing finding your branch didn't introduce.
+Such a finding is real and owed to the `review:vuln` queue; it is **not** a
+blocker for that PR (confirm from the PR's own `vuln-gate-<surface>.txt`
+artifact). The delta lane itself is deliberately **not** localized: its
+correctness depends on both sides being scanned in the same job at the same
+moment against one floating DB, which a pre-push run can't model — see
+[Delta-vs-absolute vuln gates (#334)](#delta-vs-absolute-vuln-gates-334).
+
 ## Accepted risks (documented, not suppressed)
 
 A finding stays open in a scanner or Dependabot only when a real, proven fix is
@@ -914,6 +950,132 @@ replayed in the fuzz-regression tier (`grype-fs-gate.regression.test.ts`); the
 `fail-build` to JSON-derived. Those records are now **gone** (#324 bumped semgrep
 so the CVEs are fixed, not accepted), but the mechanism they motivated stands for
 any future `affected` acceptance.
+
+## Delta-vs-absolute vuln gates (#334)
+
+**The problem.** Six set-based gates (`grype` FS, `trivy-fs`, `osv-scanner`,
+`npm-audit`, `ministack-image`, `trivy-image`) answered a **snapshot** question —
+"is the repo's total uncovered set empty?" — while being asked, as **required
+status checks**, a **delta** question: "is this PR safe to merge?" Those differ
+whenever the set is non-empty for a reason the PR did not cause: a freshly
+disclosed CVE, the floating vuln DB (#183), an upstream-blocked transitive, a
+base-image CVE with no rebuilt digest. Any of those turns **every** PR in the repo
+red, including a docs-only one — a single point of failure for all merges, and the
+`C1` half of the Gate Atomicity Law (#335): _a hard gate may only assert an
+invariant the repo can unilaterally satisfy._
+
+**What landed** (the approved combination — options 2, 4 and 5 of the issue;
+option 1, a stored no-regression baseline, was **dropped** and must not return
+under another name):
+
+| option | surfaces                                           | mechanism                                                                                                                                             |
+| ------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **4**  | `grype` FS, `trivy-fs`, `osv-scanner`, `npm-audit` | **Same-job merge-base delta.** The job materializes the merge-base tree and scans BOTH sides in one job, one moment; only findings the PR ADDS block. |
+| **5**  | `ministack-image`, `trivy-image`                   | **Causal attribution in the always-running script.** An image finding is attributable only to a change that MOVES the pinned digest.                  |
+| **2**  | both                                               | **Split blocking from visible.** The delta decides what blocks; the absolute set stays loud on `main`/cron and files the `review:vuln` queue.         |
+
+No stored baseline is possible _and_ none is needed: both sides are scanned in the
+same job against the same floating DB, so the comparison is apples-to-apples by
+construction. **Do not "optimize" this by caching or persisting the base result** —
+that reintroduces the dropped option 1 and its DB-skew problem.
+
+### The six required contexts keep their names — a SEMANTIC split, not an identity one
+
+The delta lane is **not** a new job. The six existing jobs keep byte-identical
+`name:` values — `Grype FS scan`, `Grype MiniStack image scan`, `Trivy FS scan`,
+`Trivy MiniStack image scan`, `npm audit`, `OSV Scanner` — because those strings
+are the **required status check contexts** in the `main` ruleset, matched by name.
+A rename (e.g. into a single `vuln-gate-delta` context) would leave the ruleset
+waiting forever on a context that no longer exists, blocking every PR: the exact
+deadlock class this change removes, and one this repo has already hit with a
+path-gated required check.
+
+For the same reason, **attribution lives inside the gate script, never in a
+job-level `if:`**. A conditioned required job never reports its context at all, so
+a path filter ("only run the image gate when the digest changed") is a permanent
+block, not a skip. Every one of the six jobs **always runs and always reports**;
+only its _verdict_ is diff-scoped. `laneFor()` therefore keys on the event, not on
+the diff: `pull_request` → delta, `push` to a non-default branch → delta (the same
+gate runs twice per PR, once per trigger), `push` to `main` / `schedule` /
+`workflow_dispatch` → absolute.
+
+### The C1 predicate: `fix.state` alone is NOT the question
+
+The gate does not ask "does a fix exist?" but **"is the fix reachable through a
+channel this repo consumes?"** — the only predicate that makes a gate satisfiable
+by the PR author:
+
+| surface              | what the repo consumes                           | `fix.state: fixed` ⇒ actionable?                         |
+| -------------------- | ------------------------------------------------ | -------------------------------------------------------- |
+| npm deps             | the npm registry, directly                       | **yes** — `npm update`/an override lands it the same day |
+| pip scanner closures | PyPI directly (+ an `overrides` pin)             | **yes**                                                  |
+| MiniStack image      | **published image digests**, not Debian packages | **no** — one indirection the repo does not control       |
+
+So `fixClass()` emits `reachable`, `no-upstream-fix`, or **`rebuild-blocked`** (fixed
+upstream but not present in any digest this repo can pin). `rebuild-blocked` is
+printed on every report and in the burndown so the distinction is visible rather
+than inferred; it is also why the image surfaces use causal attribution instead of
+a diff — there is no version bump a PR could make.
+
+### Fail-closed, and it proves it
+
+The catastrophic failure mode of any delta gate is a **silent base side**: if the
+base evaluation errors or returns empty, every finding looks "not newly
+introduced" and the gate passes — a silencer indistinguishable from a legitimate
+green. This repo has been bitten by that shape three times (a fabricated-clean
+SARIF; an artifact rooted at `/` that made a corroboration arm read
+`no-scanner-data` 64/64 times and still look green; auto-dismissed alerts). So:
+
+| base-side condition                                                          | verdict                                                   |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------- |
+| merge base undeterminable / base tree empty (`vuln-base` says `unavailable`) | **ABSOLUTE verdict** + a `::warning` + a loud report note |
+| base scan errored, wrote nothing, or wrote unparseable JSON                  | **ABSOLUTE verdict** + a loud report note                 |
+| base scan ran and found **zero** findings                                    | delta verdict — every head finding blocks                 |
+| base-side pinned digest unreadable (either side)                             | **ABSOLUTE verdict** + a loud report note                 |
+| HEAD scan unreadable                                                         | **FAIL** — an unread scan is not a clean one              |
+| surface name unrecognized                                                    | **FAIL** — the gate will not score a set it cannot name   |
+
+The last two are unconditional: they fail even in the absolute lane, because in
+both cases nothing about the head set has been proven. `BaseSide` is a tagged union
+whose five variants — `scanned{count:N}`, `unattributable`, `attributed`,
+`no-data`, `not-consulted` — render as **five deliberately unalike strings**, so
+"the base had none" can never be read (by a human or by a surviving mutant) as "we
+could not look", and neither can be read as "no base scan was needed here".
+
+### Nothing gets quieter (#335 C2)
+
+The delta narrows what **blocks**, never what is **printed**. Every finding the
+absolute lane would have shown is still in the log and in the uploaded
+`vuln-gate-<surface>` artifact, under an explicit `informational (N) — present but
+NOT attributable` heading — the same treatment #295 already gives an `affected`
+npm-audit record it does not fail on. The `vuln-gate-absolute` job (schedule /
+`workflow_dispatch` / push to `main`; **deliberately not a required check**) unions
+the six per-surface findings documents and files or updates ONE sticky
+`review:vuln` issue, closing it only on positive evidence that every surface
+reported and was clean. An unreadable surface counts as UNKNOWN, never as clean.
+
+### Where it lives
+
+`.github/scripts/vuln-gate.ts` holds the entire decision as pure functions
+(`laneFor`, `digestChange`, `fixClass`, `gate`, `renderReport`,
+`findingsDocument`, `burndown`) and reuses `vex-ledger.ts`, `gate-findings.ts`,
+`grype-fs-gate.ts` and `npm-audit-gate.ts` so a finding is scored exactly as the
+shipped absolute gates score it. `vuln-gate.mjs` / `vuln-gate-burndown.mjs` are
+logic-free CLI shims (env/argv → read → call → write → exit 0; the workflow, not
+the script, decides the job's exit status). Two composite actions keep the YAML
+honest: `.github/actions/vuln-base` (materializes the merge-base tree; **never
+fails** — it reports `state: unavailable` with a reason so the gate can degrade
+loudly) and `.github/actions/vuln-gate` (scores a surface and always uploads its
+artifact). The logic module is 100%-covered and Stryker-clean (0 survivors).
+
+**Known residual — a `.vex/` DELETION is not attributable.** The gate reads the
+HEAD ledger once and applies it to both sides, so a PR that deletes a `.vex/`
+record for a still-present finding is not caught by the delta lane. That finding is
+still PRINTED (informational) on the PR, and the absolute lane reds `main` and
+files the `review:vuln` issue the moment it merges. Feeding the base scan the
+base-side ledger instead would make `grype-fs` behave differently from
+`osv`/`npm-audit`, whose coverage the script computes from one ledger for both
+sides; unifying that is follow-up work, not a silent inconsistency.
 
 ## Pinning
 
