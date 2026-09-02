@@ -1164,6 +1164,41 @@ Three operational consequences of the same rule block:
   opening PRs as drafts, the review request appears later than PR-open — budget
   the approval click at ready-for-review time, not at creation.
 
+### `BLOCKED` with a fully green rollup — the invisible third blocker (#366)
+
+`mergeStateStatus` never says _why_ (above) — but that unknowability is narrower
+than it looks. There are three blocker classes, and only one of them is invisible:
+
+- **Required status checks** — visible: diff the rollup against `GET /rules/branches/main`.
+- **Review requirements** — visible: `reviewDecision`, `reviewThreads`.
+- **Commit signatures (`required_signatures`)** — visible in **neither**, only in
+  `commit.verification`. Measured on PR #366 (2026-09-02): `BLOCKED` while
+  `mergeable: MERGEABLE`, **15/15** required contexts present and green (**0**
+  missing), `reviewDecision: null`, `reviewThreads.totalCount: 0`, **0** open
+  code-scanning alerts — cause: head commit `833a481b` was `verified: false`,
+  reason **`unsigned`**.
+
+So triage a green-but-`BLOCKED` PR in that order: required-vs-reported context diff
+→ review threads → **`commit.verification` on every commit**
+(`gh api repos/{owner}/{repo}/pulls/{n}/commits --jq '.[].commit.verification'`).
+
+**Never use `gh pr update-branch` on this repo** — it rebases server-side into new
+commit objects no signature can carry to, and GitHub re-signs only _merge_ commits
+and web-UI edits, never a rebase. On #366: locally-authored `f3f2ba6` was `sig=G` →
+server-side-rebased `833a481b` was `unsigned` → `git commit --amend -S` gave
+`0901028` at `verified: true` (`reason: valid`), after which the PR went `CLEAN` and
+merged as `aad50aa9`. Local `git rebase` carries the same hazard —
+`commit.gpgsign=true` does **not** cover rebase and `rebase.gpgSign` is **unset**
+here — so update a branch with `git rebase -S origin/main` +
+`git push --force-with-lease`. Note the rule interaction: `required_linear_history`
+forces a rebase rather than a merge, and `required_signatures` then rejects that
+rebase's output unless it is re-signed. To repair an already-stripped commit,
+`git reset --hard origin/<branch>` (the worktree is stale after a server-side
+rebase) → `git commit --amend --no-edit -S --no-verify` → `--force-with-lease`, and
+prove content-neutrality by comparing `git rev-parse HEAD^{tree}` before and after
+— `--no-verify` is what keeps a pre-commit fixer from turning a signature-only
+amend into a content change.
+
 ### The three platform rules — why they are there (#343 AC2)
 
 `code_quality`, `copilot_code_review` and `code_coverage` are GitHub-native
