@@ -232,9 +232,31 @@ export interface Violation {
 }
 
 /** The `revisit_by` + `evidence` pair in force for one statement. */
-interface InForce {
+export interface InForce {
   value: unknown;
   evidence: unknown;
+}
+
+/**
+ * Every (`revisit_by`, `evidence`) pair in force across a record — one per
+ * statement, or the doc-level pair alone when a record carries no statements.
+ *
+ * EXPORTED so the class-C premise check (`vex-debian-tracker.ts`, #353) resolves
+ * "which form is in force" through the SAME reader this gate enforces with.
+ * Re-deriving it there would let the two modules disagree about whether a record
+ * is a standing acceptance — the gate demanding evidence for a record the premise
+ * check never re-verifies, which is precisely the silent gap class C exists to
+ * close. Same argument the joiner already makes for reusing `statementName` /
+ * `statementPurls`.
+ */
+export function inForcePairs(record: Record<string, unknown>): InForce[] {
+  const statements = asArray(record.statements);
+  if (statements.length === 0)
+    return [{ value: record.revisit_by, evidence: record.evidence }];
+  return statements.map((statement) => ({
+    value: effectiveRevisitBy(record, statement),
+    evidence: effectiveEvidence(record, statement),
+  }));
 }
 
 /**
@@ -251,15 +273,7 @@ interface InForce {
 export function recordViolation({ path, doc }: LedgerEntry): Violation | null {
   const record = asRecord(doc);
   if (record === null) return { path, reason: 'unreadable', value: '' };
-  const statements = asArray(record.statements);
-  const inForce: InForce[] =
-    statements.length === 0
-      ? [{ value: record.revisit_by, evidence: record.evidence }]
-      : statements.map((statement) => ({
-          value: effectiveRevisitBy(record, statement),
-          evidence: effectiveEvidence(record, statement),
-        }));
-  for (const { value, evidence } of inForce) {
+  for (const { value, evidence } of inForcePairs(record)) {
     const form = revisitForm(value);
     // A standing acceptance is the only form whose validity depends on data
     // OUTSIDE the `revisit_by` string, so it is checked here and not in

@@ -15,6 +15,7 @@ import {
   fixStateIndex,
   corroborate,
   renderReport,
+  standingPremises,
 } from '../../.github/scripts/vex-debian-tracker.ts';
 import { parsePurl } from '../../.github/scripts/vex-ledger.ts';
 
@@ -1050,7 +1051,7 @@ describe('renderReport', () => {
   ]);
 
   it('renders the whole join as an evidence table', () => {
-    const report = renderReport(DEBIAN_SUITE, rows, fixStateIndex([]));
+    const report = renderReport(DEBIAN_SUITE, rows, fixStateIndex([]), []);
     expect(report).toBe(
       [
         '.vex/ ↔ Debian security tracker join (#352) — REPORT ONLY',
@@ -1070,6 +1071,9 @@ describe('renderReport', () => {
         'rows',
         '  .vex/CVE-2026-0002.openvex.json | CVE-2026-0002 | pkg:deb/debian/libattr1@2.5.2-3 | UNIMPORTANT-NO-FIX | src=attr suite-version=1:2.5.2-3 match=epoch-stripped status=open urgency=unimportant fixed= nodsa= nodsa-reason= scope=local | fix-state=no-scanner-data',
         '  .vex/CVE-2026-0005.openvex.json | CVE-2026-0005 | pkg:deb/debian/zlib1g@1:1.3-1 | NO-CVE-IN-TRACKER | candidates=0 | fix-state=no-scanner-data',
+        '',
+        'class-C premise check (#353) — does each standing-acceptance still hold?',
+        '  standing-acceptance records: 0 (holds 0 / stale 0 / unverifiable 0)',
         '',
         'NOTE — reported, not applied: this job edits no .vex/ record (#322). It is',
         'REPORT-ONLY and never a required gate: it fetches an ~86 MB third-party',
@@ -1115,6 +1119,7 @@ describe('renderReport', () => {
         },
       ]),
       fixStateIndex([]),
+      [],
     );
     expect(report).toContain('src=a ');
     expect(report).toContain('src=b ');
@@ -1138,6 +1143,7 @@ describe('renderReport', () => {
         },
       ]),
       fixStateIndex([]),
+      [],
     );
     expect(report).toContain('| NO-VERSION-MATCH | candidates=1 |');
   });
@@ -1157,6 +1163,7 @@ describe('renderReport', () => {
       fixStateIndex([
         { id: 'CVE-2026-0004', scanner: 'grype', state: 'fixed' },
       ]),
+      [],
     );
     expect(report).toContain('fix-state=conflict (grype=fixed)');
   });
@@ -1180,6 +1187,7 @@ describe('renderReport', () => {
         { id: 'CVE-2026-0004', scanner: 'grype', state: 'fixed' },
         { id: 'CVE-2026-0004', scanner: 'trivy', state: 'will_not_fix' },
       ]),
+      [],
     );
     expect(report).toContain(
       'fix-state=conflict (grype=fixed trivy=will_not_fix)',
@@ -1203,6 +1211,7 @@ describe('renderReport', () => {
         },
       ]),
       fixStateIndex([]),
+      [],
     );
     expect(report).toContain(
       'nodsa=Minor issue; fixed via a point release nodsa-reason=postponed',
@@ -1211,9 +1220,390 @@ describe('renderReport', () => {
   });
 
   it('renders an empty ledger without inventing rows', () => {
-    const report = renderReport(DEBIAN_SUITE, [], fixStateIndex([]));
+    const report = renderReport(DEBIAN_SUITE, [], fixStateIndex([]), []);
     expect(report).toContain('triples: 0');
     expect(report).toContain('  NO-DSA              0');
     expect(report).not.toContain('pkg:deb/debian');
+  });
+
+  // The class-C premise section (#353). A standing acceptance names no future
+  // event, so nothing about it expires on its own; re-asking Debian is the ONLY
+  // thing that can falsify it, and this section is where that answer surfaces.
+  it('tallies every premise verdict and shouts the stale ones', () => {
+    const report = renderReport(DEBIAN_SUITE, [], fixStateIndex([]), [
+      { path: '.vex/a.openvex.json', verdict: 'holds', detail: 'still so' },
+      { path: '.vex/b.openvex.json', verdict: 'stale', detail: 'moved on' },
+      {
+        path: '.vex/c.openvex.json',
+        verdict: 'unverifiable',
+        detail: 'no deb',
+      },
+    ]);
+    expect(report).toContain(
+      '  standing-acceptance records: 3 (holds 1 / stale 1 / unverifiable 1)',
+    );
+    // The verdict is SHOUTED so a stale premise is greppable in a report whose
+    // body is otherwise lower-case field=value prose.
+    expect(report).toContain('  .vex/a.openvex.json | HOLDS | still so');
+    expect(report).toContain('  .vex/b.openvex.json | STALE | moved on');
+    expect(report).toContain('  .vex/c.openvex.json | UNVERIFIABLE | no deb');
+  });
+
+  // A finding that does not say what THIS REPO can do about it is a finding a
+  // reader has to research before acting — and every option here is a local edit,
+  // never "wait for upstream", because a standing acceptance has no upstream to
+  // wait for. That is the whole distinction from class B.
+  it('names the in-repo remedy when, and only when, a premise is stale', () => {
+    const stale = renderReport(DEBIAN_SUITE, [], fixStateIndex([]), [
+      { path: '.vex/b.openvex.json', verdict: 'stale', detail: 'moved on' },
+    ]);
+    expect(stale).toContain(
+      'REMEDY (always in-repo — reclassify the record, never wait on upstream):',
+    );
+    expect(stale).toContain('-> revisit <ISO-date> (class A)');
+    expect(stale).toContain('-> wait-for-image-rebuild (class B)');
+    expect(stale).toContain('repoint evidence.source_package / suite');
+
+    // Unconditional remedy prose would train the reader to skip the section that
+    // matters, so a clean sweep prints no remedy at all.
+    const clean = renderReport(DEBIAN_SUITE, [], fixStateIndex([]), [
+      { path: '.vex/a.openvex.json', verdict: 'holds', detail: 'still so' },
+      {
+        path: '.vex/c.openvex.json',
+        verdict: 'unverifiable',
+        detail: 'no deb',
+      },
+    ]);
+    expect(clean).not.toContain('REMEDY');
+  });
+
+  // A ledger with no class-C record still prints the section at zero: the repo's
+  // report convention is that an absent number is indistinguishable from a
+  // number the code forgot to compute.
+  it('prints the premise section at zero rather than omitting it', () => {
+    const report = renderReport(DEBIAN_SUITE, [], fixStateIndex([]), []);
+    expect(report).toContain(
+      'class-C premise check (#353) — does each standing-acceptance still hold?',
+    );
+    expect(report).toContain(
+      '  standing-acceptance records: 0 (holds 0 / stale 0 / unverifiable 0)',
+    );
+  });
+});
+
+// `standingPremises` (#353) — the machine-checkable half of a standing
+// acceptance. Class C replaced a `revisit_by` countdown with a CITATION, and a
+// citation nobody re-runs is just a longer assertion; this re-runs it against the
+// live tracker join and reports whether the cited verdict still holds.
+describe('standingPremises', () => {
+  // A doc-level class-C record, the shape every one of the seven reclassified
+  // records uses (doc level so one citation covers every product in the record).
+  const standing = (evidence: unknown): unknown => ({
+    revisit_by: 'standing-acceptance',
+    evidence,
+  });
+  const attrEvidence = {
+    source: 'debian-security-tracker',
+    url: 'https://security-tracker.debian.org/tracker/CVE-2026-0002',
+    source_package: 'attr',
+    suite: 'trixie',
+    verdict: 'unimportant; no fixed_version in trixie',
+    scope: 'local',
+    checked_at: '2026-09-02',
+  };
+  // UNIMPORTANT-NO-FIX, src=attr — the bucket that JUSTIFIES a standing
+  // acceptance (Debian rated it unimportant and named no fix, so no rebuild can
+  // ever clear it).
+  const attrRows = classifyTriples(INDEX, [
+    {
+      path: '.vex/CVE-2026-0002.openvex.json',
+      cve: 'CVE-2026-0002',
+      name: 'libattr1',
+      version: '2.5.2-3',
+      purl: 'pkg:deb/debian/libattr1@2.5.2-3',
+    },
+  ]);
+
+  it('holds when Debian still reads UNIMPORTANT-NO-FIX for the cited source', () => {
+    expect(
+      standingPremises(
+        DEBIAN_SUITE,
+        [
+          {
+            path: '.vex/CVE-2026-0002.openvex.json',
+            doc: standing(attrEvidence),
+          },
+        ],
+        attrRows,
+      ),
+    ).toEqual([
+      {
+        path: '.vex/CVE-2026-0002.openvex.json',
+        verdict: 'holds',
+        // The detail restates what was re-verified, so "holds" is never bare —
+        // a verdict without its basis is the assertion class C exists to replace.
+        detail: 'src=attr suite=trixie still UNIMPORTANT-NO-FIX on 1 triple(s)',
+      },
+    ]);
+  });
+
+  it('goes stale when Debian no longer reads UNIMPORTANT-NO-FIX', () => {
+    // NO-DSA means Debian DEFERRED a fix — an event-triggered (class B) state, so
+    // a record standing on "unfixable" is now mis-classified.
+    const rows = classifyTriples(INDEX, [
+      {
+        path: '.vex/x.openvex.json',
+        cve: 'CVE-2026-0001',
+        name: 'libacl1',
+        version: '2.3.2-2+b1',
+        purl: 'pkg:deb/debian/libacl1@2.3.2-2+b1',
+      },
+    ]);
+    expect(
+      standingPremises(
+        DEBIAN_SUITE,
+        [{ path: '.vex/x.openvex.json', doc: standing(attrEvidence) }],
+        rows,
+      ),
+    ).toEqual([
+      {
+        path: '.vex/x.openvex.json',
+        verdict: 'stale',
+        detail:
+          'Debian no longer reads UNIMPORTANT-NO-FIX: CVE-2026-0001 pkg:deb/debian/libacl1@2.3.2-2+b1 -> NO-DSA',
+      },
+    ]);
+  });
+
+  it('separates EVERY drifted triple in the detail', () => {
+    // A record covers many purls; naming only one would send the reader back to
+    // the row table to find the rest, and two concatenated triples
+    // (`…-> NO-DSACVE-2026-0004 …`) are unreadable by eye and by grep.
+    const rows = classifyTriples(INDEX, [
+      {
+        path: '.vex/x.openvex.json',
+        cve: 'CVE-2026-0001',
+        name: 'libacl1',
+        version: '2.3.2-2+b1',
+        purl: 'pkg:deb/debian/libacl1@2.3.2-2+b1',
+      },
+      {
+        path: '.vex/x.openvex.json',
+        cve: 'CVE-2026-0004',
+        name: 'libnode115',
+        version: '20.19.2+dfsg-1+deb13u2',
+        purl: 'pkg:deb/debian/libnode115@20.19.2+dfsg-1+deb13u2',
+      },
+    ]);
+    const [check] = standingPremises(
+      DEBIAN_SUITE,
+      [{ path: '.vex/x.openvex.json', doc: standing(attrEvidence) }],
+      rows,
+    );
+    expect(check.detail).toBe(
+      'Debian no longer reads UNIMPORTANT-NO-FIX: ' +
+        'CVE-2026-0001 pkg:deb/debian/libacl1@2.3.2-2+b1 -> NO-DSA ; ' +
+        'CVE-2026-0004 pkg:deb/debian/libnode115@20.19.2+dfsg-1+deb13u2 -> OPEN-NO-FIX',
+    );
+  });
+
+  it('goes stale when the citation names a different suite', () => {
+    // The join speaks for ONE suite. Evidence citing another release is not
+    // evidence about the image this ledger covers, however true it may be.
+    expect(
+      standingPremises(
+        DEBIAN_SUITE,
+        [
+          {
+            path: '.vex/CVE-2026-0002.openvex.json',
+            doc: standing({ ...attrEvidence, suite: 'bookworm' }),
+          },
+        ],
+        attrRows,
+      ),
+    ).toEqual([
+      {
+        path: '.vex/CVE-2026-0002.openvex.json',
+        verdict: 'stale',
+        detail: 'cited evidence.suite=bookworm is not the joined suite trixie',
+      },
+    ]);
+  });
+
+  it('goes stale when the citation names a source package that did not join', () => {
+    // Debian keys verdicts on SOURCE packages, so citing the binary name (or a
+    // renamed source) means the lookup a reviewer would re-run is not the lookup
+    // the join actually performed.
+    expect(
+      standingPremises(
+        DEBIAN_SUITE,
+        [
+          {
+            path: '.vex/CVE-2026-0002.openvex.json',
+            doc: standing({ ...attrEvidence, source_package: 'libattr1' }),
+          },
+        ],
+        attrRows,
+      ),
+    ).toEqual([
+      {
+        path: '.vex/CVE-2026-0002.openvex.json',
+        verdict: 'stale',
+        detail:
+          'cited evidence.source_package=libattr1 is not among the joined src=attr',
+      },
+    ]);
+  });
+
+  it('separates EVERY joined source package in the detail', () => {
+    // Two source packages can list one CVE and agree about it, so the "which
+    // lookup did the join actually perform?" list is plural. Concatenating the
+    // names invents a package that does not exist (`src=ab`), which is exactly
+    // the string a reviewer would paste into the tracker and get nothing back.
+    const shared = indexTracker(
+      {
+        a: {
+          'CVE-2026-3333': {
+            scope: 'local',
+            releases: {
+              trixie: {
+                status: 'open',
+                repositories: { trixie: '1.0-1' },
+                urgency: 'unimportant',
+              },
+            },
+          },
+        },
+        b: {
+          'CVE-2026-3333': {
+            scope: 'local',
+            releases: {
+              trixie: {
+                status: 'open',
+                repositories: { trixie: '1.0-1' },
+                urgency: 'unimportant',
+              },
+            },
+          },
+        },
+      },
+      DEBIAN_SUITE,
+    );
+    const rows = classifyTriples(shared, [
+      {
+        path: '.vex/x.openvex.json',
+        cve: 'CVE-2026-3333',
+        name: 'libx',
+        version: '1.0-1',
+        purl: 'pkg:deb/debian/libx@1.0-1',
+      },
+    ]);
+    // Precondition: the two agreeing entries still justify a standing acceptance,
+    // so this row reaches the source-package arm rather than short-circuiting.
+    expect(rows[0].bucket).toBe('UNIMPORTANT-NO-FIX');
+    const [check] = standingPremises(
+      DEBIAN_SUITE,
+      [
+        {
+          path: '.vex/x.openvex.json',
+          doc: standing({ ...attrEvidence, source_package: 'libx' }),
+        },
+      ],
+      rows,
+    );
+    expect(check.detail).toBe(
+      'cited evidence.source_package=libx is not among the joined src=a,b',
+    );
+  });
+
+  it('treats an unreadable evidence block as a stale citation, never a pass', () => {
+    // Fail-closed: a record whose evidence is not an object cites nothing, so
+    // there is no suite to agree with. (The hard-fail revisit gate rejects this
+    // record outright — this arm exists so the report never silently passes it.)
+    const [check] = standingPremises(
+      DEBIAN_SUITE,
+      [{ path: '.vex/CVE-2026-0002.openvex.json', doc: standing(undefined) }],
+      attrRows,
+    );
+    expect(check.verdict).toBe('stale');
+    expect(check.detail).toBe(
+      'cited evidence.suite= is not the joined suite trixie',
+    );
+  });
+
+  it('reports unverifiable — not holds — when no Debian triple joined', () => {
+    // Silence from the tracker is not agreement. An npm-scoped or purl-less
+    // record has nothing Debian can speak to, and calling that "holds" would let
+    // the check bless exactly the records it cannot see.
+    expect(
+      standingPremises(
+        DEBIAN_SUITE,
+        [{ path: '.vex/npm-thing.openvex.json', doc: standing(attrEvidence) }],
+        attrRows,
+      ),
+    ).toEqual([
+      {
+        path: '.vex/npm-thing.openvex.json',
+        verdict: 'unverifiable',
+        detail:
+          'no pkg:deb/debian triple — the Debian tracker cannot speak to it',
+      },
+    ]);
+  });
+
+  it('checks only class-C records, and never throws on a broken one', () => {
+    // The other four `revisit_by` forms name an EVENT, so waiting falsifies them
+    // and there is no premise to re-verify. An unreadable record is the hard-fail
+    // gate's job (#336) — re-reporting it here would red two surfaces for one
+    // cause.
+    expect(
+      standingPremises(
+        DEBIAN_SUITE,
+        [
+          {
+            path: '.vex/b.openvex.json',
+            doc: { revisit_by: 'wait-for-image-rebuild' },
+          },
+          {
+            path: '.vex/a.openvex.json',
+            doc: { revisit_by: 'revisit 2026-12-01' },
+          },
+          { path: '.vex/broken.openvex.json', doc: undefined },
+          { path: '.vex/none.openvex.json', doc: {} },
+        ],
+        attrRows,
+      ),
+    ).toEqual([]);
+  });
+
+  it('resolves a doc-level citation through the gate’s own reader', () => {
+    // Statement-level records exist, and the doc level WINS (`effectiveRevisitBy`
+    // / `effectiveEvidence`). Re-deriving that precedence here instead of reusing
+    // the gate's readers is how the gate and the check would come to disagree
+    // about which records even ARE standing acceptances.
+    expect(
+      standingPremises(
+        DEBIAN_SUITE,
+        [
+          {
+            path: '.vex/CVE-2026-0002.openvex.json',
+            doc: {
+              ...(standing(attrEvidence) as Record<string, unknown>),
+              statements: [
+                { vulnerability: { name: 'CVE-2026-0002' } },
+                { revisit_by: 'wait-for-image-rebuild' },
+              ],
+            },
+          },
+        ],
+        attrRows,
+      ),
+    ).toEqual([
+      {
+        path: '.vex/CVE-2026-0002.openvex.json',
+        verdict: 'holds',
+        detail: 'src=attr suite=trixie still UNIMPORTANT-NO-FIX on 1 triple(s)',
+      },
+    ]);
   });
 });

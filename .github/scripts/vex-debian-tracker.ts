@@ -59,9 +59,17 @@ import {
   statementName,
   statementPurls,
 } from './vex-ledger.ts';
-// `LedgerEntry` is the existing type for "one `.vex/` file as the shim hands it
-// over"; `import type` is erased at runtime, so this adds no runtime coupling.
-import type { LedgerEntry } from './vex-revisit-gate.ts';
+// `inForcePairs` / `revisitForm` are the revisit GATE's own readers for "which
+// `revisit_by` form, and which `evidence`, is in force on this record". The
+// class-C premise check below reuses them rather than re-deriving the resolution,
+// so the gate and the check can never disagree about which records ARE standing
+// acceptances (#353). `LedgerEntry` is the existing type for "one `.vex/` file as
+// the shim hands it over".
+import {
+  type LedgerEntry,
+  inForcePairs,
+  revisitForm,
+} from './vex-revisit-gate.ts';
 
 /** The tracker's full JSON dump — the ONE URL the shim fetches. */
 export const DEBIAN_TRACKER_URL =
@@ -526,6 +534,144 @@ export function corroborate(
   return conflict ? 'conflict' : 'agree';
 }
 
+/**
+ * Whether a class-C record's stated premise still holds against the tracker.
+ *
+ * `unverifiable` is kept DISTINCT from both other verdicts on purpose: a standing
+ * acceptance whose products are not `pkg:deb/debian/*` has no row here at all, and
+ * reporting that as `holds` would be this source claiming to have confirmed
+ * something it never looked at — the same failure mode `NO-CVE-IN-TRACKER` exists
+ * to avoid one layer down.
+ */
+export type PremiseVerdict = 'holds' | 'stale' | 'unverifiable';
+
+/** One class-C record's premise, with the reason behind the verdict. */
+export interface PremiseCheck {
+  path: string;
+  verdict: PremiseVerdict;
+  /** Why — a report line, always populated, so no verdict is bare. */
+  detail: string;
+}
+
+/**
+ * The bucket a class-C acceptance's premise REQUIRES. `standing-acceptance` claims
+ * "no fix will ever arrive because none is needed", which is exactly what Debian's
+ * `urgency: unimportant` with no `fixed_version` says. Any OTHER bucket falsifies
+ * it: a named fix (`FIXED-UPSTREAM`) means there IS something to wait for, a
+ * `<no-dsa>` deferral means Debian intends a point release, `OPEN-NO-FIX` means the
+ * CVE is still untriaged, and the three join outcomes mean the citation itself no
+ * longer resolves.
+ */
+const STANDING_BUCKET: Bucket = 'UNIMPORTANT-NO-FIX';
+
+/**
+ * The premise check for ONE class-C record, given its rows and its cited evidence.
+ *
+ * Checks the two things the record ASSERTS, in the order a reader would:
+ *  1. Debian's verdict is still `unimportant`-with-no-fix on every triple.
+ *  2. The citation still resolves — the cited `source_package` is one the join
+ *     actually landed on, and the cited `suite` is the one that was read.
+ *
+ * The second half matters as much as the first: a record citing `src=glibc` whose
+ * purls now join through some other source package is no longer re-checkable by
+ * following its own `url`, even if the verdict happens to still be `unimportant`.
+ *
+ * TOTAL: a non-object `evidence` (which the revisit gate already hard-fails on)
+ * yields blank citations, which match nothing and so read as `stale` — never a
+ * throw and never a silent pass.
+ */
+function premiseFor(
+  suite: string,
+  path: string,
+  evidence: unknown,
+  rows: readonly ClassifiedTriple[],
+): PremiseCheck {
+  if (rows.length === 0)
+    return {
+      path,
+      verdict: 'unverifiable',
+      detail:
+        'no pkg:deb/debian triple — the Debian tracker cannot speak to it',
+    };
+  const wrong = rows.filter((row) => row.bucket !== STANDING_BUCKET);
+  if (wrong.length > 0)
+    return {
+      path,
+      verdict: 'stale',
+      detail: `Debian no longer reads ${STANDING_BUCKET}: ${wrong
+        .map((row) => `${row.cve} ${row.purl} -> ${row.bucket}`)
+        .join(' ; ')}`,
+    };
+  const cited = asRecord(evidence) ?? {};
+  const citedSuite = stringField(cited, 'suite');
+  if (citedSuite !== suite)
+    return {
+      path,
+      verdict: 'stale',
+      detail: `cited evidence.suite=${citedSuite} is not the joined suite ${suite}`,
+    };
+  const joinedSources = new Set(
+    rows.flatMap((row) => row.joined.map(({ entry }) => entry.sourcePackage)),
+  );
+  const citedPackage = stringField(cited, 'source_package');
+  if (!joinedSources.has(citedPackage))
+    return {
+      path,
+      verdict: 'stale',
+      detail: `cited evidence.source_package=${citedPackage} is not among the joined src=${[
+        ...joinedSources,
+      ].join(',')}`,
+    };
+  return {
+    path,
+    verdict: 'holds',
+    detail: `src=${citedPackage} suite=${suite} still ${STANDING_BUCKET} on ${rows.length} triple(s)`,
+  };
+}
+
+/**
+ * The premise of every class-C (`standing-acceptance`) record in the ledger, in
+ * ledger order — the machine-checkable half of what replaces a countdown for a
+ * class that by design never expires (#353; the human half is #354's quarterly
+ * sweep).
+ *
+ * WHY THIS IS REPORT-ONLY, even though it asserts BOOKKEEPING accuracy (which the
+ * repo can always fix in-repo) rather than vulnerability absence: the ASSERTION
+ * would be safe to gate, but the MECHANISM is not. Deciding it requires the same
+ * ~86 MB third-party GET as the join above, so a required check would put
+ * `security-tracker.debian.org` on CI's critical path — the externally-mutable
+ * dependency the Gate Atomicity Law forbids in a blocking path (#335 C1). So a
+ * stale premise is loud in the report and never reds `main`.
+ *
+ * Records with no standing acceptance in force contribute nothing. Unreadable
+ * records are skipped here on purpose — the hard-fail revisit gate already fails
+ * CI on those, and re-reporting them would red twice for one cause.
+ */
+export function standingPremises(
+  suite: string,
+  entries: readonly LedgerEntry[],
+  rows: readonly ClassifiedTriple[],
+): PremiseCheck[] {
+  const checks: PremiseCheck[] = [];
+  for (const { path, doc } of entries) {
+    const record = asRecord(doc);
+    if (record === null) continue;
+    const standing = inForcePairs(record).find(
+      ({ value }) => revisitForm(value) === 'standing',
+    );
+    if (standing === undefined) continue;
+    checks.push(
+      premiseFor(
+        suite,
+        path,
+        standing.evidence,
+        rows.filter((row) => row.path === path),
+      ),
+    );
+  }
+  return checks;
+}
+
 // The evidence column for one joined candidate — EVERY tracker field the joiner
 // resolved, plus the relaxation the join needed, so a reader can re-derive the
 // bucket by hand from the row alone. `nodsa-reason` is not part of the verdict
@@ -570,6 +716,38 @@ function fixStateColumn(
   return `fix-state=${verdict} (${detail})`;
 }
 
+// The in-repo remedy for a stale class-C premise. Printed with the finding, never
+// only in docs: a gate — or, here, a report — that says "this is wrong" without
+// saying what THIS REPO can do about it is how #321 happened. Every option below
+// is an edit to a file in this repository; none of them is "wait for upstream",
+// which is the whole reason a stale premise is actionable at all.
+const PREMISE_REMEDY = [
+  'REMEDY (always in-repo — reclassify the record, never wait on upstream):',
+  '  Debian named a fixed_version   -> revisit <ISO-date> (class A) until the digest carries it',
+  '  Debian deferred it (<no-dsa>)  -> wait-for-image-rebuild (class B)',
+  '  the citation drifted           -> repoint evidence.source_package / suite and re-date checked_at',
+];
+
+/** The class-C premise section, rendered even when the ledger holds no class C. */
+function premiseLines(checks: readonly PremiseCheck[]): string[] {
+  const tally = (verdict: PremiseVerdict): number =>
+    checks.filter((check) => check.verdict === verdict).length;
+  const lines = [
+    '',
+    'class-C premise check (#353) — does each standing-acceptance still hold?',
+    `  standing-acceptance records: ${checks.length} (holds ${tally('holds')} / stale ${tally('stale')} / unverifiable ${tally('unverifiable')})`,
+  ];
+  for (const check of checks)
+    lines.push(
+      `  ${check.path} | ${check.verdict.toUpperCase()} | ${check.detail}`,
+    );
+  // Only spell the remedy out when something actually needs remedying — an
+  // unconditional four-line block would train the reader to skip the section
+  // that matters.
+  if (tally('stale') > 0) lines.push(...PREMISE_REMEDY);
+  return lines;
+}
+
 /**
  * The uploaded artifact AND the job-summary surface, so it must be
  * self-explanatory: what was joined, what the totals are, and one line of
@@ -581,6 +759,7 @@ export function renderReport(
   suite: string,
   rows: readonly ClassifiedTriple[],
   fixStates: ReadonlyMap<string, FixStateClaim[]>,
+  premises: readonly PremiseCheck[],
 ): string {
   const width = Math.max(...BUCKETS.map((bucket) => bucket.length));
   const lines = [
@@ -598,6 +777,7 @@ export function renderReport(
     lines.push(
       `  ${row.path} | ${row.cve} | ${row.purl} | ${row.bucket} | ${rowEvidence(row)} | ${fixStateColumn(row, fixStates)}`,
     );
+  lines.push(...premiseLines(premises));
   lines.push(
     '',
     'NOTE — reported, not applied: this job edits no .vex/ record (#322). It is',
