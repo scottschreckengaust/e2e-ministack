@@ -13,7 +13,7 @@ supply-chain safety. This file is the authoritative inventory.
 | Node.js                                                | `mise.toml` + `.github/actions/setup` default       | exact patch (`24.19.0`); two-site couple **enforced** by a drift guard (see below)                       |
 | Local CI-parity scanners (#185)                        | `mise.toml` `[tools]`                               | exact, **mirrors** the `security.yml`/`ci.yml` engine pins (see below)                                   |
 | npm (via Corepack)                                     | `package.json` (`packageManager`)                   | exact (`npm@11.13.0`)                                                                                    |
-| MiniStack image                                        | `ci.yml`                                            | digest (`@sha256:636c4ef5…`)                                                                             |
+| MiniStack image                                        | `ci.yml`                                            | digest (`@sha256:3a047f62…`, `1.5.5-full`); bump via `mise run update:ministack`                         |
 | ClamAV image                                           | `security.yml` (`clamav` service)                   | digest (`@sha256:6f4a9e7d…`); **signature DB floats** (freshclam)                                        |
 | SonarQube image                                        | `security.yml` (`sonarqube` service)                | digest (`@sha256:160bd2f6…`)                                                                             |
 | SonarSource actions                                    | `security.yml`                                      | commit SHA (`sonarqube-scan-action` v8.2.0, `-quality-gate-action` v1.2.0)                               |
@@ -186,8 +186,11 @@ mise run update                       # umbrella: runs every update:* task
   (`.github/scripts/check-ministack-digest-drift.sh`) checks: the registry
   `.digest` field, the three workflows (`ci.yml`, `security.yml` ×2,
   `ministack-compat.yml`), and the two docs (`AGENTS.md`, `README.md`). It
-  substitutes the **literal** full `sha256:<64hex>` pin, so the truncated prose
-  form (`636c4ef5…`) is left untouched.
+  substitutes the **literal** full `sha256:<64hex>` pin, so a truncated prose
+  form (e.g. the long-superseded `636c4ef5…`) is left untouched — which is
+  precisely why prose should not restate a digest it cannot keep current
+  (#361: two workflow comments sat two bumps stale, so they now point at this
+  guard instead of carrying a copy).
 - **What it deliberately leaves alone** — `services/_registry/provisioning.json`'s
   `lastVerifiedDigest` is a _semantic_ record (a bump invalidates the compat
   catalog), so it is not blindly rewritten; update it via the compat re-verify

@@ -196,7 +196,7 @@ jobs:
             -e LAMBDA_EXECUTOR=docker \
             -e MINISTACK_RDS_PUBLIC_ENDPOINT=1 \
             -e MINISTACK_HOST=localhost \
-            ministackorg/ministack:full@sha256:8674b54b185972791135a04bb06d6507df0027c88bf9c530b2173c0955e9a686
+            ministackorg/ministack:full@sha256:3a047f62a75d8839eb7b80b779bf4626ca944d4a74a557b2440257682d4da191
 
       - name: Wait for MiniStack to be healthy
         if: steps.worklist.outputs.should_run == 'true'

@@ -740,15 +740,21 @@ jobs:
       # SCAN ONCE (#263): the image is ANALYZED once — Syft builds an SBOM of the
       # pinned digest — and every grype pass below scans that SBOM (`sbom:` input),
       # a cheap DB match, instead of re-pulling/unpacking the image 3x. Verified:
-      # `grype sbom:` yields the IDENTICAL high+ set as `grype <image>` on this
-      # digest (43 high+, exact match), and GRYPE_VEX_DOCUMENTS suppresses on the
-      # SBOM the same way — so the gate is unchanged.
-      # NOTE: this digest MUST match the image pinned in ci.yml
-      # (ministackorg/ministack:full@sha256:636c4ef5...). Keep them in sync.
+      # `grype sbom:` yields the IDENTICAL high+ set as `grype <image>` (re-verified
+      # on the 1.5.5-full digest in #361), and GRYPE_VEX_DOCUMENTS suppresses on the
+      # SBOM the same way — so the gate is unchanged. The absolute high+ count is
+      # deliberately NOT transcribed here: it shifts on every digest/vuln-DB bump,
+      # so read the scan artifact, not a comment.
+      # NOTE: this digest MUST match the image pinned in ci.yml. Deliberately NOT
+      # restated here as a literal — a copied digest silently rots at every bump
+      # (it sat two bumps stale until #361). `mise run update:ministack` fans the
+      # one true value out to every pin site and
+      # `.github/scripts/check-ministack-digest-drift.sh` hard-fails on any
+      # disagreement, so the guard — not a comment — is what keeps them in sync.
       - name: Build image SBOM (once)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: 'ministackorg/ministack:full@sha256:8674b54b185972791135a04bb06d6507df0027c88bf9c530b2173c0955e9a686'
+          image: 'ministackorg/ministack:full@sha256:3a047f62a75d8839eb7b80b779bf4626ca944d4a74a557b2440257682d4da191'
           format: syft-json
           output-file: image.sbom.json
           upload-artifact: false
@@ -1044,8 +1050,10 @@ jobs:
             trivy-db-
       # VEX comes from the committed trivy.yaml (auto-discovered), NOT a flag/env.
       # NOTE: this digest MUST match the image pinned in ci.yml and the Grype
-      # ministack-image job above (ministackorg/ministack:full@sha256:636c4ef5...).
-      # Keep all three in sync; if ci.yml bumps the digest, bump it here too.
+      # ministack-image job above. Deliberately NOT restated here as a literal,
+      # for the same reason as that job: a copied digest rots at every bump.
+      # `mise run update:ministack` writes all three sites from one value and
+      # `.github/scripts/check-ministack-digest-drift.sh` hard-fails on drift.
       # SCAN ONCE (#263): a single Trivy image scan emits JSON — the richest
       # format — and the SARIF (Security tab) + human table are DERIVED from that
       # saved JSON via `trivy convert`, with NO re-scan. Previously this job ran
@@ -1064,7 +1072,7 @@ jobs:
           # convert steps below reuse the binary (skip-setup-trivy) + cached result.
           version: v0.74.0
           scan-type: image
-          image-ref: 'ministackorg/ministack:full@sha256:8674b54b185972791135a04bb06d6507df0027c88bf9c530b2173c0955e9a686'
+          image-ref: 'ministackorg/ministack:full@sha256:3a047f62a75d8839eb7b80b779bf4626ca944d4a74a557b2440257682d4da191'
           format: json
           output: trivy-image.json
           cache-dir: ${{ github.workspace }}/.cache/trivy
