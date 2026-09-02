@@ -246,6 +246,39 @@ Note it joins on the purl **version**, never the package name — Debian keys on
 _source_ packages while purls carry _binary_ ones, so `source_package` in the
 evidence above is frequently NOT the name in the purl.
 
+**Which Debian row means class C.** For a `pkg:deb/debian/*` record the tracker
+row itself decides the class, and the two states are easy to confuse:
+
+| Debian's row for the pinned suite                            | class                            | why                                                                                                |
+| ------------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `urgency: unimportant` **and no `fixed_version`**            | **C** — `standing-acceptance`    | Debian has ruled the issue non-security and is shipping no patch, so no rebuild can ever carry one |
+| a `<no-dsa>` deferral, or a `fixed_version` the digest lacks | **B** — `wait-for-image-rebuild` | a fix exists or is coming, so the rebuild is a real event that can actually fire                   |
+
+Reading the first row as class B is the precise mistake this vocabulary exists to
+prevent: it promises that a rebuild will clear a finding Debian has decided never
+to fix, so the trigger can never fire and the record becomes a **permanently**
+deferred acceptance wearing the costume of a temporary one (#353).
+
+**The premise is re-checked by machine.** Since the joiner already resolves
+Debian's current verdict for every record, it also re-asks whether each standing
+acceptance's premise still holds, in a `class-C premise check` section:
+
+- `HOLDS` — Debian still returns the same non-security/no-fix verdict for the
+  cited source package and suite.
+- `STALE` — the row moved, or the citation names a suite or source package the
+  join did not produce. The report names the in-repo remedy alongside the
+  finding, because every remedy IS local: reclassify to the dated or
+  event-triggered form, or repoint and re-date the citation.
+- `UNVERIFIABLE` — the record has no `pkg:deb/debian` product for the tracker to
+  speak to. Deliberately not `HOLDS`: silence from a source is not corroboration
+  by it, and a check that blessed the records it cannot see would be worse than
+  no check at all.
+
+Like the rest of that job this is **report-only**. A stale premise is a
+bookkeeping signal, not a new security finding — and the mechanism behind it is
+the same large external fetch that keeps the whole job off any required check
+(#335 C1).
+
 **Only the dated form self-expires.** `vex-ledger.ts` drops a record from the
 active set once its embedded ISO date is on/before today, so the finding re-reds
 automatically instead of rotting (`revisitDate` / `activeRecordIds`; the same
@@ -253,8 +286,9 @@ date feeds `osv-scanner.toml`'s `ignoreUntil` via `vex-dialects.ts`). The
 event-token forms never expire **by design** — they wait on an event, not a
 clock, and their expiry mechanism is the reconcile procedure, not the calendar.
 Class C does not expire either, and for a stronger reason: there is no event to
-wait for, so its honesty mechanism is the dated `evidence.checked_at` citation
-plus a periodic re-verification sweep. So: if an acceptance is genuinely
+wait for, so its honesty mechanism is the dated `evidence.checked_at` citation,
+the machine premise check described above, and a periodic human re-verification
+sweep (#354). So: if an acceptance is genuinely
 time-boxed, use the **dated** form, because it is the only one a machine can nag
 you about.
 

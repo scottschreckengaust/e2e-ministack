@@ -37,6 +37,7 @@ import {
   grypeFixStates,
   indexTracker,
   renderReport,
+  standingPremises,
   trivyFixStates,
 } from './vex-debian-tracker.ts';
 import { vexRecordPaths } from './vex-ledger.ts';
@@ -93,6 +94,7 @@ const report = renderReport(
     ...grypeFixStates(readJson(grypeJson)),
     ...trivyFixStates(readJson(trivyJson)),
   ]),
+  standingPremises(DEBIAN_SUITE, entries, rows),
 );
 
 console.log(report.trimEnd());

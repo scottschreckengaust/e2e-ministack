@@ -4,6 +4,7 @@ import {
   effectiveRevisitBy,
   evidenceDefect,
   gateResult,
+  inForcePairs,
   recordViolation,
   renderReport,
   revisitForm,
@@ -219,6 +220,64 @@ describe('effectiveEvidence — doc-level wins, statement-level is the fallback'
   it('tolerates a non-record statement (never throws)', () => {
     expect(effectiveEvidence({}, 'nope')).toBeUndefined();
     expect(effectiveEvidence({}, null)).toBeUndefined();
+  });
+});
+
+// The two resolvers above, applied across a whole record. EXPORTED (#353) so the
+// class-C premise check in vex-debian-tracker.ts asks "which form is in force
+// here?" through this gate's own reader rather than re-deriving the precedence —
+// two implementations of that question is how the gate would come to demand
+// evidence for a record the premise check never re-verifies.
+describe('inForcePairs — every (revisit_by, evidence) pair a record puts in force', () => {
+  it('yields the doc-level pair alone when the record carries no statements', () => {
+    // Not an edge case to tolerate but the shape the ledger actually uses least:
+    // a record with no products still has to be checkable, or "no statements"
+    // becomes a way to hold no trigger at all.
+    expect(
+      inForcePairs({ revisit_by: 'standing-acceptance', evidence: EVIDENCE }),
+    ).toEqual([{ value: 'standing-acceptance', evidence: EVIDENCE }]);
+  });
+
+  it('yields one pair per statement, doc-level values covering them all', () => {
+    expect(
+      inForcePairs({
+        revisit_by: 'wait-for-image-rebuild',
+        statements: [{ status: 'not_affected' }, { status: 'not_affected' }],
+      }),
+    ).toEqual([
+      { value: 'wait-for-image-rebuild', evidence: undefined },
+      { value: 'wait-for-image-rebuild', evidence: undefined },
+    ]);
+  });
+
+  it('falls back per statement when the doc declares neither field', () => {
+    // A record may mix: one product event-triggered, another standing. Every pair
+    // is returned so the caller judges each on its own terms.
+    expect(
+      inForcePairs({
+        statements: [
+          { revisit_by: 'wait-for-image-rebuild' },
+          { revisit_by: 'standing-acceptance', evidence: EVIDENCE },
+        ],
+      }),
+    ).toEqual([
+      { value: 'wait-for-image-rebuild', evidence: undefined },
+      { value: 'standing-acceptance', evidence: EVIDENCE },
+    ]);
+  });
+
+  it('treats a non-array statements field as no statements (never throws)', () => {
+    expect(inForcePairs({ revisit_by: 'x', statements: 'nope' })).toEqual([
+      { value: 'x', evidence: undefined },
+    ]);
+  });
+
+  it('yields an all-undefined pair for an empty record rather than nothing', () => {
+    // Returning [] here would make a fieldless record vacuously compliant — the
+    // exact hole the presence gate exists to close.
+    expect(inForcePairs({})).toEqual([
+      { value: undefined, evidence: undefined },
+    ]);
   });
 });
 
