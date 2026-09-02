@@ -10,6 +10,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.13.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.12.1...v0.13.0) (2026-09-02)
+
+
+### Features
+
+* **vex:** add the standing-acceptance dialect form and a tested Debian-tracker joiner ([#355](https://github.com/scottschreckengaust/e2e-ministack/issues/355)) ([0d74461](https://github.com/scottschreckengaust/e2e-ministack/commit/0d74461c8f3c284c87d8faa0e936448cce1748ea)), closes [#352](https://github.com/scottschreckengaust/e2e-ministack/issues/352)
+
+
+### Bug Fixes
+
+* **security:** pin-currency sweep — MiniStack digest past the openssl fix + browserslist 4.28.8 ([#363](https://github.com/scottschreckengaust/e2e-ministack/issues/363)) ([2c73817](https://github.com/scottschreckengaust/e2e-ministack/commit/2c738174cfd551f17b9e4316a042511772a9de4e)), closes [#361](https://github.com/scottschreckengaust/e2e-ministack/issues/361)
+
 ## [0.12.1](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.12.0...v0.12.1) (2026-08-25)
 
 
