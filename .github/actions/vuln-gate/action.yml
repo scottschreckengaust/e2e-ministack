@@ -1,0 +1,95 @@
+name: Score one vuln surface (delta on changes, absolute on the default branch)
+description: >-
+  Run the VEX-aware vuln gate for ONE surface (issue #334) and always upload its
+  report. The whole decision lives in `.github/scripts/vuln-gate.ts` (100%
+  covered, 0 surviving mutants); this composite is the six jobs' shared wiring so
+  the delta lane cannot drift between them.
+
+  It ALWAYS exits 0 and always uploads. The verdict is read from
+  `vuln-gate-<surface>.outcome` by a separate `if: always()` enforce step in the
+  calling job — the repo's produce -> always-upload -> ENFORCE pattern, which is
+  what guarantees the diagnostic artifact exists precisely when the job fails.
+
+  Nothing gets quieter (#335 C2): the report lists EVERY finding, both the
+  blocking set and the present-but-not-attributable set, to the job log and to
+  the uploaded artifact. The delta lane narrows what BLOCKS, never what is
+  printed.
+
+  Callers must have run `actions/checkout` and `./.github/actions/setup` first —
+  the gate script imports `.ts` modules under Node's type-stripping loader, so it
+  needs the repo's PINNED Node, not whatever the runner image happens to ship.
+
+inputs:
+  surface:
+    description: >-
+      One of `grype-fs`, `trivy-fs`, `osv`, `npm-audit`, `grype-image`,
+      `trivy-image`. Anything else is fail-closed by the script (it will not
+      score a finding set it cannot name).
+    required: true
+  head-json:
+    description: 'Path to the HEAD-side scanner output (JSON or SARIF).'
+    required: true
+  base-json:
+    description: >-
+      Path to the BASE-side scanner output from the SAME job. Empty (or
+      unreadable) means no base data, which degrades to the absolute verdict.
+    required: false
+    default: ''
+  base-reason:
+    description: >-
+      Empty when the base side is usable; otherwise WHY it is not — the string
+      the report prints when it falls back to the absolute verdict. A non-empty
+      reason WINS over any base document.
+    required: false
+    default: ''
+  base-workflow:
+    description: 'Image surfaces: base-side file to read the pinned digest from.'
+    required: false
+    default: ''
+  head-workflow:
+    description: 'Image surfaces: head-side file to read the pinned digest from.'
+    required: false
+    default: ''
+  enforce:
+    description: '`blocking` (default) or `report-only`.'
+    required: false
+    default: blocking
+
+runs:
+  using: composite
+  steps:
+    - name: Score the surface (delta vs absolute)
+      shell: bash
+      env:
+        # Every input reaches the script as an ENVIRONMENT value, never as a
+        # `${{ }}` expansion inside the script body: several of them derive from
+        # a PR (an event name, a ref, a base ref), and the `.ts` validates each
+        # against a closed allow-list rather than trusting the shape.
+        VG_SURFACE: ${{ inputs.surface }}
+        VG_EVENT: ${{ github.event_name }}
+        VG_REF: ${{ github.ref }}
+        VG_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        VG_ENFORCE: ${{ inputs.enforce }}
+        VG_HEAD_JSON: ${{ inputs.head-json }}
+        VG_BASE_JSON: ${{ inputs.base-json }}
+        VG_BASE_REASON: ${{ inputs.base-reason }}
+        VG_BASE_WORKFLOW: ${{ inputs.base-workflow }}
+        VG_HEAD_WORKFLOW: ${{ inputs.head-workflow }}
+      run: |
+        set -uo pipefail
+        # UTC so a run near midnight cannot read a dated `revisit_by` as still
+        # in-window in one timezone and expired in another.
+        VG_TODAY="$(date -u +%Y-%m-%d)"
+        export VG_TODAY
+        node .github/scripts/vuln-gate.mjs
+    # Always upload: the report is the ONLY place the full finding set (blocking
+    # plus informational) is durably visible, so it must exist when the job reds.
+    - name: Upload gate findings
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: vuln-gate-${{ inputs.surface }}
+        path: |
+          vuln-gate-${{ inputs.surface }}.txt
+          vuln-gate-${{ inputs.surface }}.findings.json
+        if-no-files-found: warn

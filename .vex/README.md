@@ -53,6 +53,14 @@ be inert on the surface you meant it for.
 | `npm audit` (#295)          | broad glob `.vex/*` for the verdict; **scoped** `.vex/npm-*` for SARIF visibility     | hard-fail, JSON-derived                                   |
 | GitHub Security tab (#181)  | `vex-to-sarif-suppressions` + `advanced-security/dismiss-alerts`                      | dismisses covered alerts; re-opens if a record is dropped |
 
+The `gate` column is the **absolute** policy — what the whole uncovered set costs
+on `main` and on the weekly cron. On a `pull_request` those five hard-fail rows are
+**delta-scoped**: the job still always runs, always reports and always prints every
+finding, but only what the change ADDS blocks the merge (#334). A record you delete
+therefore may not red the PR that deletes it — it reds `main` and opens the
+`review:vuln` burndown issue instead. See `docs/SECURITY-TOOLING.md`
+§ "Delta-vs-absolute vuln gates".
+
 Two consequences worth internalizing:
 
 - **Neither `--vex` flag accepts a bare directory.** Grype reads `.vex/`

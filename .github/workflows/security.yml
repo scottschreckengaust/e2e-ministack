@@ -114,7 +114,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          # Full history so the MERGE BASE is reachable (#334 option 4). A shallow
+          # clone is not a correctness problem — the gate degrades to the absolute
+          # verdict and says so — but it costs the delta lane, so it is not
+          # optional.
+          fetch-depth: 0
       - uses: ./.github/actions/setup
+      # ── the BASE side, in THIS job (#334 option 4) ──────────────────────────
+      # Both sides are audited in the SAME job at the SAME moment, so they see the
+      # SAME advisory data. That is precisely why the same-job merge-base diff
+      # works and why a STORED baseline (option 1) was dropped: a persisted base
+      # would have been produced against a different, older advisory snapshot, so
+      # a DB refresh alone would look like a finding the PR introduced.
+      - name: Materialize the merge-base tree
+        id: vuln-base
+        uses: ./.github/actions/vuln-base
+        with:
+          base-ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+      # Step-level `if:`, never a job-level one: this job must ALWAYS run and
+      # ALWAYS report, because it is a REQUIRED status check and a check that
+      # never reports blocks the PR forever (the path-gated-checkov deadlock this
+      # repo already hit). Only the base-side WORK is conditional.
+      - name: npm audit the merge base (JSON)
+        if: always() && steps.vuln-base.outputs.state == 'ok'
+        working-directory: .vuln-base
+        run: |
+          set +e
+          # The base tree is a `git archive` of the merge base: package.json +
+          # package-lock.json, no node_modules. `npm audit` builds its tree from
+          # the lockfile, so that is all it needs.
+          npm audit --json > ../npm-audit-base.json
+          exit 0
       # Produce the machine-readable audit. `--audit-level=high` only sets the
       # summary/exit threshold; the JSON carries ALL advisories regardless, and
       # the VEX-aware gate below (not this exit code) is authoritative — so a
@@ -185,11 +215,34 @@ jobs:
           vex=(.vex/*.openvex.json)
           node .github/scripts/npm-audit-gate.mjs \
             npm-audit.json "$(date -u +%Y-%m-%d)" "${vex[@]}"
+      # ── the BLOCKING verdict (#334) ─────────────────────────────────────────
+      # Same question, diff-scoped: fail on an uncovered advisory this change
+      # ADDS relative to the merge base, and on the whole uncovered set when the
+      # run is on the default branch or a schedule. The absolute verdict above is
+      # still computed and still printed below — this narrows what BLOCKS, not
+      # what is reported (#335 C2).
+      - name: Score the npm-audit surface (delta vs absolute)
+        if: always()
+        uses: ./.github/actions/vuln-gate
+        with:
+          surface: npm-audit
+          head-json: npm-audit.json
+          base-json: npm-audit-base.json
+          # A non-empty reason WINS over any base document: if the merge base
+          # could not be materialized, whatever is on disk is not a base result.
+          base-reason: ${{ steps.vuln-base.outputs.reason }}
       - name: Enforce audit result
         if: always()
         run: |
+          # BOTH verdicts are logged. The absolute one (#295, unchanged) answers
+          # "is the repo's total uncovered set empty?"; the delta one answers "is
+          # this change safe to merge?" — and only the second gates, because only
+          # the second is a question the PR author can act on.
           source npm-audit.outcome
-          echo "npm audit gate outcome=$outcome (VEX-aware; fails on any advisory not covered by an active .vex/ record)"
+          absolute="$outcome"
+          source vuln-gate-npm-audit.outcome
+          echo "npm audit ABSOLUTE outcome=$absolute (VEX-aware whole-set verdict; always reported — the GATE line below IS this verdict on the default branch and on a schedule)"
+          echo "npm audit GATE outcome=$outcome (see the vuln-gate-npm-audit artifact for the lane, the base side, and every finding)"
           test "$outcome" = "success"
 
   osv-scanner:
@@ -203,6 +256,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # merge base must be reachable (#334 option 4)
+      # Node is needed only for the gate script, which imports `.ts` modules under
+      # the type-stripping loader — so it must be the repo's PINNED Node, not the
+      # runner image's ambient one. `npm-ci: false`: no dependency tree required.
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false'
       - name: Install OSV-Scanner
         # Pinned to v2.5.1 AND verified by SHA-256 so a re-tagged/tampered
         # release is rejected (content pin, not just a tag pin). The checksum is
@@ -214,6 +274,23 @@ jobs:
             https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64
           echo "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
+      # ── the BASE side, in THIS job (#334 option 4) ──────────────────────────
+      # Same scanner binary, same OSV database, same moment — only the lockfile
+      # root differs, so a finding present on both sides is not one this change
+      # introduced.
+      - name: Materialize the merge-base tree
+        id: vuln-base
+        uses: ./.github/actions/vuln-base
+        with:
+          base-ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+      - name: Scan the merge-base npm lockfile (SARIF)
+        if: always() && steps.vuln-base.outputs.state == 'ok'
+        run: |
+          set +e
+          ./osv-scanner scan source \
+            --lockfile=.vuln-base/package-lock.json --format sarif > osv-base.sarif
+          echo "base osv exit=$? (base side of the delta — never gating on its own)"
+          exit 0
       # npm surface — HARD-FAIL (unchanged). OSV-Scanner v2 form:
       # `scan source --lockfile=…` (the bare `scan --lockfile=` is deprecated).
       - name: Scan npm lockfile (SARIF; hard-fail, enforced after upload)
@@ -271,11 +348,28 @@ jobs:
             osv.sarif
             osv-pip.sarif
           if-no-files-found: warn
+      # ── the BLOCKING verdict (#334) ─────────────────────────────────────────
+      # Scoped to the npm SARIF — the surface this job actually ENFORCES. The pip
+      # SARIF stays report-only and untouched (ratcheting it is its own change).
+      - name: Score the osv surface (delta vs absolute)
+        if: always()
+        uses: ./.github/actions/vuln-gate
+        with:
+          surface: osv
+          head-json: osv.sarif
+          base-json: osv-base.sarif
+          base-reason: ${{ steps.vuln-base.outputs.reason }}
       - name: Enforce OSV result (npm surface only — pip is report-only)
         if: always()
         run: |
+          # The scanner's own absolute exit code is still logged; the delta
+          # verdict is what gates (#334). Nothing got quieter — every finding is
+          # in the vuln-gate-osv report and in the SARIF on the Security tab.
           source osv.outcome
-          test "$exit" = "0"
+          echo "OSV ABSOLUTE exit=$exit (whole npm lockfile set; reported — the GATE line below IS this verdict on the default branch and on a schedule)"
+          source vuln-gate-osv.outcome
+          echo "OSV GATE outcome=$outcome (see the vuln-gate-osv artifact for the lane, the base side, and every finding)"
+          test "$outcome" = "success"
 
   # PR-time dependency-diff gate (#77). Unlike the always-on scanners above,
   # this only runs on pull_request: it diffs the PR's dependency changes
@@ -571,6 +665,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # merge base must be reachable (#334 option 4)
+      # The gate scripts import `.ts` modules under Node's type-stripping loader,
+      # so they need the repo's PINNED Node rather than the runner image's ambient
+      # one (this job previously relied on whatever `node` happened to be on the
+      # PATH). `npm-ci: false`: no dependency tree required.
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false'
       # VEX-aware FS gate (#226, #284). Feed the whole `.vex/` set via
       # GRYPE_VEX_DOCUMENTS (comma-separated — the same channel the ministack-image
       # job uses) so an honest `not_affected` record suppresses a matching
@@ -582,6 +684,68 @@ jobs:
       - name: Gather VEX documents
         id: vex
         run: echo "docs=$(printf '%s,' .vex/*.openvex.json | sed 's/,$//')" >> "$GITHUB_OUTPUT"
+      # ── The BASE side of the delta (#334, option 4) ───────────────────────
+      # Scan the MERGE BASE with the same engine, the same VEX feed, the same
+      # floor, in the SAME job — so the floating vuln DB (#183) is byte-identical
+      # on both sides and the only variable is the TREE. That identity is the
+      # whole reason a same-job delta works and a STORED baseline (option 1) was
+      # dropped: a persisted baseline is scored by an older DB, so a routine DB
+      # refresh would read as "this PR introduced 40 CVEs".
+      #
+      # Both sides are scored against the HEAD `.vex/` ledger (the gate script
+      # reads `.vex/` once), which is deliberate: it keeps ONE coverage model
+      # across all six surfaces, and it means a PR that ADDS a record nets to
+      # zero rather than looking like a fix for something it never introduced.
+      # Known residual, stated rather than hidden: a PR that DELETES a record
+      # for a still-present finding is therefore NOT attributable — the finding
+      # shows up on both sides. It is still PRINTED in the report (informational
+      # section) on that PR, and the ABSOLUTE lane reds `main` and files the
+      # sticky `review:vuln` issue the moment it merges.
+      - name: Materialize the merge-base tree
+        id: vuln-base
+        uses: ./.github/actions/vuln-base
+        with:
+          base-ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+      - id: grype-base
+        name: Grype the merge-base tree (base side of the delta)
+        # A STEP-level `if:`, never a job-level one. A conditioned REQUIRED job
+        # never reports its context, so the ruleset waits forever on a check that
+        # will never arrive — the path-gated-checkov deadlock this repo already
+        # hit. The job always runs and always reports; only this step is
+        # conditional, and skipping it degrades to the ABSOLUTE verdict (loudly)
+        # via the `base-reason` the materializer emitted.
+        if: always() && steps.vuln-base.outputs.state == 'ok'
+        continue-on-error: true # the base side never fails the job on its own
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        env:
+          GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
+        with:
+          grype-version: v0.117.0 # MUST match the head scans below
+          path: .vuln-base
+          fail-build: false
+          severity-cutoff: negligible # strictest floor (#284), same as head
+          output-format: json
+      # Two jobs in one step, in this order, and BOTH are load-bearing:
+      #   1. COPY the base result to a filename we own. `scan-action` chooses its
+      #      own output name, so the head JSON scan below can overwrite the base
+      #      one — and then the gate would diff head against head and could never
+      #      fail. Staging removes that coupling entirely.
+      #   2. DELETE the base tree BEFORE the head scans, which run `path: '.'`
+      #      and would otherwise catalog the base copy too, making every base
+      #      finding appear on the head side as well.
+      - name: Stage the base result and remove the base tree
+        if: always()
+        env:
+          BASE_JSON: ${{ steps.grype-base.outputs.json }}
+        run: |
+          set -uo pipefail
+          rm -f grype-fs-base.json
+          if [ -n "$BASE_JSON" ] && [ -f "$BASE_JSON" ]; then
+            cp -- "$BASE_JSON" grype-fs-base.json
+          else
+            echo "::warning title=grype-fs::the base scan produced no JSON - the gate falls back to the ABSOLUTE verdict"
+          fi
+          rm -rf .vuln-base
       # ── The GATE — derive the fail decision from the JSON, NOT from grype's
       # `fail-build` (#284), mirroring the ministack-image job. WHY: grype only
       # moves `not_affected`/`fixed` records to `ignoredMatches[]`; an `affected`
@@ -685,11 +849,27 @@ jobs:
             ${{ steps.grype.outputs.sarif }}
             ${{ steps.grype-json.outputs.json }}
           if-no-files-found: warn
-      - name: Enforce Grype FS result (hard-fail on any uncovered CVE, any severity)
+      # ── The delta/absolute split (#334, option 2) ─────────────────────────
+      # This job keeps its exact `name:` — `Grype FS scan` is a REQUIRED status
+      # check matched BY NAME, so the split is SEMANTIC, not an identity split:
+      # the same context now carries the DELTA verdict on a change and the
+      # ABSOLUTE verdict on the default branch / a schedule.
+      - name: Score the grype-fs surface (delta vs absolute)
+        if: always()
+        uses: ./.github/actions/vuln-gate
+        with:
+          surface: grype-fs
+          head-json: ${{ steps.grype-json.outputs.json }}
+          base-json: grype-fs-base.json
+          base-reason: ${{ steps.vuln-base.outputs.reason }}
+      - name: Enforce Grype FS result (delta on a change, absolute on main/schedule)
         if: always()
         run: |
           source grype-fs.outcome
-          echo "grype FS scan outcome=$outcome (fails on any CVE, at any severity, not covered by a .vex/ record)"
+          absolute="$outcome"
+          source vuln-gate-grype-fs.outcome
+          echo "grype FS ABSOLUTE outcome=$absolute (whole-set verdict: any CVE, at any severity, not covered by a .vex/ record — always reported; the GATE line below IS this verdict on the default branch and on a schedule)"
+          echo "grype FS GATE outcome=$outcome (see the vuln-gate-grype-fs artifact for the lane, the base side, and every finding — blocking AND informational)"
           test "$outcome" = "success"
 
   # ── Third-party container image (MiniStack emulator) ───────────────────
@@ -730,6 +910,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # merge base must be reachable (#334 option 5)
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # Node for the gate script; no dependency tree needed
+      # ── CAUSAL ATTRIBUTION, not a second scan (#334, option 5) ────────────
+      # An image finding is attributable to a change only if that change MOVES
+      # THE PINNED DIGEST. Nothing else a PR can do alters what is inside a
+      # third-party image pinned by digest, so re-scanning the base image would
+      # burn minutes to re-derive a fact the DIFF already states. The base tree is
+      # materialized purely so the gate can read the base-side digest pin out of
+      # `.vuln-base/.github/workflows/security.yml` and compare it with the head's.
+      # Nothing is deleted afterwards: this job scans an SBOM of the image, never
+      # `path: '.'`, so the extra tree cannot leak into any scan.
+      - name: Materialize the merge-base tree
+        id: vuln-base
+        uses: ./.github/actions/vuln-base
+        with:
+          base-ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
       # Grype's `--vex` takes individual files, not a directory, and the
       # scan-action `vex` input only forwards ONE path — so gather the image
       # CVE records (`.vex/CVE-*.openvex.json`) into the comma-separated list
@@ -780,30 +978,32 @@ jobs:
           fail-build: false # gate is derived from the JSON below, not fail-build
           severity-cutoff: high
           output-format: json
-      # Compute the gate from the VEX-fed JSON: fail iff any high+/critical remains
-      # in `matches[]` (i.e. NOT covered by a `.vex/` record). VEX-covered CVEs are
-      # in `ignoredMatches[]` and correctly don't count. Node built-in only.
-      - name: Derive gate outcome from VEX-fed JSON
+      # Stage the VEX-FED gate JSON under a name we own, and do it IMMEDIATELY:
+      # two more `scan-action` passes follow (the VEX-free SARIF and the VEX-free
+      # JSON) and the action picks its own output filename, so
+      # `steps.grype.outputs.json` cannot be trusted to still hold THIS scan's
+      # bytes by the end of the job. (Its use in the existing `Upload SARIF
+      # artifact` path list below is left exactly as-is — that step belongs to
+      # #364.)
+      #
+      # The inline `node -e` high+ counter that used to live here is GONE. The
+      # verdict now comes from `.github/scripts/vuln-gate.ts` (100% covered, 0
+      # surviving mutants), which applies the SAME `high` floor (#84) plus the
+      # purl-scoped `.vex/` coverage the FS gate already uses — strictly-additional
+      # suppression that can only ever honour an explicit, reviewed record.
+      # Untested logic does not belong in a YAML `run:` block, least of all the
+      # logic deciding whether a REQUIRED check passes.
+      - name: Stage the gate scan for the delta gate
         if: always()
         env:
           GATE_JSON: ${{ steps.grype.outputs.json }}
         run: |
-          if [ -z "$GATE_JSON" ] || [ ! -f "$GATE_JSON" ]; then
-            echo "no gate JSON produced (scan failed to run)"
-            echo "outcome=failure" > grype-image.outcome
-            exit 0
-          fi
-          uncovered="$(node -e '
-            const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-            const hi = new Set(["High", "Critical"]);
-            const n = (d.matches || []).filter((m) => hi.has(m?.vulnerability?.severity)).length;
-            process.stdout.write(String(n));
-          ' "$GATE_JSON")"
-          echo "uncovered high+ in matches[]: $uncovered"
-          if [ "$uncovered" = "0" ]; then
-            echo "outcome=success" > grype-image.outcome
+          set -uo pipefail
+          rm -f grype-image-head.json
+          if [ -n "$GATE_JSON" ] && [ -f "$GATE_JSON" ]; then
+            cp -- "$GATE_JSON" grype-image-head.json
           else
-            echo "outcome=failure" > grype-image.outcome
+            echo "::warning title=grype-image::no gate JSON produced - the gate fails CLOSED on an unread head scan"
           fi
       # ── Security-tab VEX coupling (issue #181) ──────────────────────────────
       # A VEX-FREE SARIF (every high+ present) with `.vex/`-derived suppressions[]
@@ -888,11 +1088,32 @@ jobs:
             grype-ministack-image.suppressed.sarif
             grype-ministack-image.json
           if-no-files-found: warn
-      - name: Enforce Grype image result (hard-fail on any uncovered high+ CVE)
+      # ── The verdict (#334 options 2 + 5) ──────────────────────────────────
+      # `Grype MiniStack image scan` is a REQUIRED status check matched BY NAME, so
+      # this job keeps its exact `name:` and the split is SEMANTIC: the same
+      # context carries the DELTA verdict on a change and the ABSOLUTE verdict on
+      # the default branch / a schedule. Renaming it would leave the ruleset
+      # waiting forever on a context that no longer exists — the same deadlock
+      # class this change removes.
+      - name: Score the grype-image surface (causal attribution)
+        if: always()
+        uses: ./.github/actions/vuln-gate
+        with:
+          surface: grype-image
+          head-json: grype-image-head.json
+          # No base-side scan: the digest pin IS the attribution probe. An
+          # unreadable pin on either side (or a drifted one — `pinnedDigest`
+          # refuses to guess) degrades to the ABSOLUTE verdict, never to "nothing
+          # new".
+          base-workflow: .vuln-base/.github/workflows/security.yml
+          head-workflow: .github/workflows/security.yml
+          base-reason: ${{ steps.vuln-base.outputs.reason }}
+      - name: Enforce Grype image result (attributable high+ CVEs; absolute on main/schedule)
         if: always()
         run: |
-          source grype-image.outcome
-          echo "grype ministack-image step outcome=$outcome (fails on any high+ CVE not covered by a .vex/ record)"
+          source vuln-gate-grype-image.outcome
+          echo "grype ministack-image GATE outcome=$outcome"
+          echo "see the vuln-gate-grype-image artifact for the lane, the digest probe, and EVERY high+ finding — blocking AND informational (the absolute set is never trimmed, #335 C2)"
           test "$outcome" = "success"
 
   # ── Trivy (second vuln scanner, alongside Grype) ────────────────────────
@@ -943,6 +1164,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # Node for the gate script; no dependency tree needed
       # Cache the (floating) Trivy vuln DB across runs. Rolling run_id key so the
       # post-job save always persists a fresh DB; restore-keys prefix-matches the
       # most recent prior cache (same pattern as the mutation/fuzz caches).
@@ -1004,6 +1228,28 @@ jobs:
             trivy-fs.sarif
             trivy-fs.txt
           if-no-files-found: warn
+      # ── Absolute-view participation (#334, option 2) ───────────────────────
+      # This surface is REPORT-ONLY, so a delta lane would be vacuous — there is
+      # nothing here to un-block. It still runs the gate, for two reasons:
+      #   * it emits `vuln-gate-trivy-fs.findings.json`, which is what puts this
+      #     surface in the sticky `review:vuln` burndown issue. A surface the
+      #     burndown cannot READ counts as UNKNOWN, never as clean (#364), so
+      #     "report-only" must not mean "invisible to the absolute view".
+      #   * if the floor is ever ratcheted to blocking, flipping `enforce:` is the
+      #     whole change — and it fails CLOSED from day one, because a missing/
+      #     unreadable head SARIF is already scored as a failure, not a pass.
+      # `base-reason` is a TRUE statement, not a placeholder: it is why the report
+      # will say the base side was not evaluated.
+      - name: Score the trivy-fs surface (absolute view for the burndown)
+        if: always()
+        uses: ./.github/actions/vuln-gate
+        with:
+          surface: trivy-fs
+          head-json: trivy-fs.sarif
+          enforce: report-only
+          base-reason: >-
+            trivy-fs is report-only, so no base side is evaluated - a delta lane
+            is vacuous where nothing blocks
       - name: Report Trivy FS outcome (report-only — never fails)
         if: always()
         run: |
@@ -1011,6 +1257,8 @@ jobs:
           # jobs hard-fail (#84); the filesystem source scan stays report-only.
           source trivy-fs.outcome
           echo "trivy-fs step outcome=$outcome (report-only — not enforced)"
+          source vuln-gate-trivy-fs.outcome
+          echo "trivy-fs GATE outcome=$outcome (report-only by construction; see the vuln-gate-trivy-fs artifact for every finding)"
 
   # trivy-image — vuln scan of the pinned MiniStack emulator image by digest
   # (Trivy analog of the flipped Grype `ministack-image` job). HARD-FAIL,
@@ -1043,6 +1291,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # merge base must be reachable (#334 option 5)
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # Node for the gate script; no dependency tree needed
+      # Causal attribution, same as the Grype image job: the base tree exists only
+      # so the gate can read the BASE-side digest pin and compare it with the
+      # head's. No second image scan — a digest-pinned third-party image cannot be
+      # changed by anything else in a PR. Nothing scans `path: '.'` here, so the
+      # extra tree cannot leak into a result.
+      - name: Materialize the merge-base tree
+        id: vuln-base
+        uses: ./.github/actions/vuln-base
+        with:
+          base-ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
       - name: Cache Trivy DB
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1125,14 +1387,35 @@ jobs:
             trivy-image.txt
             trivy-image.json
           if-no-files-found: warn
-      - name: Enforce Trivy image result (hard-fail on any uncovered high+ CVE)
+      # ── The verdict (#334 options 2 + 5) ──────────────────────────────────
+      # `Trivy MiniStack image scan` is a REQUIRED status check matched BY NAME:
+      # the job keeps its exact `name:` and the SAME context now carries the delta
+      # verdict on a change and the absolute verdict on the default branch /
+      # schedule. The trivy JSON is already VEX-gated (via trivy.yaml) and
+      # severity-filtered to HIGH,CRITICAL, so the gate re-derives nothing — it
+      # only decides ATTRIBUTION.
+      - name: Score the trivy-image surface (causal attribution)
+        if: always()
+        uses: ./.github/actions/vuln-gate
+        with:
+          surface: trivy-image
+          head-json: trivy-image.json
+          base-workflow: .vuln-base/.github/workflows/security.yml
+          head-workflow: .github/workflows/security.yml
+          base-reason: ${{ steps.vuln-base.outputs.reason }}
+      - name: Enforce Trivy image result (attributable high+ CVEs; absolute on main/schedule)
         if: always()
         run: |
-          # Hard-fail (VEX-gated): the scan step ran with exit-code 1 + TRIVY_VEX,
-          # so its outcome is `failure` iff a HIGH,CRITICAL remains uncovered by a
-          # .vex/ record. Mirrors the flipped Grype ministack-image enforce.
+          # The scan step ran with exit-code 1 and the trivy.yaml VEX feed, so its
+          # own outcome is the ABSOLUTE verdict: `failure` iff a HIGH,CRITICAL is
+          # uncovered by a `.vex/` record. It is still PRINTED — the gate line
+          # below is what DECIDES, and on the default branch / a schedule the two
+          # are the same verdict by construction.
           source trivy-image.outcome
-          echo "trivy-image step outcome=$outcome (fails on any high+ CVE not covered by a .vex/ record)"
+          absolute="$outcome"
+          source vuln-gate-trivy-image.outcome
+          echo "trivy-image ABSOLUTE outcome=$absolute (whole-set: any high+ CVE not covered by a .vex/ record)"
+          echo "trivy-image GATE outcome=$outcome (see the vuln-gate-trivy-image artifact for the lane, the digest probe, and every finding — blocking AND informational)"
           test "$outcome" = "success"
 
   # trivy-config (cdk.out misconfig scan) — DELIBERATELY OMITTED for #133.
@@ -1143,6 +1426,111 @@ jobs:
   # coverage for no new signal here. #133 scope is vuln scanning (FS + image);
   # add trivy-config later only if a concrete gap in checkov's CFN coverage is
   # identified. Recorded in docs/SECURITY-TOOLING.md.
+
+  # ── The ABSOLUTE view (#334, option 2: split blocking from visible) ───────
+  # The six gate jobs above DECIDE with the delta lane on a change. This job is
+  # the other half of that split: it re-reads the SAME per-surface findings
+  # documents those jobs uploaded, reports the ABSOLUTE uncovered set across every
+  # surface, and files/updates ONE sticky `review:vuln` issue — so the residual
+  # becomes a tracked burndown QUEUE (the `review:<thing>` label-family
+  # convention, #297) instead of a permanent red X on every unrelated PR.
+  #
+  # This is the ONLY new job, and it is DELIBERATELY NOT A REQUIRED CHECK: it does
+  # not run on `pull_request` at all. Promoting a context is a repository-settings
+  # change (maintainer-only), and a required check that never reports on a PR
+  # deadlocks every merge — the exact failure class this issue removes. The six
+  # existing contexts keep their byte-identical `name:` values instead, which is
+  # why the delta/absolute split is SEMANTIC rather than an identity split.
+  #
+  # `needs:` all six so their artifacts exist; `if: always()` so one red gate
+  # cannot suppress the queue — a failing gate is when the queue matters most.
+  vuln-gate-absolute:
+    name: Vuln gate — absolute view (burndown)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      [grype, trivy-fs, osv-scanner, npm-audit, ministack-image, trivy-image]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    permissions:
+      contents: read
+      issues: write # file / update / close the sticky review:vuln issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          npm-ci: 'false' # Node for the renderer; no dependency tree needed
+      - name: Download every surface's findings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: vuln-gate-*
+          merge-multiple: true
+      # The six filenames are ENUMERATED, never globbed. A glob silently shrinks
+      # to whatever arrived, so a surface whose artifact went missing would simply
+      # vanish from the total and the queue would look shorter than it is. Named
+      # explicitly, a missing file is read as UNREADABLE — counted as UNKNOWN and
+      # refusing to report clean (#364: a misrouted artifact once made a
+      # corroboration arm read "no scanner data" 64 times and still look green).
+      - name: Render the absolute view
+        run: |
+          set -uo pipefail
+          node .github/scripts/vuln-gate-burndown.mjs "$(date -u +%Y-%m-%d)" \
+            vuln-gate-grype-fs.findings.json \
+            vuln-gate-trivy-fs.findings.json \
+            vuln-gate-osv.findings.json \
+            vuln-gate-npm-audit.findings.json \
+            vuln-gate-grype-image.findings.json \
+            vuln-gate-trivy-image.findings.json
+      - name: Upload the absolute view
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vuln-gate-absolute
+          path: |
+            vuln-gate-burndown.md
+            vuln-gate-burndown.outcome
+            vuln-gate-burndown.meta.json
+          if-no-files-found: warn
+      # The title and the body marker are READ FROM the renderer's meta file, never
+      # restated here: they come from the same tested constants the body is built
+      # from, so a reworded title can never leave this step hunting for an issue
+      # that no longer matches it.
+      - name: File, update or close the sticky review:vuln issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          if [ ! -f vuln-gate-burndown.md ] || [ ! -f vuln-gate-burndown.meta.json ]; then
+            echo "::error title=vuln-gate-absolute::the renderer produced no output - refusing to touch the issue (an unrendered view is not a clean one)"
+            exit 1
+          fi
+          title="$(jq -r '.title' vuln-gate-burndown.meta.json)"
+          marker="$(jq -r '.marker' vuln-gate-burndown.meta.json)"
+          source vuln-gate-burndown.outcome
+          # Find the sticky issue by its BODY MARKER, not by title: a title can be
+          # edited by a human, the marker is machine-owned.
+          existing="$(gh issue list --label review:vuln --state open --limit 100 --json number,body |
+            jq -r --arg m "$marker" 'map(select(.body | contains($m))) | .[0].number // empty')"
+          echo "absolute view: clean=$clean total=$total existing=${existing:-none}"
+          if [ "$clean" = "true" ]; then
+            if [ -n "$existing" ]; then
+              gh issue edit "$existing" --body-file vuln-gate-burndown.md
+              gh issue close "$existing" --reason completed \
+                --comment "Every vuln surface is readable and clean — closing the burndown queue. It is refiled automatically on the next uncovered finding."
+            else
+              echo "every surface readable and clean; nothing to file"
+            fi
+            exit 0
+          fi
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body-file vuln-gate-burndown.md
+            echo "updated the sticky burndown issue #$existing"
+          else
+            gh issue create --title "$title" --label review:vuln --body-file vuln-gate-burndown.md
+          fi
 
   # ── VEX report (two-ledger reconciliation, #189) ────────────────────────
   # A per-push, human-readable reconciliation of the committed `.vex/` records

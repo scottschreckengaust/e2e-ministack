@@ -11,7 +11,9 @@ name: Stale
 #   - Any new activity removes the `stale` label and resets the clock.
 #   - Exempt labels (issues AND PRs) shield long-lived / important work from
 #     ever going stale: priority:high, help wanted, good first issue,
-#     review:license, area:security, pinned.
+#     review:license, review:vuln, area:security, pinned.
+#     (Both review:* queues are CI-owned: a stale-close would just make the
+#     filing workflow open a duplicate on its next run.)
 #   - Assigned or milestoned items are also exempt.
 
 on:
@@ -54,7 +56,7 @@ jobs:
             activity. Comment or update it to keep it open. Exempt it
             permanently with the `pinned` label (or one of the exempt
             labels: `priority:high`, `help wanted`, `good first issue`,
-            `review:license`, `area:security`).
+            `review:license`, `review:vuln`, `area:security`).
           stale-pr-message: >
             This pull request has had no activity for 60 days and is now
             marked `stale`. It will be closed in 14 days if there is no
@@ -67,8 +69,8 @@ jobs:
             Closing this pull request after 74 days of inactivity. Reopen
             it if you intend to continue the work.
           # -- Exemptions (issues AND PRs) ---------------------------------
-          exempt-issue-labels: 'priority:high,help wanted,good first issue,review:license,area:security,pinned'
-          exempt-pr-labels: 'priority:high,help wanted,good first issue,review:license,area:security,pinned'
+          exempt-issue-labels: 'priority:high,help wanted,good first issue,review:license,review:vuln,area:security,pinned'
+          exempt-pr-labels: 'priority:high,help wanted,good first issue,review:license,review:vuln,area:security,pinned'
           exempt-all-assignees: true
           exempt-all-milestones: true
           # -- Rate limiting -----------------------------------------------

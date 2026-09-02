@@ -25,6 +25,16 @@ clamdscan.txt
 sonar-issues.json
 suppression-inventory.txt
 vex-revisit.txt
+# Delta-vs-absolute vuln gate (#334) — per-surface reports/findings docs, the
+# absolute-view burndown body/meta, and the base/head scanner outputs.
+vuln-gate-*.txt
+vuln-gate-*.findings.json
+vuln-gate-burndown.md
+vuln-gate-burndown.meta.json
+.vuln-base/
+npm-audit-base.json
+grype-fs-base.json
+grype-image-head.json
 reports/
 .fuzz-corpus/
 # Committed fuzz corpora (#165) are byte-exact fixtures, not source to format.
