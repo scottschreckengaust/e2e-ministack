@@ -31,14 +31,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: javascript-typescript
           # Pin the analyzer bundle so the CodeQL engine/queries are reproducible
           # (otherwise the action auto-updates to the latest bundle).
           tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.25.6/codeql-bundle.tar.gz
       # CodeQL uploads its own SARIF to the Security tab natively.
-      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
 
   semgrep:
     name: Semgrep SAST
@@ -85,7 +85,7 @@ jobs:
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -157,7 +157,7 @@ jobs:
           fi
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: npm-audit.suppressed.sarif
           category: npm-audit
@@ -252,13 +252,13 @@ jobs:
           true
       - name: Upload npm SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: osv.sarif
           category: osv-scanner
       - name: Upload pip SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: osv-pip.sarif
           category: osv-scanner-pip
@@ -670,7 +670,7 @@ jobs:
           output-format: sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
@@ -860,7 +860,7 @@ jobs:
       - name: Upload VEX-suppressed SARIF to Security tab
         id: upload-suppressed
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: grype-ministack-image.suppressed.sarif
           category: grype-ministack-image
@@ -989,7 +989,7 @@ jobs:
           skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -1109,7 +1109,7 @@ jobs:
           trivy convert --format table "$TRIVY_JSON" | tee trivy-image.txt
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
@@ -1400,7 +1400,7 @@ jobs:
         run: node .github/scripts/clamav-to-sarif.mjs clamdscan.txt clamav.sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: clamav.sarif
           category: clamav
@@ -1560,7 +1560,7 @@ jobs:
       # would wrongly resolve prior alerts; the enforce step below fails the job.
       - name: Upload SARIF to Security tab
         if: ${{ steps.sarif.outcome == 'success' }}
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: sonar.sarif
           category: sonarqube
@@ -1725,7 +1725,7 @@ jobs:
           checkov -d cdk.out --framework cloudformation --compact # human-readable
       - name: Upload checkov SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: results_sarif.sarif
           category: checkov
@@ -1998,7 +1998,7 @@ jobs:
             --text suppression-inventory.txt
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: suppression-inventory.sarif
           category: suppression-inventory
