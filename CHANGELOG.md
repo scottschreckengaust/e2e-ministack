@@ -10,6 +10,18 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > changes to date lives in the git log and the merged pull requests; this file
 > starts tracking notable changes forward from its introduction.
 
+## [0.14.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.13.0...v0.14.0) (2026-09-02)
+
+
+### Features
+
+* **vex:** reclassify the seven unfixable-by-Debian records to standing-acceptance ([#366](https://github.com/scottschreckengaust/e2e-ministack/issues/366)) ([aad50aa](https://github.com/scottschreckengaust/e2e-ministack/commit/aad50aa90f79fcf3ff242c6cc3303c412d6c8565)), closes [#353](https://github.com/scottschreckengaust/e2e-ministack/issues/353)
+
+
+### Bug Fixes
+
+* **ci:** drop the temporary semgrep --exclude-rule now that the upstream fix is served ([#365](https://github.com/scottschreckengaust/e2e-ministack/issues/365)) ([3eb5640](https://github.com/scottschreckengaust/e2e-ministack/commit/3eb5640b55e00638738baee7ea9cbbfca69e54d8)), closes [#163](https://github.com/scottschreckengaust/e2e-ministack/issues/163)
+
 ## [0.13.0](https://github.com/scottschreckengaust/e2e-ministack/compare/v0.12.1...v0.13.0) (2026-09-02)
 
 
