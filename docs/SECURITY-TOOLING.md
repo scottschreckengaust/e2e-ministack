@@ -925,3 +925,338 @@ future targets of the #78 pin-sync updater. `trivy-action` (added in #133) is
 likewise SHA-pinned and is also a #78 pin-sync target; its vuln **database
 floats** by design (like Grype's), so newly disclosed CVEs are caught without a
 repo change — the DB is cached across runs via `actions/cache` (see PINNING.md).
+
+## Repository rulesets — the merge boundary (#343)
+
+Everything above describes what the **gates** do. This section describes the
+**merge boundary**: which of those gates GitHub actually consults before it will
+let a commit land on `main`. The two are not the same set, and the difference had
+never been written down anywhere in this repo — the highest-privilege
+configuration surface here was tribal knowledge until #343.
+
+`main` and every tag are governed by **repository rulesets**, not classic branch
+protection. That distinction matters because the legacy endpoint lies about it:
+
+```console
+$ gh api repos/scottschreckengaust/e2e-ministack/branches/main/protection
+{"message":"Branch not protected", "status":"404"}
+```
+
+`main` **is** protected. `Branch not protected` is a **false negative** for a
+ruleset-governed branch: the legacy branch-protection API only reports classic
+protection and cannot see rulesets at all. Never conclude from that 404 that a
+merge needs no approval, or that no status checks are required — read the ruleset
+endpoints below instead.
+
+### Reading the live state — two endpoints, two privilege levels
+
+| endpoint                                        | returns                                                                         | privilege          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------- | ------------------ |
+| `GET /repos/{owner}/{repo}/rules/branches/main` | every rule type **with its `parameters`**, plus the owning `ruleset_id`         | ordinary repo read |
+| `GET /repos/{owner}/{repo}/rulesets` + `/{id}`  | `enforcement`, **`bypass_actors`**, `conditions`, `updated_at`, the tag ruleset | admin              |
+
+The first needs no elevated token, which is what makes an automated drift gate
+buildable at all (#357). The second is admin-scoped; figures below that come only
+from it are **human-audited**, not gate-able.
+
+Two standing rules for tooling:
+
+- **Read-only, always.** No script, workflow or agent may `POST`/`PUT`/`PATCH`/
+  `DELETE` a `rulesets` or `rules` endpoint. Rulesets are changed by the
+  maintainer by hand, one deliberate edit at a time.
+- **No `administration:write` token** is requested or used by anything in this
+  repo. If a fact is only visible with admin, it gets documented as human-audited
+  and dated — it does not become a reason to mint a stronger token.
+
+**Everything below is a point-in-time measurement taken 2026-09-02 from the
+endpoints named above. Re-derive it rather than quoting it later.** A useful
+staleness check: the branch ruleset's `updated_at` was
+`2026-07-09T01:02:49-07:00` and the tag ruleset's `2026-07-13T10:37:02-07:00`, so
+if those timestamps are unchanged, this catalogue is still current.
+
+### Ruleset `default-branch` — id `18187230`
+
+`target: branch` · `enforcement: active` · **`bypass_actors: []`** (zero — nobody,
+including the maintainer, can bypass) · `conditions.ref_name.include:
+["~DEFAULT_BRANCH"]`, no excludes. 11 rule types:
+
+| rule                      | parameters                                                                                      |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `creation`                | —                                                                                               |
+| `deletion`                | —                                                                                               |
+| `non_fast_forward`        | — (no force-push)                                                                               |
+| `required_linear_history` | —                                                                                               |
+| `required_signatures`     | — (every commit on `main` must be signed)                                                       |
+| `pull_request`            | see "What actually blocks a bot PR" below                                                       |
+| `required_status_checks`  | `strict_required_status_checks_policy: true`, `do_not_enforce_on_create: true`, **15 contexts** |
+| `code_scanning`           | **9 tools**, each `alerts_threshold: all` + `security_alerts_threshold: all`                    |
+| `code_quality`            | `severity: all` — see "The three platform rules"                                                |
+| `copilot_code_review`     | `review_draft_pull_requests: true`, `review_on_push: true` — see "The three platform rules"     |
+| `code_coverage`           | `minimum_coverage: 100`, `max_coverage_drop: null` — see "The three platform rules"             |
+
+`strict_required_status_checks_policy: true` means a PR branch must be **up to
+date with `main`** before it can merge, so every advance of `main` forces a
+rebase of every open PR. `do_not_enforce_on_create: true` exempts branch
+creation.
+
+#### The 15 required status-check contexts
+
+All 15 are `security.yml` jobs, all reported by the GitHub Actions app
+(`integration_id: 15368`):
+
+`Semgrep SAST` · `Grype FS scan` · `Grype MiniStack image scan` · `Gitleaks` ·
+`OSV Scanner` · `CodeQL (JS/TS)` · `npm audit` · `SBOM (Syft / CycloneDX)` ·
+`Zizmor (Actions audit)` · `IaC scan (cfn-lint + checkov)` ·
+`SonarQube analysis` · `Trivy FS scan` · `Trivy MiniStack image scan` ·
+`ClamAV virus scan` · `Actionlint (workflow correctness)`
+
+**A required context is matched by its literal job `name:` string.** All 15
+currently resolve 1:1 to a real job name (verified by diffing the endpoint's
+context list against the `name:` values in `.github/workflows/*.yml` — no orphans
+in either direction). **Renaming one of those jobs makes the ruleset wait forever
+on a check that can never report, permanently blocking every PR** — and the fix
+requires the admin-only write path this repo forbids to tooling. Treat these job
+names as a public API.
+
+#### Gates that run on every PR but are NOT required contexts
+
+The gap is real and worth stating plainly: a job going red does **not** by itself
+stop a merge unless its name is in the list above. Notably absent are
+`Unit + synth gate` (the unit tier, the 100% coverage gate, the cdk-nag synth
+gate, the fuzz-regression tier, the MCP parity gate),
+`Mutation testing (Stryker)`, `Integration (MiniStack)`,
+`Dependency review (PR)` (the license allow-list), `ShellCheck (shell scripts)`,
+`VEX revisit_by gate`, `VEX dialect drift-check`,
+`MiniStack digest drift guard`, `Verify compat against current pin`,
+`SBOM + provenance attestation` and `Threat model`. So several things this file
+and AGENTS.md describe as **hard gates** are hard _in CI_ and advisory _at the
+merge boundary_. The hole is latent rather than exploited — it is held closed by
+the practice of not merging anything red — but do not mistake "CI hard-fails" for
+"cannot be merged".
+
+Closing that gap is a **maintainer-only, manual** ruleset edit (see the read-only
+rule above), done one context at a time. Three of those jobs stay non-required
+**permanently** by standing decision: `Integration (MiniStack)`,
+`SBOM + provenance attestation` and `Verify compat against current pin` all need
+an elevated token, a fork PR never receives one, and a workflow's `permissions:`
+block cannot elevate a fork token — so requiring them would make every fork
+contribution unmergeable.
+
+#### The 9 `code_scanning` tools
+
+`ClamAV` · `CodeQL` · `Grype` · `Semgrep OSS` · `SonarQube` · `Trivy` ·
+`checkov` · `osv-scanner` · `zizmor` — each at `alerts_threshold: all` **and**
+`security_alerts_threshold: all`, the strictest available setting. Because `all`
+admits no severity floor, **any** open Code Scanning alert from any of the nine
+blocks every PR at once, regardless of severity. That is the mechanism by which
+an unaccounted-for alert — including one GitHub `auto_dismissed` without a
+`.vex/` record — can red the whole queue, so an empty alert list is not the same
+as a clean one.
+
+### What actually blocks a bot PR — the `pull_request` rule (#343 AC4)
+
+Live parameters:
+
+```jsonc
+{
+  "allowed_merge_methods": ["squash"],
+  "required_approving_review_count": 0,
+  "require_code_owner_review": true,
+  "require_extra_approval_for_unattributed_changes": true,
+  "dismiss_stale_reviews_on_push": true,
+  "require_last_push_approval": false,
+  "required_review_thread_resolution": true,
+  "required_reviewers": [],
+}
+```
+
+The observed behaviour is asymmetric and reproducible: **maintainer-authored PRs
+merge with zero approvals; every bot-authored PR needs one approving click.**
+Measured 2026-09-02:
+
+- The six most recent merged maintainer-authored PRs (#365, #363, #355, #351,
+  #346, #344) have **zero** approving reviews each.
+- Every merged bot PR examined has **exactly one** `APPROVED` review by
+  `scottschreckengaust`, submitted seconds before the merge — release-please #339
+  (approved 21:25:23Z, merged 21:25:27Z), #356, #350; dependabot #359, #319.
+- Open/closed bot PRs sitting `BLOCKED` (#367, #318, #317) each carry an
+  automatic **review request** to `scottschreckengaust`; on #367 the timeline
+  shows `review_requested` at PR-open time with the bot itself as requester.
+
+**Verdict: `require_code_owner_review` is the blocker.
+`require_extra_approval_for_unattributed_changes` is eliminated — it is
+documented to have no effect at this repo's settings.** This **reverses** #343's
+Finding 3, which named the latter as the better-fitting explanation. Four
+reasons, strongest first:
+
+1. **The extra-approval rule is a no-op here, by upstream documentation.** Its UI
+   name is "Require an additional approval for unattributed **Copilot** pull
+   requests", and its documented mechanism is to require _one more approval than
+   the number you configured_. GitHub states plainly: "**This setting has no
+   effect if the ruleset requires zero approvals.**" This ruleset sets
+   `required_approving_review_count: 0`, so the rule cannot demand anything —
+   `0 + 1` is not how it is specified to work. It is also scoped to PRs **Copilot
+   opens under its own app identity**, not to bot PRs generally, so
+   dependabot/release-please PRs are out of its scope on two independent grounds.
+   It is `true` here because GitHub **enables it by default** in new and existing
+   rulesets — a platform default that was inherited, not a decision that was
+   made.
+2. **A CODEOWNERS file exists and matches everything.** `.github/CODEOWNERS` is a
+   `* @scottschreckengaust` catch-all (added in #103), so every path in every PR
+   has an owner, and `GET /codeowners/errors` returns `{"errors":[]}`. The rule
+   has something to bite on for every bot PR. On a maintainer-authored PR the
+   sole code owner **is** the author, who cannot review their own PR — which is
+   the natural explanation for why that arm merges at zero approvals.
+3. **Only the code-owner mechanism produces a review request, and it is
+   demonstrably firing.** GitHub auto-requests review from the owners of changed
+   paths whenever a PR is opened — documented as unconditional, independent of any
+   rule. The extra-approval setting creates no reviewer request at all (its only
+   documented effect is the approval count). Bot PRs get the request; that
+   mechanism is live.
+4. **The bot commits are attributed anyway.** `GET /pulls/{n}/commits` resolves
+   `.author.login` to `github-actions[bot]` (#367) and `dependabot[bot]` (#317) —
+   non-null, from `…@users.noreply.github.com` addresses, with
+   `verification.verified: true`.
+
+**The honest limits.** Three, and none of them is closable from here:
+
+- **GitHub does not document `require_code_owner_review`'s behaviour when
+  `required_approving_review_count` is 0**, nor the case where the PR author is
+  the only code owner. Reasons 2 and 3 are a well-supported inference from
+  observed behaviour plus the documented auto-request mechanism — not a quoted
+  guarantee. The elimination in reason 1, by contrast, _is_ quoted.
+- **The REST parameter `require_extra_approval_for_unattributed_changes` is
+  itself undocumented** — the name appears nowhere in GitHub's REST reference or
+  OpenAPI description, only the UI feature is described. The field is real (the
+  endpoint returns it); the mapping between it and the documented UI setting is
+  inferred from the name.
+- **No API can confirm which rule blocks a given PR.** GraphQL
+  `PullRequest.mergeRequirements` — the only field that would _enumerate the
+  unmet merge conditions_ — **does not exist on this schema** (verified
+  2026-09-02). `mergeStateStatus` reports **that** a PR is blocked and never
+  **why**. Do not re-derive a conclusion from silence: absence of a signal is not
+  evidence of absence of a mechanism. What would settle it outright is the merge
+  box in the web UI on a live blocked bot PR, or removing one parameter and
+  re-observing — the latter being a ruleset write, hence maintainer-only.
+
+Note also that `#367` is **not** a clean specimen for this question even though
+it is currently `BLOCKED`: its status-check rollup is **empty** (0 check runs), so
+its blocked state is confounded by missing required contexts and says nothing
+about review requirements. The merged PRs above, which had all 15 contexts green
+and were approved seconds before merge, are the informative ones.
+
+Three operational consequences of the same rule block:
+
+- **Any automation that opens PRs must budget for a human approval click.** This
+  is a design constraint, not a bug.
+- **`dismiss_stale_reviews_on_push: true` + the strict up-to-date policy is a
+  churn loop.** Every advance of `main` forces a rebase, the rebase changes the
+  recorded diff, and that dismisses the approval, which must then be re-given.
+  Dependabot PR #359 shows this directly: its review history is a `DISMISSED`
+  review followed by an `APPROVED` one. A bot PR can therefore starve while
+  `main` is busy — structurally the same trap as the Gate Atomicity Law deadlock
+  (#335), reached through review state instead of finding sets. The trigger is
+  **broader than the parameter name suggests**: GitHub dismisses on any change to
+  the approved diff state, which includes clicking **Update branch** and a
+  _related_ PR merging into the target branch — not only a new commit push.
+- **Code owners are _not_ auto-requested on draft PRs** (documented; the request
+  fires when the draft is marked ready). So under the merge-train practice of
+  opening PRs as drafts, the review request appears later than PR-open — budget
+  the approval click at ready-for-review time, not at creation.
+
+### The three platform rules — why they are there (#343 AC2)
+
+`code_quality`, `copilot_code_review` and `code_coverage` are GitHub-native
+platform rules. **All three are retained by maintainer decision**; the standing
+direction is that 100% coverage, 100% mutant-kill and every other
+zero-tolerance policy are **core tenets**, that they must be codified in each
+tool's own native config format, and that **no rules are removed**.
+
+None of the three produces an observable check run today. **That silence must not
+be read as "the rule is inert"** — for at least one of them, silence is exactly
+what a _passing_ rule looks like. What was measured across the six most recent
+merged PRs (#350–#363), 2026-09-02: zero check runs whose name matches
+`qualit|coverag|copilot` (out of 43–78 checks per PR); zero reviews authored by
+Copilot; `GET /code-quality/findings` → `404`; and every distinct check-run app
+owner on `main` being `github-actions`.
+
+- **`code_coverage` (`minimum_coverage: 100`, `max_coverage_drop: null`)** — the
+  merge-boundary expression of the 100%-coverage core tenet. **BECAUSE** the
+  enforcement point is `coverageThreshold` in `jest.config.js` (#124) and the
+  repo genuinely holds 100%, a rule that is _evaluated and satisfied_ emits
+  nothing and blocks nothing. Successful merges are therefore consistent with
+  **both** "never evaluated" **and** "evaluated and passing", and cannot
+  discriminate between them — and per the section above, no API can. Treat it as
+  a live constraint. `max_coverage_drop: null` with `minimum_coverage: 100` makes
+  it an **absolute** gate rather than a delta gate; that is deliberate for a
+  tenet (there is no acceptable drop from 100%), and is the opposite of the
+  delta-shaped direction #334 is taking _vulnerability_ gates. Note it would
+  interact badly with the deliberately-uninstrumented `.mjs` shims (#165) if the
+  platform ever began computing coverage from a source this repo does not
+  control.
+- **`code_quality` (`severity: all`)** — set to the strictest available
+  threshold, consistent with every other threshold in this repo (compare the nine
+  `code_scanning` tools at `alerts_threshold: all`). **BECAUSE** the house style
+  is no severity floor anywhere, `all` is the setting that matches the posture if
+  and when the platform feature starts producing findings. Today it produces no
+  check run and `GET /code-quality/findings` 404s. The repo's own code-quality
+  gate is `SonarQube analysis`, which _is_ a required context and _does_
+  hard-fail — so this rule is additive, not the thing carrying that load.
+- **`copilot_code_review` (`review_draft_pull_requests: true`,
+  `review_on_push: true`)** — retained, with the governance reasoning recorded
+  here rather than left implicit. Assessment against the tool-adoption /
+  single-vendor line (AGENTS.md § Security checks, and the "License policy"
+  section above): that line governs **adopting a new tool, dependency or GitHub
+  Action** — something whose license lands in the repo, whose version must be
+  pinned, and which can lock the project into a vendor it would then have to
+  migrate off. A **GitHub-native ruleset rule is a different kind of thing**: it
+  adds no dependency, no `uses:` pin, no license to clear, and no new SBOM entry;
+  it is a toggle on the forge the repo already lives on, and removing it is a
+  one-field edit with nothing to unwind. That is materially unlike the SonarQube
+  case (#161), which needed an explicit written exception precisely _because_ it
+  wired in two LGPL-3.0 third-party actions plus a single-vendor service, and had
+  to be exempted by name in `dependency-review`'s license policy. So this rule
+  lands **inside** the line rather than requiring a #161-style carve-out — with
+  the caveat that "already on GitHub" is a reason it is _not a new lock-in_, not
+  a general licence to adopt vendor features unexamined. Two things a future
+  reader should know: (a) measurement shows **no Copilot review object on any
+  recent PR and no non-Actions check-run producer at all**, which is consistent
+  with the feature not being enabled for this repository rather than with the
+  rule being misconfigured — this is the one of the three where absence of a
+  _visible review object_ is genuinely the stronger signal, and it is still not
+  proof; and (b) `review_draft_pull_requests: true` means that if the feature
+  does activate, **draft PRs get reviewed too**, which cuts against the
+  merge-train practice of opening PRs as drafts specifically to defer review
+  until CI is green. Revisit the flag then, not now.
+
+### Ruleset `default-tag` — id `18704797`
+
+`target: tag` · `enforcement: active` · **`bypass_actors: []`** ·
+`conditions.ref_name.include: ["~ALL"]` (every tag). 4 rule types: `creation` is
+absent, and `deletion` · `non_fast_forward` · `required_signatures` · `update`
+are present, none taking parameters.
+
+So **tags are immutable and must be signed**: once pushed, a tag cannot be
+deleted, moved, force-updated or amended by anyone. Relevant to release-please —
+a botched release tag can only be **superseded** by a new version, never
+corrected in place.
+
+### Known coverage gap for an automated drift gate (#357)
+
+A drift detector built on the unprivileged `/rules/branches/main` endpoint —
+which is the only shape available without the admin token this repo refuses —
+**cannot** see:
+
+- `enforcement` (whether the ruleset is `active`, `evaluate` or `disabled`),
+- **`bypass_actors`** — so _a bypass actor being added would not be detected_,
+  which is the single highest-impact change anyone could make to this repo's
+  merge boundary, and
+- the **`default-tag` ruleset** at all, since the endpoint is branch-scoped.
+
+Those three remain **admin-only and therefore human-audited**; the zero-bypass
+posture recorded above is a dated human reading, not a gated invariant. Say so
+rather than implying the gate covers them. #357 owns the detector itself, which
+per #335 must stay **report-only / self-satisfiable** — an out-of-band settings
+change is not something a PR author can fix in-repo, so it must never hard-red an
+unrelated PR — and whose committed snapshot must be an **allow-list of fields**,
+never a deny-list, so no sensitive value can be captured by omission.
