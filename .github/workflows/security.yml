@@ -619,7 +619,7 @@ jobs:
       - id: grype-json
         name: Grype gate scan (VEX-fed JSON)
         continue-on-error: true # never stop the job here; enforced off the outcome below
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -661,7 +661,7 @@ jobs:
       - id: grype
         name: Grype SARIF scan (Security-tab view, VEX-fed)
         continue-on-error: true # visibility path; the gate is the JSON scan above
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -754,7 +754,7 @@ jobs:
       # `.github/scripts/check-ministack-digest-drift.sh` hard-fails on any
       # disagreement, so the guard — not a comment — is what keeps them in sync.
       - name: Build image SBOM (once)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: 'ministackorg/ministack:full@sha256:3a047f62a75d8839eb7b80b779bf4626ca944d4a74a557b2440257682d4da191'
           format: syft-json
@@ -770,7 +770,7 @@ jobs:
       - id: grype
         name: Grype gate scan (VEX-fed JSON, from the SBOM)
         continue-on-error: true # never stop the job here; enforced off the outcome below
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -815,7 +815,7 @@ jobs:
         name: Grype VEX-free SARIF (Security-tab suppression view, from the SBOM)
         if: always()
         continue-on-error: true # visibility path only; never fails the job
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           grype-version: v0.117.0
           sbom: image.sbom.json
@@ -841,7 +841,7 @@ jobs:
         name: Grype VEX-free JSON (gate severity for the VEX report #208, from the SBOM)
         if: always()
         continue-on-error: true # report-only; must not fail the gate job
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           grype-version: v0.117.0
           sbom: image.sbom.json
@@ -1620,7 +1620,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: '.'
           format: cyclonedx-json
