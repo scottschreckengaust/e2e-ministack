@@ -31,14 +31,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: javascript-typescript
           # Pin the analyzer bundle so the CodeQL engine/queries are reproducible
           # (otherwise the action auto-updates to the latest bundle).
           tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.25.6/codeql-bundle.tar.gz
       # CodeQL uploads its own SARIF to the Security tab natively.
-      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
 
   semgrep:
     name: Semgrep SAST
@@ -85,7 +85,7 @@ jobs:
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -157,7 +157,7 @@ jobs:
           fi
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: npm-audit.suppressed.sarif
           category: npm-audit
@@ -252,13 +252,13 @@ jobs:
           true
       - name: Upload npm SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: osv.sarif
           category: osv-scanner
       - name: Upload pip SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: osv-pip.sarif
           category: osv-scanner-pip
@@ -619,7 +619,7 @@ jobs:
       - id: grype-json
         name: Grype gate scan (VEX-fed JSON)
         continue-on-error: true # never stop the job here; enforced off the outcome below
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -661,7 +661,7 @@ jobs:
       - id: grype
         name: Grype SARIF scan (Security-tab view, VEX-fed)
         continue-on-error: true # visibility path; the gate is the JSON scan above
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -672,7 +672,7 @@ jobs:
           output-format: sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
@@ -754,7 +754,7 @@ jobs:
       # `.github/scripts/check-ministack-digest-drift.sh` hard-fails on any
       # disagreement, so the guard — not a comment — is what keeps them in sync.
       - name: Build image SBOM (once)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: 'ministackorg/ministack:full@sha256:3a047f62a75d8839eb7b80b779bf4626ca944d4a74a557b2440257682d4da191'
           format: syft-json
@@ -770,7 +770,7 @@ jobs:
       - id: grype
         name: Grype gate scan (VEX-fed JSON, from the SBOM)
         continue-on-error: true # never stop the job here; enforced off the outcome below
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -815,7 +815,7 @@ jobs:
         name: Grype VEX-free SARIF (Security-tab suppression view, from the SBOM)
         if: always()
         continue-on-error: true # visibility path only; never fails the job
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           grype-version: v0.117.0
           sbom: image.sbom.json
@@ -841,7 +841,7 @@ jobs:
         name: Grype VEX-free JSON (gate severity for the VEX report #208, from the SBOM)
         if: always()
         continue-on-error: true # report-only; must not fail the gate job
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           grype-version: v0.117.0
           sbom: image.sbom.json
@@ -862,7 +862,7 @@ jobs:
       - name: Upload VEX-suppressed SARIF to Security tab
         id: upload-suppressed
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: grype-ministack-image.suppressed.sarif
           category: grype-ministack-image
@@ -991,7 +991,7 @@ jobs:
           skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -1111,7 +1111,7 @@ jobs:
           trivy convert --format table "$TRIVY_JSON" | tee trivy-image.txt
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
@@ -1402,7 +1402,7 @@ jobs:
         run: node .github/scripts/clamav-to-sarif.mjs clamdscan.txt clamav.sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: clamav.sarif
           category: clamav
@@ -1563,7 +1563,7 @@ jobs:
       # would wrongly resolve prior alerts; the enforce step below fails the job.
       - name: Upload SARIF to Security tab
         if: ${{ steps.sarif.outcome == 'success' }}
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: sonar.sarif
           category: sonarqube
@@ -1620,7 +1620,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: '.'
           format: cyclonedx-json
@@ -1728,7 +1728,7 @@ jobs:
           checkov -d cdk.out --framework cloudformation --compact # human-readable
       - name: Upload checkov SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: results_sarif.sarif
           category: checkov
@@ -1951,7 +1951,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
 
   # ── In-code suppression inventory (report-only) ─────────────────────────
   # #202 (the in-code-comment arm of the suppression-governance program #167):
@@ -2001,7 +2001,7 @@ jobs:
             --text suppression-inventory.txt
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: suppression-inventory.sarif
           category: suppression-inventory
