@@ -31,14 +31,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: javascript-typescript
           # Pin the analyzer bundle so the CodeQL engine/queries are reproducible
           # (otherwise the action auto-updates to the latest bundle).
           tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.25.6/codeql-bundle.tar.gz
       # CodeQL uploads its own SARIF to the Security tab natively.
-      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
 
   semgrep:
     name: Semgrep SAST
@@ -85,13 +85,13 @@ jobs:
           echo "exit=$?" > semgrep.outcome
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: semgrep.sarif
           category: semgrep
       - name: Upload SARIF artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -157,13 +157,13 @@ jobs:
           fi
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: npm-audit.suppressed.sarif
           category: npm-audit
       - name: Upload audit report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-audit-json
           path: |
@@ -252,19 +252,19 @@ jobs:
           true
       - name: Upload npm SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: osv.sarif
           category: osv-scanner
       - name: Upload pip SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: osv-pip.sarif
           category: osv-scanner-pip
       - name: Upload SARIF artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: osv-sarif
           path: |
@@ -619,7 +619,7 @@ jobs:
       - id: grype-json
         name: Grype gate scan (VEX-fed JSON)
         continue-on-error: true # never stop the job here; enforced off the outcome below
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -661,7 +661,7 @@ jobs:
       - id: grype
         name: Grype SARIF scan (Security-tab view, VEX-fed)
         continue-on-error: true # visibility path; the gate is the JSON scan above
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -672,13 +672,13 @@ jobs:
           output-format: sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
       - name: Upload SARIF artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: grype-sarif
           path: |
@@ -754,7 +754,7 @@ jobs:
       # `.github/scripts/check-ministack-digest-drift.sh` hard-fails on any
       # disagreement, so the guard — not a comment — is what keeps them in sync.
       - name: Build image SBOM (once)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: 'ministackorg/ministack:full@sha256:3a047f62a75d8839eb7b80b779bf4626ca944d4a74a557b2440257682d4da191'
           format: syft-json
@@ -770,7 +770,7 @@ jobs:
       - id: grype
         name: Grype gate scan (VEX-fed JSON, from the SBOM)
         continue-on-error: true # never stop the job here; enforced off the outcome below
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         env:
           GRYPE_VEX_DOCUMENTS: ${{ steps.vex.outputs.docs }}
         with:
@@ -815,7 +815,7 @@ jobs:
         name: Grype VEX-free SARIF (Security-tab suppression view, from the SBOM)
         if: always()
         continue-on-error: true # visibility path only; never fails the job
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           grype-version: v0.117.0
           sbom: image.sbom.json
@@ -841,7 +841,7 @@ jobs:
         name: Grype VEX-free JSON (gate severity for the VEX report #208, from the SBOM)
         if: always()
         continue-on-error: true # report-only; must not fail the gate job
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           grype-version: v0.117.0
           sbom: image.sbom.json
@@ -862,7 +862,7 @@ jobs:
       - name: Upload VEX-suppressed SARIF to Security tab
         id: upload-suppressed
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: grype-ministack-image.suppressed.sarif
           category: grype-ministack-image
@@ -880,7 +880,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
       - name: Upload SARIF artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: grype-ministack-image-sarif
           path: |
@@ -991,13 +991,13 @@ jobs:
           skip-setup-trivy: 'true' # DB already fetched by the SARIF step above
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
       - name: Upload Trivy FS reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trivy-fs-reports
           path: |
@@ -1111,13 +1111,13 @@ jobs:
           trivy convert --format table "$TRIVY_JSON" | tee trivy-image.txt
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
       - name: Upload Trivy image reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trivy-image-reports
           path: |
@@ -1194,7 +1194,7 @@ jobs:
       - name: Download current image-scan SARIFs
         id: dl-sarifs
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: scan-sarifs
           # Both image-scan artifacts; merge into one dir so the extractor globs them.
@@ -1302,7 +1302,7 @@ jobs:
           cat vex-report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload VEX report artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vex-report
           path: |
@@ -1402,13 +1402,13 @@ jobs:
         run: node .github/scripts/clamav-to-sarif.mjs clamdscan.txt clamav.sarif
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: clamav.sarif
           category: clamav
       - name: Upload ClamAV reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: clamav-reports
           path: |
@@ -1515,7 +1515,7 @@ jobs:
           curl -s -X POST -H "Authorization: Bearer $SONAR_TOKEN" \
             "http://localhost:9000/api/projects/create?project=e2e-ministack&name=e2e-ministack" > /dev/null
       - name: Run SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         env:
           SONAR_HOST_URL: http://localhost:9000
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
@@ -1563,13 +1563,13 @@ jobs:
       # would wrongly resolve prior alerts; the enforce step below fails the job.
       - name: Upload SARIF to Security tab
         if: ${{ steps.sarif.outcome == 'success' }}
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: sonar.sarif
           category: sonarqube
       - name: Upload SonarQube reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sonarqube-reports
           path: |
@@ -1620,7 +1620,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           path: '.'
           format: cyclonedx-json
@@ -1630,7 +1630,7 @@ jobs:
           upload-artifact: false
       - name: Upload SBOM artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
@@ -1662,7 +1662,7 @@ jobs:
           echo "exit=$?" > gitleaks.outcome
       - name: Upload report artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gitleaks-sarif
           path: gitleaks.sarif
@@ -1728,13 +1728,13 @@ jobs:
           checkov -d cdk.out --framework cloudformation --compact # human-readable
       - name: Upload checkov SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: results_sarif.sarif
           category: checkov
       - name: Upload IaC reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: iac-reports
           path: |
@@ -1863,7 +1863,7 @@ jobs:
         run: node .github/scripts/vex-revisit-gate.mjs
       - name: Upload revisit_by report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vex-revisit-report
           path: vex-revisit.txt
@@ -1920,7 +1920,7 @@ jobs:
       - name: Download current image-scan JSON (optional corroboration)
         id: dl-scans
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: scan-json
           pattern: '{grype-ministack-image-sarif,trivy-image-reports}'
@@ -1934,7 +1934,7 @@ jobs:
               scan-json/grype-ministack-image.json scan-json/trivy-image.json
       - name: Upload Debian tracker join report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vex-debian-tracker-report
           path: vex-debian-tracker.txt
@@ -1951,7 +1951,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
 
   # ── In-code suppression inventory (report-only) ─────────────────────────
   # #202 (the in-code-comment arm of the suppression-governance program #167):
@@ -2001,13 +2001,13 @@ jobs:
             --text suppression-inventory.txt
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: suppression-inventory.sarif
           category: suppression-inventory
       - name: Upload inventory reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: suppression-inventory
           path: |
